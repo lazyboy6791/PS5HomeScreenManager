@@ -82,7 +82,7 @@ A folder is a small launcher app, the same kind Payload Manager installs for its
 
 - It lives at `/user/app/HHFDnnnnn/sce_sys/`, with a `param.json` whose `deeplinkUri` is `http://127.0.0.1:8090/folder/HHFDnnnnn`, plus a 512x512 `icon0.png`.
 - Home Hider registers the app with `sceAppInstUtilAppInstallTitleDir`, resolved at run time like Payload Manager does. Then it sets the tile's `dispLocation` tab bits for the chosen tab.
-- The games inside are hidden with the normal hide mechanism. `folder_items.was_hidden` remembers games that were already hidden, so taking a game out of a folder never shows something the user hid on purpose.
+- The games inside are hidden with the normal hide mechanism. A game can be in several folders: `folder_items` has one row per (game, folder) pair, keyed by `(title_id, folder)`, and the game stays hidden while it has at least one row. `folder_items.was_hidden` remembers games that were already hidden, so taking a game out of its last folder never shows something the user hid on purpose. It belongs to the game, so a new row copies it from the game's existing row; it is only worked out from the hide list when the game joins its first folder. Databases from older versions (keyed by `title_id` alone) are rebuilt with the new key the first time Home Hider opens them.
 - At every launch, missing folder tiles are reinstalled and moved tiles are put back on their tab.
 
 ### Folder pictures

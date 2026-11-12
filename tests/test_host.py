@@ -604,6 +604,10 @@ def folder_tests(tmp):
     check(code == 409, "folder tile can't be hidden like a game")
     code, page = http("GET", "/folder/HHFD00001", raw=True)
     check(code == 200 and b"Sort by" in page, "folder page served")
+    check(b'id="head"' in page and b"header{display:none" in page,
+          "folder page has a header (picture + name) that is hidden unless switched on")
+    check(b'id="count"' in page and b'id="grid"' in page and b'id="edit"' in page,
+          "folder page keeps the count, sort, grid and edit link")
     code, j = http("GET", "/api/folder?id=HHFD00001")
     check(j["folder"]["items"][0]["name"] == "ASTRO's PLAYROOM", "folder API returns names")
     code, j = http("GET", "/api/folder?id=HHFD00099")
@@ -622,8 +626,16 @@ def folder_tests(tmp):
     code, r = form("/api/folders/save", {"name": "Favourites", "items": "CUSA01065,PPSA02000"})
     check(code == 200 and r["id"] == "HHFD00002", "second folder created")
     code, j = http("GET", "/api/folder?id=HHFD00001")
-    check([i["id"] for i in j["folder"]["items"]] == ["CUSA00900"], "game moved out of the first folder")
-    check(vis(appdb, "CUSA01065") == [0, 0], "moved game stays hidden")
+    check([i["id"] for i in j["folder"]["items"]] == ["CUSA00900", "CUSA01065"],
+          "a game put in a second folder stays in the first")
+    code, j = http("GET", "/api/folder?id=HHFD00002")
+    check([i["id"] for i in j["folder"]["items"]] == ["CUSA01065", "PPSA02000"], "second folder has its games")
+    check(vis(appdb, "CUSA01065") == [0, 0], "a game in two folders stays hidden")
+    by_id, _ = listing()
+    check(by_id["CUSA01065"]["folders"] == ["HHFD00001", "HHFD00002"] and by_id["CUSA01065"]["folder"] == "HHFD00001",
+          "the list reports every folder a game is in")
+    check(by_id["CUSA00900"]["folders"] == ["HHFD00001"] and by_id["CUSA02000"]["folders"] == [] if "CUSA02000" in by_id
+          else by_id["CUSA00900"]["folders"] == ["HHFD00001"], "single-folder and no-folder games listed right")
 
     print("  pictures")
     before = open(os.path.join(apps, "HHFD00002", "sce_sys", "icon0.png"), "rb").read()
@@ -660,8 +672,10 @@ def folder_tests(tmp):
     check(code == 200, "folder deleted")
     check(all(not r_ for r_ in tile_rows(appdb, "HHFD00002")), "tile removed")
     check(not os.path.exists(os.path.join(apps, "HHFD00002")), "tile files removed")
-    check(vis(appdb, "CUSA01065") == [1, 1] and vis(appdb, "PPSA02000") == [1, 1], "its games are shown again")
+    check(vis(appdb, "PPSA02000") == [1, 1], "a game only in the deleted folder is shown again")
+    check(vis(appdb, "CUSA01065") == [0, 0], "a game still in another folder stays hidden")
     code, r = http("POST", "/api/folders/delete?id=HHFD00001")
+    check(vis(appdb, "CUSA01065") == [1, 1], "it is shown once its last folder is gone")
     check(vis(appdb, "CUSA00900") == [0, 0], "game hidden before joining stays hidden")
     http("POST", "/api/unhide?id=CUSA00900")
     check(dump(appdb) == original, "database back to the original after folders come and go")
@@ -674,6 +688,112 @@ def folder_tests(tmp):
     check(not os.path.exists(os.path.join(apps, "HHFD00001")), "folder tile files removed")
     code, j = http("GET", "/api/folders")
     check(j["folders"] == [], "folder list cleared")
+    s.stop()
+
+
+def multi_folder_tests(tmp):
+    print("games in several folders")
+    appdb = os.path.join(tmp, "multi.db")
+    data = os.path.join(tmp, "multi-data")
+    apps = os.path.join(tmp, "multi-app")
+    icons = os.path.join(tmp, "multi-icons")
+    os.makedirs(icons)
+    for i, tid in enumerate(["PPSA01325", "CUSA00900", "CUSA01065"]):
+        open(os.path.join(icons, tid + ".png"), "wb").write(tiny_png(64 + i * 10, 64 + i * 10, (200, 40 * i, 90)))
+    make_db(appdb)
+    original = dump(appdb)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons})
+
+    # the user hid CUSA00900 on their own before any folder existed
+    http("POST", "/api/hide?id=CUSA00900")
+
+    code, r = form("/api/folders/save", {"name": "A", "items": "PPSA01325,CUSA00900"})
+    check(code == 200 and r["id"] == "HHFD00001", "folder A created")
+    code, r = form("/api/folders/save", {"name": "B", "items": "PPSA01325,CUSA00900,CUSA01065"})
+    check(code == 200 and r["id"] == "HHFD00002", "folder B takes games that are already in A")
+    for fid, want in (("HHFD00001", ["PPSA01325", "CUSA00900"]), ("HHFD00002", ["PPSA01325", "CUSA00900", "CUSA01065"])):
+        j = http("GET", "/api/folder?id=" + fid)[1]
+        check([i["id"] for i in j["folder"]["items"]] == want, fid + " keeps all its games")
+    by_id, _ = listing()
+    check(by_id["PPSA01325"]["folders"] == ["HHFD00001", "HHFD00002"], "a game lists both its folders")
+    check(by_id["CUSA01065"]["folders"] == ["HHFD00002"], "a game in one folder lists one")
+    check(by_id["PPSA02000"]["folders"] == [] and by_id["PPSA02000"]["folder"] is None, "a free game lists none")
+    check(vis(appdb, "PPSA01325") == [0, 0], "a game in two folders is hidden")
+
+    print("  leaving one folder")
+    code, r = form("/api/folders/save", {"id": "HHFD00002", "name": "B", "items": "CUSA00900"})
+    check(code == 200, "folder B edited")
+    check(vis(appdb, "PPSA01325") == [0, 0], "still hidden: it is still in folder A")
+    check(vis(appdb, "CUSA01065") == [1, 1], "shown: B was its only folder")
+    j = http("GET", "/api/folder?id=HHFD00001")[1]
+    check([i["id"] for i in j["folder"]["items"]] == ["PPSA01325", "CUSA00900"], "folder A untouched by editing B")
+
+    print("  take out of a chosen folder")
+    form("/api/folders/save", {"id": "HHFD00002", "name": "B", "items": "CUSA00900,PPSA01325,CUSA01065"})
+    code, r = http("POST", "/api/folders/take_out?id=PPSA02000")
+    check(code == 409 and "isn't in a folder" in r["error"], "take-out of a game in no folder refused")
+    code, r = http("POST", "/api/folders/take_out?id=PPSA01325")
+    check(code == 409 and "more than one folder" in r["error"], "take-out must say which folder when there are two")
+    code, r = http("POST", "/api/folders/take_out?id=PPSA01325&folder=BOGUS")
+    check(code == 400, "bad folder id refused")
+    code, r = http("POST", "/api/folders/take_out?id=CUSA01065&folder=HHFD00001")
+    check(code == 409 and "isn't in that folder" in r["error"], "take-out from a folder it isn't in refused")
+    code, r = http("POST", "/api/folders/take_out?id=PPSA01325&folder=HHFD00002")
+    check(code == 200 and "another folder" in r["note"], "taken out of B, and told it is still in A")
+    check(vis(appdb, "PPSA01325") == [0, 0], "still hidden after leaving only one of its folders")
+    check(listing()[0]["PPSA01325"]["folders"] == ["HHFD00001"], "the list shows the one folder left")
+    code, r = http("POST", "/api/unhide?id=PPSA01325")
+    check(code == 409, "showing a game that is still in a folder is refused")
+    code, r = http("POST", "/api/tab?id=PPSA01325&to=media")
+    check(code == 409 and "folder" in r["error"], "can't move a tab while it is in a folder")
+    code, r = http("POST", "/api/folders/take_out?id=PPSA01325")
+    check(code == 200 and vis(appdb, "PPSA01325") == [1, 1], "out of its last folder: shown again")
+
+    print("  hidden by the user before joining")
+    # CUSA00900 is in A and B and was hidden by the user first
+    code, r = http("POST", "/api/folders/delete?id=HHFD00001")
+    check(code == 200 and vis(appdb, "CUSA00900") == [0, 0], "still hidden while in B")
+    code, r = http("POST", "/api/folders/delete?id=HHFD00002")
+    check(code == 200 and vis(appdb, "CUSA00900") == [0, 0], "stays hidden after both folders go (the user hid it)")
+    http("POST", "/api/unhide?id=CUSA00900")
+    check(dump(appdb) == original, "database back to the original")
+
+    print("  deleting a folder keeps shared games hidden")
+    form("/api/folders/save", {"name": "C", "items": "PPSA01325,CUSA01065"})
+    form("/api/folders/save", {"name": "D", "items": "PPSA01325"})
+    code, r = http("POST", "/api/folders/delete?id=HHFD00001")
+    check(vis(appdb, "CUSA01065") == [1, 1], "game only in the deleted folder is shown")
+    check(vis(appdb, "PPSA01325") == [0, 0], "game also in another folder stays hidden")
+    http("POST", "/api/folders/delete?id=HHFD00002")
+    check(vis(appdb, "PPSA01325") == [1, 1], "shown when the last folder is deleted")
+    check(dump(appdb) == original, "nothing left behind")
+    s.stop()
+
+    print("  folders made before games could be in several")
+    appdb = os.path.join(tmp, "migrate.db")
+    data = os.path.join(tmp, "migrate-data")
+    os.makedirs(data)
+    make_db(appdb)
+    old = sqlite3.connect(os.path.join(data, "state.db"))
+    old.executescript(
+        "CREATE TABLE folders(title_id TEXT PRIMARY KEY, name TEXT NOT NULL, tab TEXT NOT NULL DEFAULT 'games',"
+        " color TEXT NOT NULL DEFAULT 'blue', custom_icon INTEGER NOT NULL DEFAULT 0, created_at TEXT);"
+        "CREATE TABLE folder_items(title_id TEXT PRIMARY KEY, folder TEXT NOT NULL,"
+        " pos INTEGER NOT NULL DEFAULT 0, was_hidden INTEGER NOT NULL DEFAULT 0);"
+        "INSERT INTO folders(title_id, name) VALUES('HHFD00001', 'Old');"
+        "INSERT INTO folder_items VALUES('PPSA01325', 'HHFD00001', 0, 0), ('CUSA00900', 'HHFD00001', 1, 1);")
+    old.commit()
+    old.close()
+    s = Server(appdb, data, {"HH_USER_APP_DIR": os.path.join(tmp, "migrate-app")})
+    con = sqlite3.connect(os.path.join(data, "state.db"))
+    npk = con.execute("SELECT count(*) FROM pragma_table_info('folder_items') WHERE pk>0").fetchone()[0]
+    rows = con.execute("SELECT title_id, folder, pos, was_hidden FROM folder_items ORDER BY pos").fetchall()
+    con.close()
+    check(npk == 2, "folder_items upgraded to the (game, folder) key")
+    check(rows == [("PPSA01325", "HHFD00001", 0, 0), ("CUSA00900", "HHFD00001", 1, 1)], "existing folder contents carried over")
+    code, r = form("/api/folders/save", {"name": "New", "items": "PPSA01325"})
+    check(code == 200, "an upgraded install can put a game in a second folder")
+    check(listing()[0]["PPSA01325"]["folders"] == ["HHFD00001", "HHFD00002"], "and it is in both")
     s.stop()
 
 
@@ -1424,6 +1544,45 @@ class RecordingLoader:
         self.sock.close()
 
 
+def watchdog_multi_folder_tests(tmp):
+    print("auto re-hide for games in several folders")
+    appdb = os.path.join(tmp, "wdm.db")
+    data = os.path.join(tmp, "wdm-data")
+    apps = os.path.join(tmp, "wdm-apps")
+    icons = os.path.join(tmp, "wdm-icons")
+    os.makedirs(icons)
+    for tid in ("PPSA01325", "CUSA00900"):
+        open(os.path.join(icons, tid + ".png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
+    make_db(appdb)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons})
+
+    def played(*tids):
+        """the PS5 shows a tile again after its game was played"""
+        for u in USERS:
+            for tid in tids:
+                qx(appdb, f'UPDATE "tbl_iconinfo_{u}" SET visible=1, dispLocation=138 WHERE titleId=?', tid)
+
+    form("/api/folders/save", {"name": "A", "items": "PPSA01325,CUSA00900"})
+    form("/api/folders/save", {"name": "B", "items": "PPSA01325"})
+    check(vis(appdb, "PPSA01325") == [0, 0] and vis(appdb, "CUSA00900") == [0, 0], "both hidden to start")
+
+    played("PPSA01325", "CUSA00900")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0] and vis(appdb, "CUSA00900") == [0, 0], 14),
+          "a game in two folders is hidden again after it is played")
+
+    # leaves folder B, still in folder A: must keep being re-hidden
+    form("/api/folders/save", {"id": "HHFD00002", "name": "B", "items": "CUSA00900"})
+    played("PPSA01325")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0], 14),
+          "still re-hidden after leaving one of its folders")
+
+    # leaves its last folder: shown, and the watchdog must leave it alone
+    form("/api/folders/save", {"id": "HHFD00001", "name": "A", "items": "CUSA00900"})
+    check(vis(appdb, "PPSA01325") == [1, 1], "shown once it is out of every folder")
+    time.sleep(8)
+    check(vis(appdb, "PPSA01325") == [1, 1], "and not hidden again behind the user's back")
+    s.stop()
+
 def watchdog_tests(tmp):
     print("auto re-hide after playing a game (background watchdog)")
     appdb = os.path.join(tmp, "wd.db")
@@ -1451,6 +1610,16 @@ def watchdog_tests(tmp):
     check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0], 12), "folder game hidden again on its own")
     check(vis(appdb, "CUSA00900") == [0, 0], "the separately hidden game too")
     check("auto re-hide" in http("GET", "/api/diag", raw=True)[1].decode(), "the watchdog logged what it did")
+
+    # a game in two folders is re-hidden the same way
+    form("/api/folders/save", {"name": "More", "items": "PPSA01325,CUSA00900"})
+    by_id, _ = listing()
+    check(by_id["PPSA01325"]["folders"] == ["HHFD00001", "HHFD00002"], "game is in two folders")
+    for u in USERS:
+        qx(appdb, f'UPDATE "tbl_iconinfo_{u}" SET visible=1, dispLocation=138 WHERE titleId IN (?,?)',
+           "PPSA01325", "CUSA00900")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0] and vis(appdb, "CUSA00900") == [0, 0], 12),
+          "a game in two folders is hidden again on its own")
 
     # with the setting off, Home Hider leaves the PS5's change alone
     http("POST", "/api/settings?reapply=0")
@@ -1679,6 +1848,391 @@ def live_tests(tmp):
     loader.close()
 
 
+def front_folders_tests(tmp):
+    print("keep folders first")
+    appdb = os.path.join(tmp, "ff.db")
+    data = os.path.join(tmp, "ff-data")
+    apps = os.path.join(tmp, "ff-apps")
+    icons = os.path.join(tmp, "ff-icons")
+    os.makedirs(icons)
+    for i, tid in enumerate(("PPSA01325", "CUSA00900", "CUSA01065")):
+        open(os.path.join(icons, tid + ".png"), "wb").write(tiny_png(64 + i * 8, 64 + i * 8, (200, 40 * i, 90)))
+    make_db(appdb)
+    running_file = os.path.join(tmp, "ff-running")  # which game is running (none until written)
+    env = {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_RUNNING_FILE": running_file}
+    s = Server(appdb, data, env)
+
+    def acc(tid, u=0):
+        return q(appdb, f'SELECT lastAccessIndex FROM "tbl_iconinfo_{USERS[u]}" WHERE titleId=?', tid)[0][0] or 0
+
+    def counter():
+        return q(appdb, "SELECT status FROM tbl_version WHERE category='access_index'")[0][0]
+
+    def others_max(fids, u=0, skip=()):
+        rows = q(appdb, f'SELECT titleId, lastAccessIndex FROM "tbl_iconinfo_{USERS[u]}"')
+        return max(v for t, v in rows if t not in fids and t not in skip and v is not None)
+
+    def ahead(fids, skip=()):
+        return all(min(acc(f, u) for f in fids) > others_max(fids, u, skip) for u in range(len(USERS)))
+
+    def order(fids):
+        return sorted(fids, key=lambda f: -acc(f))
+
+    def ps5_opens(tid):
+        """the PS5 plays a game / opens a tile: the next number after its counter in the database"""
+        n = counter() + 1
+        con = sqlite3.connect(appdb)
+        con.execute("UPDATE tbl_version SET status=? WHERE category='access_index'", (n,))
+        for u in USERS:
+            con.execute(f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=? WHERE titleId=?', (n, tid))
+        con.commit()
+        con.close()
+
+    def ps5_opens_own_counter(tid, fids):
+        """a PS5 that keeps its counter to itself: it writes a number just above the
+        games' own, whatever is in the database"""
+        con = sqlite3.connect(appdb)
+        for u in USERS:
+            rows = con.execute(f'SELECT titleId, lastAccessIndex FROM "tbl_iconinfo_{u}"').fetchall()
+            n = max(v for t, v in rows if t not in fids and v is not None) + 1
+            con.execute(f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=? WHERE titleId=?', (n, tid))
+        con.commit()
+        con.close()
+
+    fids = []
+    for name, game in (("One", "PPSA01325"), ("Two", "CUSA00900"), ("Three", "CUSA01065")):
+        code, r = form("/api/folders/save", {"name": name, "items": game})
+        check(code == 200, "folder " + name + " created")
+        fids.append(r["id"])
+    # the PS5 gives each folder tile a recency number of its own
+    con = sqlite3.connect(appdb)
+    for u in USERS:
+        for f, v in zip(fids, (30, 20, 35)):
+            con.execute(f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=? WHERE titleId=?', (v, f))
+    con.commit()
+    con.close()
+    natural = order(fids)
+    check(natural == [fids[2], fids[0], fids[1]], "the PS5's own order of the folders")
+    check(not ahead(fids), "before: games can be ahead of the folders (the PS5's own order)")
+
+    print("  switch on")
+    code, r = http("POST", "/api/settings?folders_first=1")
+    check(code == 200, "setting saved")
+    check(http("GET", "/api/status")[1]["settings"]["folders_first"] is True, "setting reported")
+    check(ahead(fids), "every folder is ahead of every game and app")
+    check(order(fids) == natural, "the folders keep the PS5's own order among themselves")
+    check(counter() >= max(acc(f) for f in fids), "the PS5's counter is at the top of the folders")
+    check(max(acc(f) for f in fids) < 10000, "the numbers stay small (just above the PS5's own)")
+    v1 = ([acc(f) for f in fids], counter())
+    mt = os.stat(appdb).st_mtime_ns
+    time.sleep(8)
+    check(([acc(f) for f in fids], counter()) == v1, "the numbers stay put (they don't climb)")
+    check(os.stat(appdb).st_mtime_ns == mt, "a quiet pass doesn't touch the home screen database")
+
+    print("  the PS5 opens a folder")
+    last = natural[-1]
+    ps5_opens(last)
+    check(order(fids)[0] == last and ahead(fids), "it goes to the front of the folders right away, as before")
+    check(order(fids)[1:] == [f for f in natural if f != last], "the others keep their order")
+    check(wait_for(lambda: counter() >= max(acc(f) for f in fids), 14), "the counter follows the folders up")
+    check(order(fids)[0] == last and ahead(fids), "still first after a pass")
+
+    print("  the PS5 plays a game that is not in a folder")
+    ps5_opens("PPSA02000")
+    check(wait_for(lambda: ahead(fids) and order(fids)[0] == last, 14),
+          "after a pass the folders are ahead of the game again, in the same order")
+    check(counter() >= max(acc(f) for f in fids), "and the counter is back at the top of the folders")
+    v2 = ([acc(f) for f in fids], counter())
+    time.sleep(8)
+    check(([acc(f) for f in fids], counter()) == v2, "quiet again afterwards")
+
+    print("  a game that stays open")
+    ordr = order(fids)
+    open(running_file, "w").write("PPSA02000")
+    ps5_opens("PPSA02000")
+    check(acc("PPSA02000") > max(acc(f) for f in fids), "it is in front of the folders when it starts")
+    time.sleep(8)  # at least one background pass
+    check(acc("PPSA02000") > max(acc(f) for f in fids), "and stays in front of the folders while it runs")
+    check(order(fids) == ordr, "the folders keep their order")
+    held = ([acc(f) for f in fids], acc("PPSA02000"), counter())
+    time.sleep(8)
+    check(([acc(f) for f in fids], acc("PPSA02000"), counter()) == held, "nothing moves or climbs while it runs")
+    check("is running, kept in front of the folders" in http("GET", "/api/diag", raw=True)[1].decode(),
+          "the log says the game is held in front")
+    open(running_file, "w").write("")  # the game is closed
+    check(wait_for(lambda: ahead(fids), 4), "when it is closed the folders go back in front of it within seconds")
+    check("PPSA02000 is closed: checking the home screen right away" in http("GET", "/api/diag", raw=True)[1].decode(),
+          "the log says the close was noticed")
+    check("was closed, the folders go back in front" in http("GET", "/api/diag", raw=True)[1].decode(),
+          "and that it was let go")
+    check(order(fids) == ordr, "in the same order")
+    check(counter() >= max(acc(f) for f in fids), "and the counter is back at the top of the folders")
+    v3 = ([acc(f) for f in fids], counter())
+    time.sleep(8)
+    check(([acc(f) for f in fids], counter()) == v3, "quiet again afterwards")
+
+    print("  a PS5 that keeps its own counter")
+    check(True, "(writes just above the games' numbers, whatever the database counter says)")
+    ps5_opens_own_counter("PPSA02000", fids)
+    check(ahead(fids), "a game it starts does not get ahead of the folders")
+    second = order(fids)[1]
+    ps5_opens_own_counter(second, fids)
+    seen_back = fixed_now = False
+    for attempt in range(4):  # (a background pass could land between the write and our look)
+        if order(fids)[0] == second:
+            second = order(fids)[1]
+            ps5_opens_own_counter(second, fids)
+        if order(fids)[0] != second:
+            seen_back = True
+            code, page = http("GET", "/folder/" + second, raw=True)
+            fixed_now = code == 200 and order(fids)[0] == second and ahead(fids)
+            break
+    check(seen_back, "an opened folder lands further back in the block")
+    check(fixed_now, "and the folder page puts it first straight away")
+    check("opened" in http("GET", "/api/diag", raw=True)[1].decode(), "the log says so")
+
+    print("  a new folder")
+    code, r = form("/api/folders/save", {"name": "Four", "items": "PPSA01325"})
+    fids.append(r["id"])
+    check(wait_for(lambda: order(fids)[0] == r["id"] and ahead(fids), 14), "a new folder joins at the front")
+
+    print("  together with a saved order")
+    code, r = form("/api/arrange/save", {"items": "PPSA02000", "pinned": ""})
+    check(code == 200, "order saved")
+    check(wait_for(lambda: ahead(fids), 14), "the folders are ahead of the arranged tile")
+    a1 = acc("PPSA02000")
+    check(a1 > others_max(fids, 0, skip=("PPSA02000",)), "the arranged tile is ahead of the other games")
+    time.sleep(8)
+    check(acc("PPSA02000") == a1, "arranged numbers don't climb")
+    check(ahead(fids), "and the folders stay ahead of it")
+    for i in range(2):  # games get played: nothing may ratchet up
+        ps5_opens("NPXS40053")
+        time.sleep(7)
+    check(acc("PPSA02000") - a1 < 1000, "playing games doesn't push the saved order up")
+    check(wait_for(lambda: ahead(fids), 14), "the folders are still ahead")
+    check(acc("PPSA02000") > acc("NPXS40053"), "and the saved order is still ahead of the played game")
+
+    print("  switch off")
+    a2 = acc("PPSA02000")
+    code, r = http("POST", "/api/settings?folders_first=0")
+    check(code == 200, "switched off")
+    check(all(acc(f) < 1000 for f in fids), "folders are back in the PS5's own number range")
+    check(acc("PPSA02000") == a2, "the saved order is left alone")
+    time.sleep(8)
+    check(all(acc(f) < 1000 for f in fids), "and stay there")
+
+    print("  after a restart")
+    http("POST", "/api/settings?folders_first=1")
+    s.stop()
+    con = sqlite3.connect(appdb)
+    for u in USERS:  # the system rebuilt the order
+        for f in fids:
+            con.execute(f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=1 WHERE titleId=?', (f,))
+    con.commit()
+    con.close()
+    s = Server(appdb, data, env)
+    check(ahead(fids), "folders are put back in front when Home Hider starts")
+    s.stop()
+
+def show_running_tests(tmp):
+    print("a running game that is hidden stays on screen")
+    appdb = os.path.join(tmp, "sr.db")
+    data = os.path.join(tmp, "sr-data")
+    apps = os.path.join(tmp, "sr-apps")
+    icons = os.path.join(tmp, "sr-icons")
+    os.makedirs(icons)
+    for tid in ("PPSA01325", "CUSA00900", "CUSA01065"):
+        open(os.path.join(icons, tid + ".png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
+    make_db(appdb)
+    running_file = os.path.join(tmp, "sr-running")
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_RUNNING_FILE": running_file})
+
+    def ps5_shows(*tids):
+        """the PS5 makes tiles visible again when their game is started"""
+        for u in USERS:
+            for tid in tids:
+                qx(appdb, f'UPDATE "tbl_iconinfo_{u}" SET visible=1, dispLocation=138 WHERE titleId=?', tid)
+
+    check(http("GET", "/api/status")[1]["settings"]["show_running"] is True, "on by default")
+    form("/api/folders/save", {"name": "Games", "items": "PPSA01325,CUSA00900"})
+    http("POST", "/api/hide?id=CUSA01065")
+    check(all(vis(appdb, t) == [0, 0] for t in ("PPSA01325", "CUSA00900", "CUSA01065")), "all three hidden to start")
+
+    print("  while it runs")
+    open(running_file, "w").write("PPSA01325")
+    ps5_shows("PPSA01325", "CUSA00900")
+    check(wait_for(lambda: vis(appdb, "CUSA00900") == [0, 0], 14), "a tile that is not running is hidden again")
+    check(vis(appdb, "PPSA01325") == [1, 1], "the running game's tile stays on screen")
+    time.sleep(8)
+    check(vis(appdb, "PPSA01325") == [1, 1], "and keeps staying while it runs")
+    code, j = http("GET", "/api/list")
+    check(code == 200, "the list still loads")
+
+    print("  after it is closed")
+    open(running_file, "w").write("")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0], 4), "it is hidden again within seconds")
+    check(all(vis(appdb, t) == [0, 0] for t in ("PPSA01325", "CUSA00900", "CUSA01065")), "everything hidden as before")
+    # the PS5 writes its own update a moment after the close and shows the tile again
+    time.sleep(0.8)
+    ps5_shows("PPSA01325")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0], 1.0), "if the PS5 shows it again, it is hidden at once")
+    check("the PS5 showed PPSA01325 again" in http("GET", "/api/log", raw=True)[1].decode(),
+          "the log says how soon after the close, and how fast it was hidden")
+    log = http("GET", "/api/diag", raw=True)[1].decode()
+    check("PPSA01325 is running, its tile stays on screen" in log and "PPSA01325 was closed, its tile is hidden again" in log,
+          "the log shows when the tile was left on screen and when it was hidden again")
+
+    code, raw = http("GET", "/api/log", raw=True)
+    check(code == 200 and b"Home Hider" in raw and b"show running" in raw, "the log has its own address (/api/log)")
+
+    print("  switched off")
+    http("POST", "/api/settings?show_running=0")
+    check(http("GET", "/api/status")[1]["settings"]["show_running"] is False, "setting reported")
+    open(running_file, "w").write("PPSA01325")
+    ps5_shows("PPSA01325")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0], 14), "hidden straight away, even while it runs")
+    open(running_file, "w").write("")
+    s.stop()
+
+    print("  with folders first")
+    appdb = os.path.join(tmp, "sr2.db")
+    data = os.path.join(tmp, "sr2-data")
+    make_db(appdb)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps + "2", "HH_ICON_DIR": icons, "HH_RUNNING_FILE": running_file})
+
+    def acc(tid):
+        return q(appdb, f'SELECT lastAccessIndex FROM "tbl_iconinfo_{USERS[0]}" WHERE titleId=?', tid)[0][0] or 0
+
+    code, r = form("/api/folders/save", {"name": "Games", "items": "PPSA01325"})
+    fid = r["id"]
+    con = sqlite3.connect(appdb)
+    for u in USERS:
+        con.execute(f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=30 WHERE titleId=?', (fid,))
+    con.commit()
+    con.close()
+    http("POST", "/api/settings?folders_first=1")
+
+    def others_max():
+        rows = q(appdb, f'SELECT titleId, lastAccessIndex FROM "tbl_iconinfo_{USERS[0]}"')
+        return max(v for t, v in rows if t != fid and v is not None)
+
+    check(acc(fid) > others_max(), "the folder is in front")
+    n = q(appdb, "SELECT status FROM tbl_version WHERE category='access_index'")[0][0] + 1
+    open(running_file, "w").write("PPSA01325")
+    con = sqlite3.connect(appdb)  # the game inside the folder is started
+    con.execute("UPDATE tbl_version SET status=? WHERE category='access_index'", (n,))
+    for u in USERS:
+        con.execute(f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=?, visible=1, dispLocation=138 WHERE titleId=?',
+                    (n, "PPSA01325"))
+    con.commit()
+    con.close()
+    time.sleep(8)
+    check(vis(appdb, "PPSA01325") == [1, 1], "its tile is on screen")
+    check(acc("PPSA01325") > acc(fid), "in front of the folder")
+    open(running_file, "w").write("")
+    check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0] and acc(fid) > others_max(), 4),
+          "closed: the tile is hidden again and the folder is back in front, within seconds")
+    s.stop()
+
+
+def folder_page_options_tests(tmp):
+    print("folder page options")
+    appdb = os.path.join(tmp, "fp.db")
+    data = os.path.join(tmp, "fp-data")
+    apps = os.path.join(tmp, "fp-apps")
+    icons = os.path.join(tmp, "fp-icons")
+    os.makedirs(icons)
+    open(os.path.join(icons, "PPSA01325.png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
+    make_db(appdb)
+    env = {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons}
+    s = Server(appdb, data, env)
+    code, r = form("/api/folders/save", {"name": "Games", "items": "PPSA01325"})
+    fid = r["id"]
+
+    st = http("GET", "/api/status")[1]["settings"]
+    check(st["folder_header"] is False and st["folder_bar"] is True, "defaults: no header, count and sort row shown")
+    code, j = http("GET", "/api/folder?id=" + fid)
+    check(code == 200 and j["page"] == {"header": False, "bar": True}, "the folder page is told the defaults")
+    check(j["folder"]["name"] == "Games" and len(j["folder"]["items"]) == 1, "the folder itself is unchanged")
+
+    print("  switch them")
+    http("POST", "/api/settings?folder_header=1")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": True, "bar": True}, "header on, bar unchanged")
+    http("POST", "/api/settings?folder_bar=0")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": True, "bar": False}, "bar off, header unchanged")
+    st = http("GET", "/api/status")[1]["settings"]
+    check(st["folder_header"] is True and st["folder_bar"] is False, "the menu is told both")
+    code, j = http("GET", "/api/folder?id=NOSUCHFLD")
+    check(code == 404, "an unknown folder is still a 404")
+
+    print("  they are remembered")
+    s.stop()
+    s = Server(appdb, data, env)
+    st = http("GET", "/api/status")[1]["settings"]
+    check(st["folder_header"] is True and st["folder_bar"] is False, "still set after a restart")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": True, "bar": False}, "and the folder page gets them")
+    http("POST", "/api/settings?folder_header=0&folder_bar=1")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": False, "bar": True}, "both can be changed in one go")
+    s.stop()
+
+
+def close_browser_tests(tmp):
+    print("close the browser when a game starts (experimental)")
+    appdb = os.path.join(tmp, "cb.db")
+    data = os.path.join(tmp, "cb-data")
+    make_db(appdb)
+    s = Server(appdb, data)
+
+    def closings():
+        return http("GET", "/api/log", raw=True)[1].decode().count("closing the browser")
+
+    check(http("GET", "/api/status")[1]["settings"]["close_browser"] is False, "off by default")
+    j = launch("CUSA00900", "&local=1")
+    check(j["result"] == "ok", "a game starts from the console's browser")
+    time.sleep(1.5)
+    check(closings() == 0, "with the switch off the browser is left alone")
+
+    http("POST", "/api/settings?close_browser=1")
+    check(http("GET", "/api/status")[1]["settings"]["close_browser"] is True, "switched on")
+    launch("CUSA00900", "&local=0")
+    time.sleep(1.5)
+    check(closings() == 0, "from a phone or PC there is no console browser to close")
+
+    j = launch("CUSA00900", "&local=1")
+    check(j["result"] == "ok", "the game still starts (the answer isn't held up)")
+    check(wait_for(lambda: closings() == 1, 5), "from the console's browser the browser is closed")
+    check("closing the browser (app 60000001, title NPXS40169)" in http("GET", "/api/log", raw=True)[1].decode(),
+          "the log says which app was closed")
+
+    http("POST", "/api/settings?close_browser=0")
+    launch("CUSA00900", "&local=1")
+    time.sleep(1.5)
+    check(closings() == 1, "switched off again: left alone")
+    s.stop()
+
+    for n, (title, proc, expect, closes) in enumerate((
+            ("CUSA00900", None, "isn't a system app, left as it is", False),
+            ("none", None, "the console gives no app id for the browser, ending its process instead", True),
+            ("none", "none", "the browser app wasn't found, left as it is", False))):
+        data2 = os.path.join(tmp, "cb-data-%d" % n)
+        envx = {"HH_BROWSER_TITLE": title}
+        if proc:
+            envx["HH_BROWSER_PROC"] = proc
+        s = Server(appdb, data2, envx)
+        http("POST", "/api/settings?close_browser=1")
+        launch("CUSA00900", "&local=1")
+        check(wait_for(lambda: expect in http("GET", "/api/log", raw=True)[1].decode(), 5),
+              "front app '%s', process %s: %s" % (title, proc or "found", expect))
+        log = http("GET", "/api/log", raw=True)[1].decode()
+        check(("closing the browser by its process: SceNKUIProcess" in log) == closes,
+              "the browser's process is ended only when its app can't be found and its process is running")
+        check("closing the browser (app" not in log, "a game is never closed this way")
+        if title == "none" and proc == "none":
+            check("browser lookup: " in log and "processes (1): " in log and "SceWebBrowser" in log,
+                  "when nothing can be found, the log lists what the console reports and its processes")
+        s.stop()
+
+
 def arrange_tests(tmp):
     print("arrange the home screen (order + pin)")
     appdb = os.path.join(tmp, "arr.db")
@@ -1701,6 +2255,8 @@ def arrange_tests(tmp):
     a1, a2, a3 = acc("CUSA01065"), acc("PPSA01325"), acc("CUSA00900")
     check(all(v > 1000000 for v in a1 + a2 + a3), "arranged tiles put above the recency counter")
     check(all(a1[u] > a2[u] > a3[u] for u in range(len(USERS))), "front tile highest, in the chosen order")
+    time.sleep(8)  # a background pass runs
+    check(acc("CUSA01065") == a1, "a saved order doesn't keep climbing with every pass")
     code, j = http("GET", "/api/arrange")
     ar = j["arrange"]
     check(ar["on"] and [i["id"] for i in ar["items"]] == ["CUSA01065", "PPSA01325", "CUSA00900"], "order reported")
@@ -2013,16 +2569,22 @@ def main():
 
         library_hide_tests(tmp)
         folder_tests(tmp)
+        folder_page_options_tests(tmp)
+        multi_folder_tests(tmp)
         picture_tests(tmp)
         launch_tests(tmp)
+        close_browser_tests(tmp)
         startup_mode_tests(tmp)
         custom_tests(tmp)
         background_tests(tmp)
         watchdog_tests(tmp)
+        watchdog_multi_folder_tests(tmp)
         tabs_tests(tmp)
         folder_move_tests(tmp)
         live_tests(tmp)
         arrange_tests(tmp)
+        front_folders_tests(tmp)
+        show_running_tests(tmp)
         updater_tests(tmp)
         print("\nALL %d CHECKS PASSED" % passed)
     finally:

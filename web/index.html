@@ -222,6 +222,10 @@ details.section > *:not(summary){margin-left:2px}
     <button class="ghost small" onclick="editFolder(null)">+ New folder</button></div>
   <p class="hint" style="margin:-4px 0 10px">Your games, apps and folders, grouped by the tab they sit on. Press <b>Edit</b> on any one
     to rename it, change its picture or background, or move it to the other tab. <b>New folder</b> groups games under one tile.</p>
+  <div class="row" style="margin-bottom:10px">
+    <div class="txt">Keep folders first<div class="hint">Your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. The folder you open still moves to the front of the folders. Turn off to let the PS5 order everything by recent play.</div></div>
+    <button class="switch" id="sw_ff" aria-label="Keep folders first" onclick="toggleSetting('folders_first')"></button>
+  </div>
   <div class="toolbar">
     <input class="search" id="q" type="search" placeholder="Search by name or title ID" oninput="renderList()" autocomplete="off">
     <div class="chips" id="chips"></div>
@@ -248,6 +252,22 @@ details.section > *:not(summary){margin-left:2px}
     <div class="row">
       <div class="txt">Keep tiles hidden<div class="hint">If the PS5 brings a hidden tile back — after an update, or after you play a game that was inside a folder — Home Hider hides it again by itself, every few seconds while it's running. Turn off to leave the PS5's changes alone.</div></div>
       <button class="switch" id="sw_reapply" aria-label="Keep tiles hidden" onclick="toggleSetting('reapply')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Show a running game<div class="hint">While a game that is hidden (for example one inside a folder) is running, its tile stays on the home screen, in front of the folders, so you can close it from the home row. It is hidden again after you close the game. Turn off to hide it straight away.</div></div>
+      <button class="switch" id="sw_run" aria-label="Show a running game" onclick="toggleSetting('show_running')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Close the browser when a game starts (experimental)<div class="hint">When you start a game from a folder page, the PS5 browser normally stays in front until you press circle. With this on, Home Hider closes the browser itself a moment after the game starts, by ending the browser's process, so the PS5 may react to that. If anything behaves oddly, turn it off. Only applies when the folder page is open in the PS5 browser.</div></div>
+      <button class="switch" id="sw_cb" aria-label="Close the browser when a game starts" onclick="toggleSetting('close_browser')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Folder page: show the name and picture<div class="hint">Shows the folder's picture and name at the top of its page. Off by default.</div></div>
+      <button class="switch" id="sw_fh" aria-label="Folder page: show the name and picture" onclick="toggleSetting('folder_header')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Folder page: show the count and sort row<div class="hint">The line above the games with how many there are and the Sort by button. Turn off to show just the games; the sort order you chose last stays in use.</div></div>
+      <button class="switch" id="sw_fb" aria-label="Folder page: show the count and sort row" onclick="toggleSetting('folder_bar')"></button>
     </div>
 
     <details class="sub" id="updSettings">
@@ -465,6 +485,11 @@ function renderStatus() {
   document.getElementById('ver').textContent = 'v' + s.version;
   renderOpenChips(s.settings.open_browser);
   setSwitch('sw_reapply', s.settings.reapply);
+  setSwitch('sw_ff', s.settings.folders_first);
+  setSwitch('sw_run', s.settings.show_running);
+  setSwitch('sw_fh', s.settings.folder_header);
+  setSwitch('sw_cb', s.settings.close_browser);
+  setSwitch('sw_fb', s.settings.folder_bar);
   setSwitch('sw_auto', s.settings.auto_check);
   var repoEl = document.getElementById('repo');
   if (document.activeElement !== repoEl) repoEl.value = s.settings.repo || '';
@@ -583,8 +608,14 @@ function card(t, move) {
     : '<button onclick="toggle(\'' + t.id + '\',1,this)">Hide</button>';
 
   if (t.folder) {
-    badge = '<span class="badge b-fold">In folder: ' + esc(folderName(t.folder)) + '</span>';
-    main = '<button class="ghost" onclick="editFolder(\'' + t.folder + '\')">Edit folder</button>';
+    var fl = t.folders && t.folders.length ? t.folders : [t.folder], fnames = [];
+    main = '';
+    for (var fi = 0; fi < fl.length; fi++) {
+      fnames.push(folderName(fl[fi]));
+      main += '<button class="ghost" onclick="editFolder(\'' + fl[fi] + '\')">' +
+        (fl.length > 1 ? 'Edit ' + esc(folderName(fl[fi])) : 'Edit folder') + '</button>';
+    }
+    badge = '<span class="badge b-fold">In ' + (fl.length > 1 ? 'folders' : 'folder') + ': ' + esc(fnames.join(', ')) + '</span>';
   }
   var open = '<button class="ghost small" onclick="launch(\'' + t.id + '\',this)">Open</button>' +
     '<button class="ghost small" onclick="editTile(\'' + t.id + '\')">Edit</button>';
@@ -861,7 +892,10 @@ function toggleSetting(key) {
   var v = state.settings[key] ? 0 : 1;
   req('POST', '/api/settings?' + key + '=' + v, function (j) {
     if (!j.ok) { banner('err', esc(j.error)); return; }
-    loadStatus();
+    if (key === 'folders_first')
+      banner('info', v ? 'Folders will stay in the first spots.' : 'Folders are back to the PS5\'s own order.',
+             '<button class="ghost" onclick="reloadShell(this)">Refresh home screen now</button>');
+    loadStatus(function () { loadList(); });
   });
 }
 
@@ -1237,7 +1271,8 @@ function renderPicker() {
     if (fmFilter === 'sel' && !sel) continue;
     if ((fmFilter === 'games' || fmFilter === 'media') && t.tab !== fmFilter) continue;
     if (q && t.name.toLowerCase().indexOf(q) < 0 && t.id.toLowerCase().indexOf(q) < 0) continue;
-    var other = t.folder && t.folder !== fm.id ? '<span class="other">In ' + esc(folderName(t.folder)) + '</span>' : '';
+    var elsewhere = (t.folders || []).filter(function (x) { return x !== fm.id; }).map(folderName);
+    var other = elsewhere.length ? '<span class="other">Also in ' + esc(elsewhere.join(', ')) + '</span>' : '';
     h += '<button class="pickc' + (sel ? ' sel' : '') + '" onclick="togglePick(\'' + t.id + '\')">' +
       '<span class="chk">&#10003;</span><span class="pin"><span class="icon" data-id="' + t.id + '">' + svg(GAME_ICON) + '</span>' +
       '<span class="pn">' + esc(t.name) + '</span>' + other + '</span></button>';
@@ -1513,6 +1548,7 @@ function teSyncInfo() {
   for (var i = 0; i < tiles.length; i++) if (tiles[i].id === te.id) li = tiles[i];
   te._tab = li ? li.tab : 'none';
   te._folder = li ? li.folder : null;
+  te._folders = li && li.folders && li.folders.length ? li.folders : (te._folder ? [te._folder] : []);
   te._locked = li ? !!li.locked : false;
 }
 
@@ -1521,9 +1557,14 @@ function renderTeMove() {
   var box = document.getElementById('teMove');
   if (!box) return;
   if (te._folder) {
-    box.innerHTML = '<div class="hint">This app is inside the folder <b>' + esc(folderName(te._folder)) +
-      '</b>. Take it out to put it back on its own tab, then you can move it.</div>' +
-      '<button class="ghost" onclick="teTakeOut(this)">Take out of folder</button>';
+    var tf = te._folders, tn = [], tb = '';
+    for (var i = 0; i < tf.length; i++) {
+      tn.push('<b>' + esc(folderName(tf[i])) + '</b>');
+      tb += '<button class="ghost" onclick="teTakeOut(this,\'' + tf[i] + '\')">Take out of ' +
+        (tf.length > 1 ? esc(folderName(tf[i])) : 'folder') + '</button>';
+    }
+    box.innerHTML = '<div class="hint">This app is inside ' + (tf.length > 1 ? 'the folders ' : 'the folder ') + tn.join(', ') +
+      '. Take it out ' + (tf.length > 1 ? 'of all of them ' : '') + 'to put it back on its own tab, then you can move it.</div>' + tb;
     return;
   }
   if (te._locked) {
@@ -1555,9 +1596,9 @@ function teMove(to, btn) {
   });
 }
 
-function teTakeOut(btn) {
+function teTakeOut(btn, folder) {
   busy(btn, true);
-  req('POST', '/api/folders/take_out?id=' + te.id, function (j) {
+  req('POST', '/api/folders/take_out?id=' + te.id + (folder ? '&folder=' + folder : ''), function (j) {
     busy(btn, false);
     if (!j.ok) { teMsg(esc(j.error)); return; }
     teMsg(esc(j.note), true);

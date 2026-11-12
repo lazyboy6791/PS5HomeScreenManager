@@ -13,12 +13,15 @@ html,body{margin:0;min-height:100%;color:var(--text);
 body{background:radial-gradient(120% 90% at 85% 10%,#1b1f2b 0%,#0b0d13 45%,var(--bg) 100%) fixed;background-color:var(--bg)}
 @media (min-width:1200px){html,body{font-size:21px}}
 .wrap{max-width:1500px;margin:0 auto;padding:34px 16px 60px}
-header{display:flex;align-items:center}
+header{display:none;align-items:center;margin-bottom:26px}
+body.hdr header{display:flex}
 header > .ficon{margin-right:18px}
 .ficon{width:64px;height:64px;border-radius:14px;overflow:hidden;flex:none;background:#1b2030}
 .ficon img{width:100%;height:100%;display:block;object-fit:cover}
 h1{font-size:1.35em;font-weight:500;margin:0}
-.bar{display:flex;align-items:center;justify-content:space-between;margin:26px 0 14px;color:var(--muted);font-size:.85em}
+body:not(.ready) .bar{visibility:hidden}
+body.nobar .bar{display:none}
+.bar{display:flex;align-items:center;justify-content:space-between;margin:0 0 14px;color:var(--muted);font-size:.85em}
 .sort{font:inherit;color:var(--muted);background:none;border:2px solid transparent;border-radius:10px;padding:6px 12px;cursor:pointer}
 .sort b{color:var(--text);font-weight:500}
 .sort:focus,.sort:hover{border-color:#ffffff55;outline:none}
@@ -58,11 +61,11 @@ h1{font-size:1.35em;font-weight:500;margin:0}
 </head>
 <body>
 <div class="wrap">
-  <header>
+  <header id="head">
     <div class="ficon"><img id="ficon" alt=""></div>
     <h1 id="title">Folder</h1>
   </header>
-  <div class="bar">
+  <div class="bar" id="bar">
     <span id="count"></span>
     <button class="sort" id="sortBtn" onclick="toggleSort()">Sort by: <b id="sortLbl">Most Recent</b></button>
   </div>
@@ -115,13 +118,18 @@ function toast(t) {
 function load() {
   if (!id) { showMsg('Folder not found.'); return; }
   document.getElementById('edit').href = '/#folder=' + id;
-  document.getElementById('ficon').src = '/api/folder_icon?id=' + id + '&v=' + Date.now();
   document.getElementById('favicon').href = '/api/folder_icon?id=' + id;
   req('GET', '/api/folder?id=' + id, function (j) {
     if (!j.ok) { showMsg(j.error); return; }
     folder = j.folder;
     document.title = folder.name;
-    document.getElementById('title').textContent = folder.name;
+    /* the settings decide whether the picture + name and the count/sort row show */
+    var pg = j.page || {};
+    if (pg.header) {
+      document.getElementById('title').textContent = folder.name;
+      document.getElementById('ficon').src = '/api/folder_icon?id=' + id + '&v=' + Date.now();
+    }
+    document.body.className = 'ready' + (pg.header ? ' hdr' : '') + (pg.bar === false ? ' nobar' : '');
     render();
   });
 }

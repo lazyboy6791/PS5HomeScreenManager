@@ -6,7 +6,7 @@
 Hide tiles, group games into folders, give any tile a new name, picture or background, and play a video as your wallpaper.
 
 ![PS5 payload](https://img.shields.io/badge/PS5-payload-0070d1)
-![Tested on FW 4.51 through 13.60](https://img.shields.io/badge/tested-FW%204.51-2ea44f)
+![Tested on FW 4.51](https://img.shields.io/badge/tested-FW%204.51-2ea44f)
 ![Version 2.1.0](https://img.shields.io/badge/version-2.1.0-7a4bf2)
 ![License GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-555)
 ![Runs with Payload Manager](https://img.shields.io/badge/runs%20with-Payload%20Manager-555)
@@ -22,8 +22,6 @@ Home Hider is a payload (`.elf`) for jailbroken PS5 consoles. Start it from **Pa
 
 Nothing is ever deleted. Hidden games still work, and every change can be undone.
 
-> [!IMPORTANT]
-> **DISCLAIMER: THIS WAS MADE WITH AI!**
 ## Features
 
 | | |
@@ -74,11 +72,13 @@ The menu opens in the PS5 browser. A notification shows the address for your pho
 
 A folder is one tile on the **Games** or **Media** tab. Selecting it opens a page that looks like the Game Library: pick a game and it starts.
 
-- Games in a folder are hidden from the home screen. Take a game out and it comes back, unless you had hidden it before.
+- Games in a folder are hidden from the home screen. A game can be in more than one folder, and it stays hidden while it is in any of them. Take it out of its last folder and it comes back, unless you had hidden it before.
 - Give the folder a colour, or choose the chequered swatch for **no colour** (see-through).
 - Use the four games as the folder picture, or choose your own picture and background.
 - Web apps such as Payload Manager can go in folders too. Selecting one opens its page.
 - If another game is running, the folder page asks before closing it.
+- Starting a game from a folder page leaves the PS5 browser in front until you press circle. **Close the browser when a game starts** (advanced options, experimental, off by default) makes Home Hider close the browser itself a moment after the game starts, by ending the browser's process.
+- The folder page can show the folder's picture and name at the top, and its row with the count and the **Sort by** button can be turned off. Both are switches in the advanced options.
 
 > [!NOTE]
 > Home Hider serves the folder page, so it needs to be running for folders to open. Add it to Autoload (see [Run it automatically](#run-it-automatically)).
@@ -140,6 +140,10 @@ The PS5 sorts each tab by most-recently-played and has no manual reorder. The ho
 3. **Automatic order** goes back to the PS5's recency sort.
 
 Because the PS5 re-sorts by recency, Home Hider re-applies your order every time it runs, so **add it to Autoload** to keep it. Everything is saved and fully reversible.
+
+## Keep folders first
+
+Turn on **Keep folders first** (in the home screen section) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Hider next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in the advanced options turns that off). Home Hider keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
 
 ## Run it automatically
 
