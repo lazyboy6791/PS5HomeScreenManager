@@ -63,6 +63,18 @@ static long long count1(hh_t *h, const char *sql, const char *a) {
   return n;
 }
 
+/* 1 if the game is in that folder. */
+static int is_member(hh_t *h, const char *tid, const char *folder) {
+  sqlite3_stmt *st = prep(h, "SELECT count(*) FROM hh.folder_items WHERE title_id=?1 AND folder=?2");
+  int n = 0;
+  if (!st) return 0;
+  sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, folder, -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) n = sqlite3_column_int(st, 0) > 0;
+  sqlite3_finalize(st);
+  return n;
+}
+
 static int col_exists(hh_t *h, const char *table, const char *col) {
   sqlite3_stmt *st = prep(h, "SELECT count(*) FROM pragma_table_info(?1, 'main') WHERE name=?2");
   int n = 0;
@@ -447,7 +459,7 @@ int folders_get_json(hh_t *h, const char *tid, strbuf_t *sb) {
 
 int folders_of_title(hh_t *h, const char *tid, char *out, size_t outsz) {
   out[0] = '\0';
-  sqlite3_stmt *st = prep(h, "SELECT folder FROM hh.folder_items WHERE title_id=?1");
+  sqlite3_stmt *st = prep(h, "SELECT folder FROM hh.folder_items WHERE title_id=?1 ORDER BY folder LIMIT 1");
   if (!st) return -1;
   sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
   if (sqlite3_step(st) == SQLITE_ROW) snprintf(out, outsz, "%.15s", sqlite3_column_text(st, 0));
@@ -539,9 +551,8 @@ int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *t
   /* 1. records (one transaction) */
   char (*removed)[16] = calloc(FOLDER_ITEMS_MAX, 16);
   int *removed_hidden = calloc(FOLDER_ITEMS_MAX, sizeof(int));
-  char (*touched)[16] = calloc(FOLDER_MAX, 16); /* other folders that lost games */
-  int nrem = 0, ntouch = 0;
-  if (!removed || !removed_hidden || !touched) goto oom;
+  int nrem = 0;
+  if (!removed || !removed_hidden) goto oom;
   if (run1(h, "BEGIN IMMEDIATE", NULL, NULL)) goto fail;
   {
     sqlite3_stmt *st = prep(h,
@@ -573,22 +584,29 @@ int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *t
       removed_hidden[nrem++] = sqlite3_column_int(st, 1);
     }
     sqlite3_finalize(st);
-    for (int i = 0; i < nrem; i++)
-      if (run1(h, "DELETE FROM hh.folder_items WHERE title_id=?1", removed[i], NULL)) goto rollback;
-
-    /* games in the folder now, in order */
-    for (int i = 0; i < n; i++) {
-      char other[16] = "";
-      folders_of_title(h, items[i], other, sizeof(other));
-      if (other[0] && strcmp(other, tid)) {
-        int seen = 0;
-        for (int k = 0; k < ntouch; k++) seen |= !strcmp(touched[k], other);
-        if (!seen && ntouch < FOLDER_MAX) snprintf(touched[ntouch++], 16, "%s", other);
+    /* leaving this folder only: the game's rows in other folders stay */
+    for (int i = 0; i < nrem; i++) {
+      st = prep(h, "DELETE FROM hh.folder_items WHERE title_id=?1 AND folder=?2");
+      if (!st) goto rollback;
+      sqlite3_bind_text(st, 1, removed[i], -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 2, tid, -1, SQLITE_TRANSIENT);
+      rc = sqlite3_step(st);
+      sqlite3_finalize(st);
+      if (rc != SQLITE_DONE) {
+        ferr(h, "Database error: %s", sqlite3_errmsg(h->db));
+        goto rollback;
       }
+    }
+
+    /* games in the folder now, in order. A game already in another folder
+     * keeps that folder's was_hidden: it was hidden by the folder, not by the
+     * user, so the hide list can't be used to work it out a second time. */
+    for (int i = 0; i < n; i++) {
       st = prep(h,
           "INSERT INTO hh.folder_items(title_id, folder, pos, was_hidden) VALUES(?1, ?2, ?3, "
-          " (SELECT count(*) FROM hh.wanted WHERE title_id=?1)) "
-          "ON CONFLICT(title_id) DO UPDATE SET folder=excluded.folder, pos=excluded.pos");
+          " COALESCE((SELECT was_hidden FROM hh.folder_items WHERE title_id=?1 LIMIT 1),"
+          "           (SELECT count(*) FROM hh.wanted WHERE title_id=?1))) "
+          "ON CONFLICT(title_id, folder) DO UPDATE SET pos=excluded.pos");
       if (!st) goto rollback;
       sqlite3_bind_text(st, 1, items[i], -1, SQLITE_TRANSIENT);
       sqlite3_bind_text(st, 2, tid, -1, SQLITE_TRANSIENT);
@@ -608,11 +626,12 @@ int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *t
   for (int i = 0; i < n; i++)
     if (hh_hide(h, items[i])) missing++;
   for (int i = 0; i < nrem; i++)
-    if (!removed_hidden[i]) hh_unhide(h, removed[i]);
+    if (!removed_hidden[i] &&
+        count1(h, "SELECT count(*) FROM hh.folder_items WHERE title_id=?1", removed[i]) == 0)
+      hh_unhide(h, removed[i]); /* left its last folder */
 
-  /* 3. the tile itself (+ refresh folders that lost games to this one) */
+  /* 3. the tile itself */
   int rc = install_tile(h, tid, note, notesz);
-  for (int k = 0; k < ntouch; k++) install_tile(h, touched[k], NULL, 0);
   if (rc) goto fail;
   hh_log("folder %s: saved, %d game(s), %d hide failure(s), %d removed", tid, n, missing, nrem);
   if (missing && note && !note[0])
@@ -622,7 +641,6 @@ int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *t
   free(items);
   free(removed);
   free(removed_hidden);
-  free(touched);
   return 0;
 
 rollback:
@@ -635,7 +653,6 @@ fail:
   free(items);
   free(removed);
   free(removed_hidden);
-  free(touched);
   return -1;
 }
 
@@ -669,11 +686,22 @@ int folders_set_tab(hh_t *h, const char *tid, const char *tab) {
   return 0;
 }
 
-/* Takes one app out of whatever folder it is in, leaving it back on its tab. */
-int folders_remove_member(hh_t *h, const char *tid) {
+/* Takes one app out of a folder. It goes back on its tab once it is out of its
+ * last folder. folder may be NULL/"" when the app is in only one. */
+int folders_remove_member(hh_t *h, const char *tid, const char *folder_in) {
   char folder[16] = "";
   if (folders_of_title(h, tid, folder, sizeof(folder)) || !folder[0]) {
     ferr(h, "That app isn't in a folder.%s", "");
+    return -1;
+  }
+  if (folder_in && folder_in[0]) {
+    if (!folders_is_folder(folder_in) || !is_member(h, tid, folder_in)) {
+      ferr(h, "That app isn't in that folder.%s", "");
+      return -1;
+    }
+    snprintf(folder, sizeof(folder), "%.15s", folder_in);
+  } else if (count1(h, "SELECT count(*) FROM hh.folder_items WHERE title_id=?1", tid) > 1) {
+    ferr(h, "This app is in more than one folder. Choose which folder to take it out of.%s", "");
     return -1;
   }
   /* the remaining members, keeping their order */
@@ -721,11 +749,13 @@ int folders_delete(hh_t *h, const char *tid) {
     ferr(h, "That folder doesn't exist.%s", "");
     return -1;
   }
-  /* show the games again (unless they were hidden before joining) */
+  /* show the games again (unless they were hidden before joining, or are
+   * still in another folder) */
   char (*show)[16] = calloc(FOLDER_ITEMS_MAX, 16);
   int n = 0;
   if (!show) return -1;
-  sqlite3_stmt *st = prep(h, "SELECT title_id FROM hh.folder_items WHERE folder=?1 AND was_hidden=0");
+  sqlite3_stmt *st = prep(h, "SELECT title_id FROM hh.folder_items WHERE folder=?1 AND was_hidden=0 "
+                         "AND title_id NOT IN (SELECT title_id FROM hh.folder_items WHERE folder<>?1)");
   if (st) {
     sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW && n < FOLDER_ITEMS_MAX)

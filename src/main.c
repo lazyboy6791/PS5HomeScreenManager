@@ -57,10 +57,15 @@ typedef struct {
   int  reapply;       /* re-hide tiles the system brought back, at launch */
   int  auto_check;    /* look for updates (GitHub/USB) at launch */
   int  live;          /* start LiveShell (live wallpaper) with Home Hider */
+  int  folders_first; /* keep the folders in the first spots of their tab */
+  int  show_running;  /* a running game's tile stays on screen (so it can be closed from the row) */
+  int  folder_header; /* folder page: show the folder's picture and name at the top */
+  int  folder_bar;    /* folder page: show the row with the count and the sort button */
+  int  close_browser; /* experimental: close the PS5 browser when a game is started from the folder page */
   char repo[128];     /* GitHub "owner/name" for updates */
 } settings_t;
 
-static settings_t g_cfg = {1, 1, 1, 0, HH_DEFAULT_REPO};
+static settings_t g_cfg = {1, 1, 1, 0, 0, 1, 0, 1, 0, HH_DEFAULT_REPO};
 static char g_pldmgr_dir[256];
 static char g_usb_fmt[256];
 static char g_github_api[128];
@@ -133,6 +138,11 @@ static void load_settings(void) {
     if (sscanf(line, "reapply=%d", &v) == 1) g_cfg.reapply = v ? 1 : 0;
     if (sscanf(line, "auto_check=%d", &v) == 1) g_cfg.auto_check = v ? 1 : 0;
     if (sscanf(line, "live=%d", &v) == 1) g_cfg.live = v ? 1 : 0;
+    if (sscanf(line, "folders_first=%d", &v) == 1) g_cfg.folders_first = v ? 1 : 0;
+    if (sscanf(line, "show_running=%d", &v) == 1) g_cfg.show_running = v ? 1 : 0;
+    if (sscanf(line, "folder_header=%d", &v) == 1) g_cfg.folder_header = v ? 1 : 0;
+    if (sscanf(line, "folder_bar=%d", &v) == 1) g_cfg.folder_bar = v ? 1 : 0;
+    if (sscanf(line, "close_browser=%d", &v) == 1) g_cfg.close_browser = v ? 1 : 0;
     if (!strncmp(line, "repo=", 5) && strlen(line + 5) < sizeof(g_cfg.repo) &&
         upd_valid_repo(line + 5))
       memcpy(g_cfg.repo, line + 5, strlen(line + 5) + 1);
@@ -145,8 +155,10 @@ static int save_settings(void) {
   snprintf(tmp, sizeof(tmp), "%s.tmp", g_settings);
   FILE *f = fopen(tmp, "w");
   if (!f) return -1;
-  fprintf(f, "open_browser=%d\nreapply=%d\nauto_check=%d\nlive=%d\nrepo=%s\n",
-          g_cfg.open_browser, g_cfg.reapply, g_cfg.auto_check, g_cfg.live, g_cfg.repo);
+  fprintf(f, "open_browser=%d\nreapply=%d\nauto_check=%d\nlive=%d\nfolders_first=%d\nshow_running=%d\n"
+             "folder_header=%d\nfolder_bar=%d\nclose_browser=%d\nrepo=%s\n",
+          g_cfg.open_browser, g_cfg.reapply, g_cfg.auto_check, g_cfg.live, g_cfg.folders_first,
+          g_cfg.show_running, g_cfg.folder_header, g_cfg.folder_bar, g_cfg.close_browser, g_cfg.repo);
   fclose(f);
   return rename(tmp, g_settings);
 }
@@ -203,9 +215,12 @@ static void handle_status(int fd) {
   sb_printf(&sb, "{\"ok\":true,\"version\":\"%s\",\"port\":%d,\"ip\":", HH_VERSION, HH_PORT);
   sb_json_str(&sb, ip);
   sb_printf(&sb, ",\"settings\":{\"open_browser\":%d,\"reapply\":%s,\"auto_check\":%s,"
-                 "\"repo\":",
+                 "\"folders_first\":%s,\"show_running\":%s,\"folder_header\":%s,\"folder_bar\":%s,"
+                 "\"close_browser\":%s,\"repo\":",
             g_cfg.open_browser, g_cfg.reapply ? "true" : "false",
-            g_cfg.auto_check ? "true" : "false");
+            g_cfg.auto_check ? "true" : "false", g_cfg.folders_first ? "true" : "false",
+            g_cfg.show_running ? "true" : "false", g_cfg.folder_header ? "true" : "false",
+            g_cfg.folder_bar ? "true" : "false", g_cfg.close_browser ? "true" : "false");
   sb_json_str(&sb, g_cfg.repo);
   sb_puts(&sb, "}");
   sb_printf(&sb, ",\"released_locked\":%d,\"folders_fixed\":%d,\"updated_to\":", g_released,
@@ -258,6 +273,19 @@ static void name_of(const char *tid, char *out, size_t n) {
 
 /* close_running=1: close the game that is running first (the user said OK)
  * local=1: the page runs in the PS5's own browser (web links open in it) */
+/* Opening a folder (or starting a game from one) makes the PS5 write a fresh
+ * recency number on the folder's tile. With Keep folders first on, put the
+ * folders back in order now rather than at the next background pass, so the
+ * home screen reads the right order as early as possible. */
+static void front_now(void) {
+  if (!g_cfg.folders_first) return;
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db) != 0) return;
+  int n = 0;
+  folders_front_apply(&h, &n);
+  hh_close(&h);
+}
+
 static void handle_launch(int fd, const char *query) {
   char tid[32], v[8];
   if (http_query_get(query, "id", tid, sizeof(tid)) || !hh_valid_tid(tid)) {
@@ -266,6 +294,7 @@ static void handle_launch(int fd, const char *query) {
   }
   int close_running = !http_query_get(query, "close_running", v, sizeof(v)) && atoi(v);
   int local = !http_query_get(query, "local", v, sizeof(v)) && atoi(v);
+  front_now(); /* a game started from a folder page */
 
   char name[160] = "", url[512] = "";
   int web = 0;
@@ -297,7 +326,9 @@ static void handle_launch(int fd, const char *query) {
     return;
   }
 
-  int job = launch_start(tid, name, close_running);
+  /* only when the page runs in the PS5's own browser (local): from a phone or PC there is
+   * no browser on the console to close */
+  int job = launch_start(tid, name, close_running, g_cfg.close_browser && local);
   if (job < 0) {
     send_error(fd, 409, "Still starting the last game. Try again in a moment.");
     return;
@@ -440,13 +471,24 @@ static void handle_folder_take_out(int fd, const char *query) {
     send_error(fd, 400, "Missing or invalid title id.");
     return;
   }
+  char folder[32] = "";
+  if (http_query_get(query, "folder", folder, sizeof(folder)) == 0 && folder[0] && !folders_is_folder(folder)) {
+    send_error(fd, 400, "Invalid folder id.");
+    return;
+  }
   hh_t h;
   if (hh_open(&h, g_app_db, g_state_db)) {
     send_error(fd, 500, h.err);
     return;
   }
-  if (folders_remove_member(&h, tid)) send_error(fd, 409, h.err);
-  else send_ok(fd, "Taken out of the folder. It's back on its tab, and you can move it now.");
+  if (folders_remove_member(&h, tid, folder)) {
+    send_error(fd, 409, h.err);
+  } else {
+    char left[16] = "";
+    folders_of_title(&h, tid, left, sizeof(left));
+    send_ok(fd, left[0] ? "Taken out of that folder. It's still in another folder."
+                        : "Taken out of the folder. It's back on its tab, and you can move it now.");
+  }
   hh_close(&h);
 }
 
@@ -593,7 +635,7 @@ static void handle_hide(int fd, const char *query, int hide) {
   char folder[16] = "";
   folders_of_title(&h, tid, folder, sizeof(folder));
   if (!hide && folder[0]) {
-    send_error(fd, 409, "This game is in a folder. Take it out of the folder to show it again.");
+    send_error(fd, 409, "This game is in a folder. Take it out of its folders to show it again.");
     hh_close(&h);
     return;
   }
@@ -640,8 +682,36 @@ static void handle_settings(int fd, const char *query) {
     g_cfg.open_browser = atoi(v) == 2 ? 2 : atoi(v) ? 1 : 0;
   if (!http_query_get(query, "reapply", v, sizeof(v))) g_cfg.reapply = atoi(v) ? 1 : 0;
   if (!http_query_get(query, "auto_check", v, sizeof(v))) g_cfg.auto_check = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "show_running", v, sizeof(v))) g_cfg.show_running = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "folder_header", v, sizeof(v))) g_cfg.folder_header = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "folder_bar", v, sizeof(v))) g_cfg.folder_bar = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "close_browser", v, sizeof(v))) g_cfg.close_browser = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "folders_first", v, sizeof(v))) {
+    int on = atoi(v) ? 1 : 0;
+    if (on != g_cfg.folders_first) {
+      g_cfg.folders_first = on; /* first, so the background check follows */
+      hh_t h;
+      if (hh_open(&h, g_app_db, g_state_db) == 0) {
+        int n = 0;
+        if (on) folders_front_apply(&h, &n);
+        else folders_front_clear(&h);
+        hh_log("folders first: %s (%d row(s) set)", on ? "on" : "off", n);
+        hh_close(&h);
+      }
+    }
+  }
   if (save_settings()) send_error(fd, 500, "Could not save settings.");
   else send_ok(fd, "saved");
+}
+
+/* The log by itself, as plain text (the same lines that end the diagnostics). */
+static void handle_log(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  hh_log_tail(&sb, 40000);
+  if (sb.oom) http_send_text(fd, 500, "text/plain", "out of memory");
+  else http_send(fd, 200, "text/plain; charset=utf-8", sb.data, sb.len, "Cache-Control: no-store\r\n");
+  sb_free(&sb);
 }
 
 static void handle_diag(int fd) {
@@ -829,7 +899,9 @@ static void handle_folder(int fd, const char *query) {
   sb_puts(&sb, "{\"ok\":true,\"folder\":");
   if (folders_get_json(&h, id, &sb)) send_error(fd, 404, h.err);
   else {
-    sb_puts(&sb, "}");
+    /* how the folder page is laid out (the page is one fixed file) */
+    sb_printf(&sb, ",\"page\":{\"header\":%s,\"bar\":%s}}", g_cfg.folder_header ? "true" : "false",
+              g_cfg.folder_bar ? "true" : "false");
     send_json(fd, 200, &sb);
   }
   sb_free(&sb);
@@ -1147,6 +1219,7 @@ static void handle_client(int fd) {
   } else if (!strcmp(p, "/api/status")) {
     handle_status(fd);
   } else if (!strncmp(p, "/folder/", 8)) {
+    front_now(); /* the PS5 has just opened this folder */
     http_send(fd, 200, "text/html; charset=utf-8", FOLDER_HTML, FOLDER_HTML_LEN, NULL);
   } else if (!strcmp(p, "/api/folders")) {
     handle_folders(fd);
@@ -1162,6 +1235,8 @@ static void handle_client(int fd) {
     handle_list(fd);
   } else if (!strcmp(p, "/api/diag")) {
     handle_diag(fd);
+  } else if (!strcmp(p, "/api/log")) {
+    handle_log(fd);
   } else if (!strcmp(p, "/api/icon")) {
     handle_icon(fd, r.query);
   } else if (!strcmp(p, "/api/custom")) {
@@ -1316,31 +1391,105 @@ static int open_server(void) {
   return -1;
 }
 
+/* Hides again the tiles the PS5 brought back. A game that is running is left
+ * alone (when "Show a running game" is on): its tile stays on screen, in front
+ * of the folders, so it can be closed from the home row. It is hidden again by
+ * the first pass after the game is closed. */
+static int running_title(char *out, size_t n) {
+  if (!g_cfg.show_running) return -1;
+  uint32_t rid = 0;
+  if (plat_running_game(out, n, &rid) != 0 || strlen(out) >= 16 || !hh_valid_tid(out)) return -1;
+  return 0;
+}
+
+static void rehide_now(hh_t *h, int *fixed) { hh_reapply(h, fixed, running_title); }
+
+/* The title id of the game that is running right now ("" if none). */
+static void game_now(char *out, size_t n) {
+  uint32_t rid = 0;
+  out[0] = '\0';
+  if (plat_running_game(out, n, &rid) != 0 || strlen(out) >= 16 || !hh_valid_tid(out)) out[0] = '\0';
+}
+
+static long ms_since(const struct timespec *t0) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (long)((t.tv_sec - t0->tv_sec) * 1000L + (t.tv_nsec - t0->tv_nsec) / 1000000L);
+}
+
+/* One round of keeping the home screen right: hide again what the PS5 brought
+ * back, put folders, the folder block, the chosen order and tab moves back. */
+static void watchdog_pass(hh_t *h) {
+  if (h->nusers == 0) return;
+  int rehidden = 0, folders = 0, arranged = 0;
+  if (g_cfg.reapply) rehide_now(h, &rehidden);
+  folders_reapply(h, &folders);
+  int fronted = 0;
+  if (g_cfg.folders_first) folders_front_apply(h, &fronted);
+  arrange_apply(h, &arranged);
+  int tabbed = 0;
+  tabs_apply(h, &tabbed);
+  if (rehidden || folders || arranged || tabbed || fronted)
+    hh_log("auto re-hide: %d tile(s), %d folder(s), %d arranged, %d tab-moved, %d kept first — the home screen heals itself",
+           rehidden, folders, arranged, tabbed, fronted);
+}
+
 /* The system makes a tile visible again after its game is played, which
  * un-hides games that are inside folders (and anything else on the hide
  * list), cluttering the home screen until Home Hider runs again. While Home
  * Hider is running, this thread re-hides them by itself every few seconds,
  * and keeps folders and the chosen order in place, so the home screen heals
- * without re-running the payload. Re-hiding a tile while its game is still
- * running is harmless (it doesn't touch the running game), and means the
- * home screen already shows it hidden by the time the game is closed. */
+ * without re-running the payload.
+ *
+ * The home screen reads the database again some moments after a game is
+ * closed, so the fix has to be in by then. The thread therefore looks at the
+ * running game four times a second, and the moment a game is gone it checks
+ * everything straight away. The PS5 writes its own update for the game a
+ * second or two after it closed (it shows the tile again), and the home screen
+ * takes that write, not our fix before it. So for the next few seconds the
+ * closed game's tile is watched closely and hidden again the instant it
+ * comes back, and everything is checked again a few times. */
 static void *rehide_watchdog(void *arg) {
   (void)arg;
+  char prev[32];
+  game_now(prev, sizeof(prev));
   while (g_running) {
-    for (int i = 0; i < 6 && g_running; i++) sleep(1);
+    int closed = 0;
+    char closed_tid[32] = "";
+    for (int t = 0; t < 6000 && g_running; t += 250) {
+      usleep(250000);
+      char now[32];
+      game_now(now, sizeof(now));
+      if (prev[0] && !now[0]) {
+        hh_log("%s is closed: checking the home screen right away", prev);
+        snprintf(closed_tid, sizeof(closed_tid), "%s", prev);
+        closed = 1;
+      }
+      snprintf(prev, sizeof(prev), "%s", now);
+      if (closed) break;
+    }
     if (!g_running) break;
     hh_t h;
     if (hh_open(&h, g_app_db, g_state_db) != 0) continue;
-    if (h.nusers > 0) {
-      int rehidden = 0, folders = 0, arranged = 0;
-      if (g_cfg.reapply) hh_reapply(&h, &rehidden);
-      folders_reapply(&h, &folders);
-      arrange_apply(&h, &arranged);
-      int tabbed = 0;
-      tabs_apply(&h, &tabbed);
-      if (rehidden || folders || arranged || tabbed)
-        hh_log("auto re-hide: %d tile(s), %d folder(s), %d arranged, %d tab-moved — the home screen heals itself",
-               rehidden, folders, arranged, tabbed);
+    watchdog_pass(&h);
+    if (closed) {
+      hh_state_t st;
+      int watch = g_cfg.reapply && h.nusers > 0 && hh_get_state(&h, closed_tid, &st) == 0 && st.wanted;
+      struct timespec t0;
+      clock_gettime(CLOCK_MONOTONIC, &t0);
+      for (int i = 1; i <= 200 && g_running; i++) { /* 5 seconds, in steps of 25 ms */
+        usleep(25000);
+        char now[32];
+        game_now(now, sizeof(now));
+        if (now[0]) break; /* a game is running again: back to the normal rhythm */
+        if (watch && hh_get_state(&h, closed_tid, &st) == 0 && st.present && (st.visible || st.in_myhome)) {
+          long seen = ms_since(&t0);
+          int rc = hh_hide(&h, closed_tid);
+          hh_log("show running: the PS5 showed %s again %ld ms after the close; hidden again within %ld ms%s",
+                 closed_tid, seen, ms_since(&t0) - seen, rc ? " (failed)" : "");
+        }
+        if (i % 60 == 0) watchdog_pass(&h); /* and everything again at 1.5 s, 3 s and 4.5 s */
+      }
     }
     hh_close(&h);
   }
@@ -1390,8 +1539,9 @@ int main(void) {
     if (hh_open(&h, g_app_db, g_state_db) == 0) {
       /* older versions let these be hidden although it has no effect */
       hh_release_locked(&h, &g_released);
-      if (g_cfg.reapply) hh_reapply(&h, &g_reapplied);
+      if (g_cfg.reapply) rehide_now(&h, &g_reapplied);
       folders_reapply(&h, &g_folders_fixed); /* folder tiles always come back */
+      if (g_cfg.folders_first) { int ff = 0; folders_front_apply(&h, &ff); } /* in the first spots */
       custom_reapply(&h, &g_custom_fixed);   /* and so do new names and pictures */
       arrange_apply(&h, &g_arrange_fixed);   /* and the chosen home-screen order */
       { int tf = 0; tabs_apply(&h, &tf); }   /* and tiles moved to the other tab */

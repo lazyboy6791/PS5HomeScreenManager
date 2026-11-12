@@ -62,13 +62,18 @@ int  hh_unhide(hh_t *h, const char *tid);
 int  hh_unhide_all(hh_t *h, int *count);
 /* Re-hides every title on the hide list that the system has made visible
  * again. *fixed receives how many titles needed fixing. */
-int  hh_reapply(hh_t *h, int *fixed);
+int  hh_reapply(hh_t *h, int *fixed, int (*running)(char *out, size_t n));
+/* (running = NULL, or a function that gives the title id of the game that is
+ * running now and returns 0 if there is one. Its tile is left on screen so it
+ * can be closed from the home row. It is only asked when a hidden tile has
+ * actually come back, so most passes never call it.) */
 int  hh_get_state(hh_t *h, const char *tid, hh_state_t *st);
 
 /* Appends a JSON array describing every installed game/app and every system
  * tile that is on (or was hidden from) the home screen. Each element:
  *   {"id","name","kind":"game|system","tab":"games|media|none",
- *    "hidden","on_list","pinned","recent","folder","renamed","custom_icon"} */
+ *    "hidden","on_list","pinned","recent","folder" (first folder or null),
+ *    "folders" (every folder it is in),"renamed","custom_icon"} */
 int  hh_list(hh_t *h, strbuf_t *out);
 
 /* Name the home screen shows for tid ("" if unknown). */

@@ -1,4 +1,5 @@
 #include "arrange.h"
+#include "platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,19 +207,32 @@ static void restore_tile(hh_t *h, const char *tid) {
   run(h, "DELETE FROM hh.arrange_orig WHERE title_id=?1", tid, NULL, NULL);
 }
 
+static long long fs_get(hh_t *h, const char *key, long long dflt);
+
 /* Writes the order and pins from hh.arranged into app.db. */
 static int apply_locked(hh_t *h, int *fixed) {
   if (fixed) *fixed = 0;
+  /* The base comes from the PS5's own numbers only. Our own earlier values
+   * (arranged tiles, and folders kept first) must not count, or every pass
+   * would raise the base by another ARRANGE_BASE_GAP and the numbers would
+   * climb for as long as Home Hider runs. */
   long long maxacc = 0;
   for (int ui = 0; ui < h->nusers; ui++) {
-    char sql[160];
-    snprintf(sql, sizeof(sql), "SELECT max(lastAccessIndex) FROM main.\"tbl_iconinfo_%s\"",
+    char sql[360];
+    snprintf(sql, sizeof(sql),
+             "SELECT max(lastAccessIndex) FROM main.\"tbl_iconinfo_%s\" "
+             "WHERE titleId NOT IN (SELECT title_id FROM hh.arranged) "
+             "AND titleId NOT IN (SELECT title_id FROM hh.folders)",
              h->users[ui]);
     long long m = scalar1(h, sql, NULL, 0);
     if (m > maxacc) maxacc = m;
   }
   long long ver = scalar1(h, "SELECT status FROM main.tbl_version WHERE category='access_index'",
                           NULL, 0);
+  /* Keep Folders first raises the counter to the top of the folder block. That
+   * value is Home Hider's own, not the PS5's progress, so it doesn't count. */
+  long long set_ver = fs_get(h, "counter", -1);
+  if (set_ver >= 0 && ver <= set_ver) ver = 0;
   long long base = (ver > maxacc ? ver : maxacc) + ARRANGE_BASE_GAP;
 
   sqlite3_stmt *st = prep(h, "SELECT title_id, pos, pinned FROM hh.arranged ORDER BY pos");
@@ -230,6 +244,8 @@ static int apply_locked(hh_t *h, int *fixed) {
     /* leave a hidden tile alone: re-pinning it could bring it back on screen */
     if (scalar1(h, "SELECT count(*) FROM hh.wanted WHERE title_id=?1", tid, 0) > 0) continue;
     if (hh_is_locked(tid)) continue; /* the PS5 places Game/App Library itself */
+    /* a folder that is kept first is placed with the other folders */
+    if (scalar1(h, "SELECT count(*) FROM hh.front_folders WHERE title_id=?1", tid, 0) > 0) continue;
     int pos = sqlite3_column_int(st, 1), pinned = sqlite3_column_int(st, 2);
     long long want = base - pos;
     for (int ui = 0; ui < h->nusers; ui++) {
@@ -430,4 +446,278 @@ int arrange_json(hh_t *h, strbuf_t *sb) {
   }
   sb_puts(sb, "]}");
   return sb->oom ? -1 : 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* keep the folders in the first spots                                       */
+/* ------------------------------------------------------------------------- */
+
+#define FRONT_MARGIN 100 /* room between the PS5's own numbers and the folders */
+#define FRONT_MAX    128
+
+typedef struct {
+  char      id[16];
+  long long cur;      /* value in app.db now */
+  long long written;  /* value Home Hider put there last time */
+  long long orig;     /* the PS5's own value, put back when this is switched off */
+  int       old_rank; /* position in the block last time (0 = first) */
+  int       known;    /* has a saved state row */
+  int       changed;  /* new, or the PS5 wrote it since (the folder was opened) */
+} front_t;
+
+/* changed folders first, most recent first; then the others as they were */
+static int front_cmp(const void *a, const void *b) {
+  const front_t *x = a, *y = b;
+  if (x->changed != y->changed) return y->changed - x->changed;
+  if (x->changed) {
+    if (x->cur != y->cur) return x->cur < y->cur ? 1 : -1;
+  } else if (x->old_rank != y->old_rank) {
+    return x->old_rank - y->old_rank;
+  }
+  return strcmp(x->id, y->id);
+}
+
+static long long fs_get(hh_t *h, const char *key, long long dflt) {
+  return scalar1(h, "SELECT v FROM hh.front_state WHERE k=?1", key, dflt);
+}
+
+static int fs_set(hh_t *h, const char *key, long long v) {
+  sqlite3_stmt *st = prep(h, "INSERT OR REPLACE INTO hh.front_state(k, v) VALUES(?1, ?2)");
+  if (!st) return -1;
+  sqlite3_bind_text(st, 1, key, -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, v);
+  int rc = sqlite3_step(st);
+  sqlite3_finalize(st);
+  return rc == SQLITE_DONE ? 0 : -1;
+}
+
+/* One user's folders. dry=1 only counts what would have to change.
+ * *top is raised to the highest number the folders get. */
+static int front_user(hh_t *h, int ui, int dry, long long *top, const char *running) {
+  const char *u = h->users[ui];
+  char icon_t[64];
+  snprintf(icon_t, sizeof(icon_t), "tbl_iconinfo_%s", u);
+  if (!has_col(h, icon_t, "lastAccessIndex")) return 0;
+
+  front_t f[FRONT_MAX];
+  int n = 0;
+  char sql[420];
+  snprintf(sql, sizeof(sql),
+           "SELECT fo.title_id, ic.lastAccessIndex FROM hh.folders fo "
+           "JOIN main.\"%s\" ic ON ic.titleId = fo.title_id ORDER BY fo.title_id", icon_t);
+  sqlite3_stmt *st = prep(h, sql);
+  if (!st) return -1;
+  while (n < FRONT_MAX && sqlite3_step(st) == SQLITE_ROW) {
+    front_t *p = &f[n++];
+    memset(p, 0, sizeof(*p));
+    snprintf(p->id, sizeof(p->id), "%s", (const char *)sqlite3_column_text(st, 0));
+    p->cur = sqlite3_column_type(st, 1) == SQLITE_NULL ? 0 : sqlite3_column_int64(st, 1);
+    p->orig = p->cur;
+    p->written = -1;
+  }
+  sqlite3_finalize(st);
+  if (n == 0) return 0;
+
+  for (int i = 0; i < n; i++) {
+    sqlite3_stmt *q = prep(h, "SELECT written, orig_access, rank FROM hh.front_folders "
+                              "WHERE title_id=?1 AND user=?2");
+    if (!q) return -1;
+    sqlite3_bind_text(q, 1, f[i].id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(q, 2, u, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW) {
+      f[i].known = 1;
+      f[i].written = sqlite3_column_type(q, 0) == SQLITE_NULL ? -1 : sqlite3_column_int64(q, 0);
+      if (sqlite3_column_type(q, 1) != SQLITE_NULL) f[i].orig = sqlite3_column_int64(q, 1);
+      f[i].old_rank = sqlite3_column_int(q, 2);
+    }
+    sqlite3_finalize(q);
+    f[i].changed = !f[i].known || f[i].cur != f[i].written;
+    if (f[i].changed) f[i].orig = f[i].cur; /* the PS5's own value, as it is now */
+  }
+  qsort(f, (size_t)n, sizeof(f[0]), front_cmp);
+
+  /* Just above everything the PS5 numbers, and above a saved order. The block
+   * keeps its place while it is still clear of them, so a quiet pass changes
+   * nothing. The PS5's counter is raised to the top of the block (see
+   * front_all), so the number the PS5 writes when a folder is opened lands
+   * above the other folders. That counter is our own after that, so it only
+   * counts as the PS5's progress once it has gone past what we set. */
+  /* A game that is running stays where the PS5 put it, in front of the
+   * folders, until it is closed: its row doesn't count, and neither does the
+   * counter step its start caused, so the block doesn't move up over it. */
+  int holding = running && running[0];
+  snprintf(sql, sizeof(sql),
+           "SELECT max(lastAccessIndex) FROM main.\"%s\" "
+           "WHERE titleId NOT IN (SELECT title_id FROM hh.folders) "
+           "AND titleId NOT IN (SELECT title_id FROM hh.arranged) "
+           "AND titleId <> ?1", icon_t);
+  long long m = scalar1(h, sql, holding ? running : "-", 0);
+  snprintf(sql, sizeof(sql),
+           "SELECT max(lastAccessIndex) FROM main.\"%s\" "
+           "WHERE titleId IN (SELECT title_id FROM hh.arranged)", icon_t);
+  long long arr = scalar1(h, sql, NULL, 0);
+  long long ver = scalar1(h, "SELECT status FROM main.tbl_version WHERE category='access_index'",
+                          NULL, 0);
+  long long set_ver = fs_get(h, "counter", -1);
+  long long floor_ = m > arr ? m : arr;
+  if (!holding && (set_ver < 0 || ver > set_ver)) floor_ = ver > floor_ ? ver : floor_;
+  char key[40];
+  snprintf(key, sizeof(key), "base:%s", u);
+  long long prev = fs_get(h, key, -1);
+  long long base = (prev >= 0 && prev >= floor_ + FRONT_MARGIN / 2) ? prev : floor_ + FRONT_MARGIN;
+  if (base + n > *top) *top = base + n;
+
+  int need = 0;
+  for (int r = 0; r < n; r++) {
+    long long want = base + (n - r);
+    if (f[r].known && f[r].cur == want && f[r].written == want && f[r].old_rank == r) continue;
+    need++;
+    if (dry) continue;
+    if (f[r].known && f[r].changed)
+      hh_log("folders first: %s was opened (the PS5 wrote %lld) -> %s of the folders", f[r].id, f[r].cur,
+             r == 0 ? "first" : "not first");
+    if (f[r].cur != want) {
+      snprintf(sql, sizeof(sql), "UPDATE main.\"%s\" SET lastAccessIndex=%lld WHERE titleId=?1", icon_t,
+               want);
+      if (run(h, sql, f[r].id, NULL, NULL)) return -1;
+    }
+    sqlite3_stmt *up = prep(h, "INSERT OR REPLACE INTO hh.front_folders(title_id, user, orig_access, "
+                               "written, rank) VALUES(?1,?2,?3,?4,?5)");
+    if (!up) return -1;
+    sqlite3_bind_text(up, 1, f[r].id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(up, 2, u, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(up, 3, f[r].orig);
+    sqlite3_bind_int64(up, 4, want);
+    sqlite3_bind_int(up, 5, r);
+    int rc = sqlite3_step(up);
+    sqlite3_finalize(up);
+    if (rc != SQLITE_DONE) return -1;
+  }
+  if (!dry && fs_set(h, key, base)) return -1;
+  return need;
+}
+
+static int front_all(hh_t *h, int dry) {
+  int total = 0;
+  long long top = 0;
+  char running[32] = "";
+  uint32_t run_id = 0;
+  if (plat_running_game(running, sizeof(running), &run_id) != 0 || strlen(running) >= 16 ||
+      !hh_valid_tid(running))
+    running[0] = '\0';
+  {
+    static char held[16]; /* for the log only: the game last held in front of the folders */
+    if (strcmp(held, running) != 0) {
+      if (running[0]) hh_log("folders first: %s is running, kept in front of the folders", running);
+      else hh_log("folders first: %s was closed, the folders go back in front", held);
+      snprintf(held, sizeof(held), "%s", running);
+    }
+  }
+  for (int ui = 0; ui < h->nusers; ui++) {
+    int n = front_user(h, ui, dry, &top, running);
+    if (n < 0) return -1;
+    total += n;
+  }
+  /* The PS5 gives a tile it starts "the next number" after its counter. Put the
+   * counter at the top of the folder block: a folder that is opened then gets a
+   * number above the other folders, which is where it went before folders were
+   * kept first. (A game or app started meanwhile lands above the folders for a
+   * moment too; the next pass puts the folders back above it.) */
+  /* Not while a saved order exists: that block sits about ARRANGE_BASE_GAP
+   * above the PS5's numbers, and a counter up there would push every game the
+   * PS5 starts up there too, and the saved order after it, on every play. */
+  if (top > 0 && scalar1(h, "SELECT count(*) FROM hh.arranged", NULL, 0) == 0) {
+    long long ver = scalar1(h, "SELECT status FROM main.tbl_version WHERE category='access_index'",
+                            NULL, 0);
+    if (ver < top) {
+      total++;
+      if (!dry) {
+        char sql[160];
+        snprintf(sql, sizeof(sql),
+                 "UPDATE main.tbl_version SET status=%lld WHERE category='access_index'", top);
+        if (run(h, sql, NULL, NULL, NULL)) return -1;
+      }
+    }
+    if (!dry && fs_set(h, "counter", ver < top ? top : ver)) return -1;
+  }
+  /* folders that no longer exist */
+  const char *stale = "title_id NOT IN (SELECT title_id FROM hh.folders)";
+  char sql[160];
+  snprintf(sql, sizeof(sql), "SELECT count(*) FROM hh.front_folders WHERE %s", stale);
+  long long ns = scalar1(h, sql, NULL, 0);
+  if (ns > 0) {
+    total += (int)ns;
+    if (!dry) {
+      snprintf(sql, sizeof(sql), "DELETE FROM hh.front_folders WHERE %s", stale);
+      if (run(h, sql, NULL, NULL, NULL)) return -1;
+    }
+  }
+  return total;
+}
+
+/* Puts the folders in the first spots of their tab, ahead of every game and
+ * app, and keeps them there. The folders keep the PS5's own order among
+ * themselves: opening one makes the PS5 write a fresh number on its tile, and
+ * that folder moves to the front of the block. *fixed = rows changed. */
+int folders_front_apply(hh_t *h, int *fixed) {
+  if (fixed) *fixed = 0;
+  if (h->nusers == 0) return 0;
+  if (scalar1(h, "SELECT count(*) FROM hh.folders", NULL, 0) == 0 &&
+      scalar1(h, "SELECT count(*) FROM hh.front_folders", NULL, 0) == 0)
+    return 0;
+  int need = front_all(h, 1); /* look first: a quiet pass takes no write lock */
+  if (need < 0) return -1;
+  if (need == 0) return 0;
+  if (run(h, "BEGIN IMMEDIATE", NULL, NULL, NULL)) return -1;
+  int n = front_all(h, 0);
+  int rc = n < 0 ? -1 : run(h, "COMMIT", NULL, NULL, NULL);
+  if (rc) {
+    sqlite3_exec(h->db, "ROLLBACK", NULL, NULL, NULL);
+    return -1;
+  }
+  if (fixed) *fixed = n;
+  return 0;
+}
+
+/* Gives the folders back the numbers the PS5 had given them. A folder the PS5
+ * has written to since (opened it) keeps that number: it is already the
+ * PS5's own. */
+int folders_front_clear(hh_t *h) {
+  if (h->nusers > 0) {
+    if (run(h, "BEGIN IMMEDIATE", NULL, NULL, NULL)) return -1;
+    for (int ui = 0; ui < h->nusers; ui++) {
+      const char *u = h->users[ui];
+      char icon_t[64];
+      snprintf(icon_t, sizeof(icon_t), "tbl_iconinfo_%s", u);
+      if (!has_col(h, icon_t, "lastAccessIndex")) continue;
+      sqlite3_stmt *st = prep(h, "SELECT title_id, orig_access, written FROM hh.front_folders WHERE user=?1");
+      if (!st) continue;
+      sqlite3_bind_text(st, 1, u, -1, SQLITE_TRANSIENT);
+      char ids[FRONT_MAX][16];
+      long long orig[FRONT_MAX], written[FRONT_MAX];
+      int n = 0;
+      while (n < FRONT_MAX && sqlite3_step(st) == SQLITE_ROW) {
+        if (sqlite3_column_type(st, 1) == SQLITE_NULL) continue;
+        snprintf(ids[n], 16, "%s", (const char *)sqlite3_column_text(st, 0));
+        orig[n] = sqlite3_column_int64(st, 1);
+        written[n] = sqlite3_column_int64(st, 2);
+        n++;
+      }
+      sqlite3_finalize(st);
+      for (int i = 0; i < n; i++) {
+        char sql[260];
+        snprintf(sql, sizeof(sql),
+                 "UPDATE main.\"%s\" SET lastAccessIndex=%lld WHERE titleId=?1 AND lastAccessIndex=%lld",
+                 icon_t, orig[i], written[i]);
+        run(h, sql, ids[i], NULL, NULL);
+      }
+    }
+  }
+  int rc = run(h, "DELETE FROM hh.front_folders", NULL, NULL, NULL);
+  if (rc == 0) rc = run(h, "DELETE FROM hh.front_state", NULL, NULL, NULL);
+  if (h->nusers > 0) {
+    if (rc == 0) rc = run(h, "COMMIT", NULL, NULL, NULL);
+    if (rc) sqlite3_exec(h->db, "ROLLBACK", NULL, NULL, NULL);
+  }
+  return rc ? -1 : 0;
 }

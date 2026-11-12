@@ -30,3 +30,13 @@ int  arrange_apply(hh_t *h, int *fixed);
 
 /* JSON: {"on":bool,"items":[{"id","tab","pinned"}...]} in order. */
 int  arrange_json(hh_t *h, strbuf_t *sb);
+
+/* Keeps every folder in the first spots of its tab, ahead of all games and
+ * apps (the folders still reorder among themselves by recent use). The block
+ * sits just above the PS5's own numbers and moves up only as they do, and the
+ * PS5's counter is raised to the top of the block so that a folder the PS5 has
+ * just opened is numbered above the other folders. *fixed = rows changed. */
+int  folders_front_apply(hh_t *h, int *fixed);
+
+/* Switches that off: folders get the PS5's own numbers back. 0 on success. */
+int  folders_front_clear(hh_t *h);

@@ -25,6 +25,17 @@ int  plat_launch_app(const char *title_id, uint32_t *app_id);
 int  plat_app_id(const char *title_id, uint32_t *app_id);
 /* The game (big app) running right now. 0 if there is one. */
 int  plat_running_game(char *title_id, size_t n, uint32_t *app_id);
+/* The PS5 browser's app (the folder page runs in it). Looked up by its title
+ * id, else as the small app that is in front. *title gets that app's title id.
+ * 0 if one was found. */
+int  plat_browser_app(uint32_t *app_id, char *title, size_t n);
+/* Closes the PS5 browser by ending its own process (the console doesn't give out
+ * the browser app's id). report says what was done. 0 if the browser was found. */
+int  plat_close_browser(char *report, size_t n);
+/* For the log: what the console says about the browser's app (each lookup and
+ * what it returned), and the names of the processes that are running. */
+void plat_browser_diag(char *out, size_t n);
+void plat_process_names(char *out, size_t n);
 /* Closes a running app. Writes what was tried into report. 0 on success. */
 int  plat_kill_app(uint32_t app_id, char *report, size_t n);
 /* GETs url (https on the console), following redirects. On HTTP 200, *out

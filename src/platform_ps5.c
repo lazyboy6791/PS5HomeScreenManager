@@ -126,6 +126,149 @@ int plat_app_id(const char *title_id, uint32_t *app_id) {
   return 0;
 }
 
+int plat_browser_app(uint32_t *app_id, char *title, size_t n) {
+  title[0] = '\0';
+  /* 1. by title id */
+  uint32_t id = 0;
+  if (plat_app_id("NPXS40169", &id) == 0) {
+    snprintf(title, n, "NPXS40169");
+    *app_id = id;
+    return 0;
+  }
+  /* 2. the small ("mini") app that is running: with the folder page open in the
+   *    PS5's browser, that is the browser */
+  int (*mini)(void) = sysfn("sceLncUtilGetAppIdOfMiniApp");
+  if (!mini) mini = sysfn("sceSystemServiceGetAppIdOfMiniApp");
+  if (!mini) return -1;
+  int v = mini();
+  if (!valid_app_id(v)) return -1;
+  int (*ttl)(uint32_t, char *) = sysfn("sceLncUtilGetAppTitleId");
+  char t[64];
+  memset(t, 0, sizeof(t));
+  if (ttl && ttl((uint32_t)v, t) != 0) t[0] = '\0';
+  t[sizeof(t) - 1] = '\0';
+  snprintf(title, n, "%s", t);
+  *app_id = (uint32_t)v;
+  return 0;
+}
+
+/* One system function that takes nothing and returns an app id: is it there,
+ * and what does it say (with that app's title id)? */
+static void diag_idfn(char *out, size_t n, const char *name) {
+  size_t l = strlen(out);
+  if (l >= n) return;
+  int (*f)(void) = sysfn(name);
+  if (!f) {
+    snprintf(out + l, n - l, "%s: missing; ", name);
+    return;
+  }
+  int v = f();
+  char t[64];
+  memset(t, 0, sizeof(t));
+  int (*ttl)(uint32_t, char *) = sysfn("sceLncUtilGetAppTitleId");
+  if (valid_app_id(v) && ttl && ttl((uint32_t)v, t) != 0) t[0] = '\0';
+  t[sizeof(t) - 1] = '\0';
+  snprintf(out + l, n - l, "%s: 0x%08x%s%s%s; ", name, (unsigned)v, t[0] ? " (title " : "", t, t[0] ? ")" : "");
+}
+
+void plat_browser_diag(char *out, size_t n) {
+  out[0] = '\0';
+  uint32_t id = 0;
+  int rc = plat_app_id("NPXS40169", &id);
+  snprintf(out, n, "by title NPXS40169: %s%08x; ", rc == 0 ? "app " : "not found ", rc == 0 ? id : 0);
+  diag_idfn(out, n, "sceLncUtilGetAppIdOfMiniApp");
+  diag_idfn(out, n, "sceSystemServiceGetAppIdOfMiniApp");
+  diag_idfn(out, n, "sceLncUtilGetAppIdOfBigApp");
+  diag_idfn(out, n, "sceSystemServiceGetAppIdOfBigApp");
+  diag_idfn(out, n, "sceLncUtilGetAppIdOfRunningBigApp");
+}
+
+/* The browser app runs as a UI process (SceNKUIProcess) with its page and
+ * network helpers; ending the UI process closes the browser. Ask politely first
+ * (SIGTERM), and end it if it is still there after a moment. */
+int plat_close_browser(char *report, size_t n) {
+  report[0] = '\0';
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0};
+  size_t size = 0;
+  if (sysctl(mib, 4, NULL, &size, NULL, 0) || !size) {
+    snprintf(report, n, "couldn't read the process list");
+    return -1;
+  }
+  size += size / 4;
+  char *buf = malloc(size);
+  if (!buf) return -1;
+  if (sysctl(mib, 4, buf, &size, NULL, 0)) {
+    free(buf);
+    snprintf(report, n, "couldn't read the process list");
+    return -1;
+  }
+  pid_t pids[8];
+  int np = 0;
+  for (char *p = buf; p + sizeof(int) <= buf + size;) {
+    struct kinfo_proc *ki = (struct kinfo_proc *)p;
+    if (ki->ki_structsize <= 0) break;
+    if (strcmp(ki->ki_comm, "SceNKUIProcess") == 0 && np < 8) pids[np++] = ki->ki_pid;
+    p += ki->ki_structsize;
+  }
+  free(buf);
+  if (np == 0) {
+    snprintf(report, n, "no SceNKUIProcess is running");
+    return -1;
+  }
+  size_t l = 0;
+  for (int i = 0; i < np; i++) {
+    int rc = kill(pids[i], SIGTERM);
+    l += (size_t)snprintf(report + l, n - l, "SceNKUIProcess pid %d: SIGTERM %s; ", (int)pids[i],
+                          rc == 0 ? "sent" : "failed");
+  }
+  int alive = 1;
+  for (int w = 0; w < 6 && alive; w++) { /* up to 0.6 s */
+    usleep(100000);
+    alive = 0;
+    for (int i = 0; i < np; i++)
+      if (kill(pids[i], 0) == 0) alive = 1;
+  }
+  for (int i = 0; i < np && alive; i++) {
+    if (kill(pids[i], 0) != 0) continue;
+    int rc = kill(pids[i], SIGKILL);
+    l += (size_t)snprintf(report + l, n - l, "still there, SIGKILL %s; ", rc == 0 ? "sent" : "failed");
+  }
+  if (!alive) snprintf(report + l, n - l, "gone after SIGTERM");
+  return 0;
+}
+
+/* The names of the running processes, once each, comma separated. */
+void plat_process_names(char *out, size_t n) {
+  out[0] = '\0';
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0};
+  size_t size = 0;
+  if (sysctl(mib, 4, NULL, &size, NULL, 0) || !size) return;
+  size += size / 4;
+  char *buf = malloc(size);
+  if (!buf) return;
+  if (sysctl(mib, 4, buf, &size, NULL, 0)) {
+    free(buf);
+    return;
+  }
+  size_t len = 0;
+  for (char *p = buf; p + sizeof(int) <= buf + size;) {
+    struct kinfo_proc *ki = (struct kinfo_proc *)p;
+    if (ki->ki_structsize <= 0) break;
+    char name[24];
+    snprintf(name, sizeof(name), "%.19s", ki->ki_comm);
+    /* once each */
+    char needle[28];
+    snprintf(needle, sizeof(needle), ", %s,", name);
+    char hay[4096 + 8];
+    snprintf(hay, sizeof(hay), ", %s,", out);
+    if (name[0] && !strstr(hay, needle) && len + strlen(name) + 3 < n) {
+      len += (size_t)snprintf(out + len, n - len, "%s%s", len ? ", " : "", name);
+    }
+    p += ki->ki_structsize;
+  }
+  free(buf);
+}
+
 int plat_running_game(char *title_id, size_t n, uint32_t *app_id) {
   int (*big)(void) = sysfn("sceLncUtilGetAppIdOfRunningBigApp");
   if (!big) big = sysfn("sceSystemServiceGetAppIdOfRunningBigApp");

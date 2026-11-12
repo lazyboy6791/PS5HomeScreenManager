@@ -108,7 +108,55 @@ int plat_app_id(const char *title_id, uint32_t *app_id) {
   return -1;
 }
 
+int plat_close_browser(char *report, size_t n) {
+  /* tests: HH_BROWSER_PROC=none means the browser's process isn't running */
+  const char *e = getenv("HH_BROWSER_PROC");
+  if (e && !strcmp(e, "none")) {
+    snprintf(report, n, "no SceNKUIProcess is running");
+    return -1;
+  }
+  snprintf(report, n, "SceNKUIProcess pid 4242: SIGTERM sent; gone after SIGTERM");
+  printf("[lnc] would end the browser process\n");
+  fflush(stdout);
+  return 0;
+}
+
+void plat_browser_diag(char *out, size_t n) {
+  snprintf(out, n, "host test build: by title NPXS40169: %s; ", getenv("HH_BROWSER_TITLE") ? "as set" : "app 60000001");
+}
+
+void plat_process_names(char *out, size_t n) {
+  snprintf(out, n, "SceShellUI, SceShellCore, SceWebBrowser, SceGame");
+}
+
+int plat_browser_app(uint32_t *app_id, char *title, size_t n) {
+  /* tests: HH_BROWSER_TITLE = the browser's title id, or "none" (not found) */
+  const char *t = getenv("HH_BROWSER_TITLE");
+  if (t && !strcmp(t, "none")) {
+    title[0] = '\0';
+    return -1;
+  }
+  snprintf(title, n, "%s", t ? t : "NPXS40169");
+  *app_id = 0x60000001;
+  return 0;
+}
+
 int plat_running_game(char *title_id, size_t n, uint32_t *app_id) {
+  /* tests: HH_RUNNING_FILE names a file holding the running game's title id
+   * (empty or missing = none), so a game can "close" without a launch */
+  const char *rf = getenv("HH_RUNNING_FILE");
+  if (rf) {
+    char b[32] = "";
+    FILE *fp = fopen(rf, "r");
+    if (fp) {
+      if (fgets(b, sizeof(b), fp)) b[strcspn(b, "\r\n ")] = '\0';
+      fclose(fp);
+    }
+    if (!b[0]) return -1;
+    snprintf(title_id, n, "%s", b);
+    *app_id = 0x1000;
+    return 0;
+  }
   game_init();
   if (!g_game[0]) return -1;
   snprintf(title_id, n, "%s", g_game);

@@ -31,7 +31,9 @@ int  launch_web_url(hh_t *h, const char *tid, char *url, size_t n);
 /* Starts a launch job. name = title shown in messages; close_running =
  * close the game that is running first (after the user said OK). Returns
  * the job id (> 0), or -1 if the previous job is still running. */
-int  launch_start(const char *tid, const char *name, int close_running);
+/* close_browser (experimental): once the game is on its way, also close the
+ * PS5 browser app (the folder page runs in it and otherwise stays in front). */
+int  launch_start(const char *tid, const char *name, int close_running, int close_browser);
 
 /* JSON for /api/launch_status. name_of looks up a title's name (called on
  * the caller's thread, for the "another game is running" answer). */

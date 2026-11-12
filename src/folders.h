@@ -4,7 +4,8 @@
  * <app_dir>/HHFDnnnnn with a param.json whose deeplink opens
  * http://127.0.0.1:<port>/folder/HHFDnnnnn in the PS5 browser. The games put
  * in a folder are hidden from the home screen with the normal hide mechanism,
- * and shown again when they leave the folder (unless they were hidden before).
+ * and shown again when they leave their last folder (unless they were hidden
+ * before). A game can be in any number of folders.
  */
 #pragma once
 
@@ -40,8 +41,9 @@ int  folders_save(hh_t *h, const char *tid, const char *name, const char *tab,
 int  folders_delete(hh_t *h, const char *tid);
 /* Moves a folder's tile to the Games or Media tab. */
 int  folders_set_tab(hh_t *h, const char *tid, const char *tab);
-/* Takes one app out of its folder, leaving it on its tab. */
-int  folders_remove_member(hh_t *h, const char *tid);
+/* Takes one app out of a folder. It goes back on its tab when it is out of its
+ * last folder. folder may be NULL or "" if the app is in only one folder. */
+int  folders_remove_member(hh_t *h, const char *tid, const char *folder);
 /* img == NULL goes back to the automatic collage. */
 int  folders_set_icon(hh_t *h, const char *tid, const unsigned char *img, size_t len);
 /* Home screen background for the folder tile (sce_sys/pic0.dds). img NULL
@@ -57,5 +59,5 @@ int  folders_icon_path(const char *tid, char *out, size_t outsz);
 int  folders_reapply(hh_t *h, int *fixed);
 /* Uninstalls every folder tile (used before restoring the original database). */
 void folders_remove_all_tiles(hh_t *h);
-/* Folder id holding tid ("" if none). */
+/* The first folder holding tid ("" if none); a game can be in several. */
 int  folders_of_title(hh_t *h, const char *tid, char *out, size_t outsz);
