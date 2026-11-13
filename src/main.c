@@ -1,4 +1,4 @@
-/* Home Hider - hide PS5 home screen tiles without deleting anything.
+/* Home Screen Manager - hide PS5 home screen tiles without deleting anything.
  *
  * Launch from Payload Manager. The ELF starts a small web server and opens
  * its menu in the PS5 browser. The same menu is reachable from any phone or
@@ -20,6 +20,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <dirent.h>
+#include "backup.h"
+#include "datadir.h"
 #include "hider.h"
 #include "arrange.h"
 #include "tabs.h"
@@ -56,16 +59,28 @@ typedef struct {
                          start after boot (Autoload), menu on later starts */
   int  reapply;       /* re-hide tiles the system brought back, at launch */
   int  auto_check;    /* look for updates (GitHub/USB) at launch */
-  int  live;          /* start LiveShell (live wallpaper) with Home Hider */
+  int  live;          /* start LiveShell (live wallpaper) with Home Screen Manager */
   int  folders_first; /* keep the folders in the first spots of their tab */
   int  show_running;  /* a running game's tile stays on screen (so it can be closed from the row) */
   int  folder_header; /* folder page: show the folder's picture and name at the top */
   int  folder_bar;    /* folder page: show the row with the count and the sort button */
-  int  close_browser; /* experimental: close the PS5 browser when a game is started from the folder page */
+  int  folder_edit;   /* folder page: show the "Edit this folder in Home Screen Manager" link under the games */
+  int  folder_debug;  /* folder page: show what the controller sends (for testing) */
   char repo[128];     /* GitHub "owner/name" for updates */
 } settings_t;
 
-static settings_t g_cfg = {1, 1, 1, 0, 0, 1, 0, 1, 0, HH_DEFAULT_REPO};
+/* Set when a folder was created or really changed and the home screen should be
+ * restarted to show it. The background thread does it (after putting the tile
+ * positions right), so two database passes never run at once. */
+static volatile int g_refresh_request;
+static volatile int g_import_running; /* an import is running: folder changes wait */
+static void request_home_refresh(void) { g_refresh_request = 1; }
+
+/* The repository used when none is saved (set at build time; empty = none). An empty value
+ * saved in the settings means "use this one". */
+static const char *g_default_repo = HH_DEFAULT_REPO;
+
+static settings_t g_cfg = {1, 1, 1, 0, 0, 1, 1, 1, 1, 0, HH_DEFAULT_REPO};
 static char g_pldmgr_dir[256];
 static char g_usb_fmt[256];
 static char g_github_api[128];
@@ -84,14 +99,19 @@ static int g_arrange_fixed = 0;
 /* paths & settings                                                          */
 /* ------------------------------------------------------------------------- */
 
+static char g_data_note[400]; /* what happened to the data folder at start, for the log */
+
 static void setup_paths(void) {
-  const char *data = "/data/homehider";
+  const char *data = "/data/homescreenmanager";
+  const char *legacy = "/data/homehider"; /* where the data was before the app was renamed */
   const char *app = "/system_data/priv/mms/app.db";
   const char *pldmgr = "/data/pldmgr/payloads";
   const char *usb = "/mnt/usb%d";
   const char *api = "https://api.github.com";
 #ifdef HH_HOST
   if (getenv("HH_DATA_DIR")) data = getenv("HH_DATA_DIR");
+  legacy = getenv("HH_LEGACY_DATA_DIR"); /* tests only: on a PC nothing is moved unless asked */
+  if (getenv("HH_DEFAULT_REPO")) g_default_repo = getenv("HH_DEFAULT_REPO"); /* tests */
   if (getenv("HH_APP_DB")) app = getenv("HH_APP_DB");
   if (getenv("HH_PLDMGR_DIR")) pldmgr = getenv("HH_PLDMGR_DIR");
   /* test override: must hold exactly one %d and no other conversions */
@@ -116,6 +136,9 @@ static void setup_paths(void) {
   if (getenv("HH_APPMETA_DIR")) appmeta = getenv("HH_APPMETA_DIR");
 #endif
   snprintf(g_appmeta_dir, sizeof(g_appmeta_dir), "%s", appmeta);
+  /* the data folder was renamed: move the old one over (nothing is lost if that fails) */
+  if (legacy && legacy[0] && datadir_move(legacy, data, g_data_note, sizeof(g_data_note)) < 0) data = legacy;
+  snprintf(g_cfg.repo, sizeof(g_cfg.repo), "%s", g_default_repo);
   snprintf(g_data_dir, sizeof(g_data_dir), "%s", data);
   snprintf(g_app_db, sizeof(g_app_db), "%s", app);
   snprintf(g_state_db, sizeof(g_state_db), "%s/state.db", g_data_dir);
@@ -142,9 +165,10 @@ static void load_settings(void) {
     if (sscanf(line, "show_running=%d", &v) == 1) g_cfg.show_running = v ? 1 : 0;
     if (sscanf(line, "folder_header=%d", &v) == 1) g_cfg.folder_header = v ? 1 : 0;
     if (sscanf(line, "folder_bar=%d", &v) == 1) g_cfg.folder_bar = v ? 1 : 0;
-    if (sscanf(line, "close_browser=%d", &v) == 1) g_cfg.close_browser = v ? 1 : 0;
-    if (!strncmp(line, "repo=", 5) && strlen(line + 5) < sizeof(g_cfg.repo) &&
-        upd_valid_repo(line + 5))
+    if (sscanf(line, "folder_edit=%d", &v) == 1) g_cfg.folder_edit = v ? 1 : 0;
+    if (sscanf(line, "folder_debug=%d", &v) == 1) g_cfg.folder_debug = v ? 1 : 0;
+    if (!strncmp(line, "repo=", 5) && line[5] && strlen(line + 5) < sizeof(g_cfg.repo) &&
+        upd_valid_repo(line + 5)) /* an empty value means "the default" */
       memcpy(g_cfg.repo, line + 5, strlen(line + 5) + 1);
   }
   fclose(f);
@@ -156,9 +180,9 @@ static int save_settings(void) {
   FILE *f = fopen(tmp, "w");
   if (!f) return -1;
   fprintf(f, "open_browser=%d\nreapply=%d\nauto_check=%d\nlive=%d\nfolders_first=%d\nshow_running=%d\n"
-             "folder_header=%d\nfolder_bar=%d\nclose_browser=%d\nrepo=%s\n",
+             "folder_header=%d\nfolder_bar=%d\nfolder_edit=%d\nfolder_debug=%d\nrepo=%s\n",
           g_cfg.open_browser, g_cfg.reapply, g_cfg.auto_check, g_cfg.live, g_cfg.folders_first,
-          g_cfg.show_running, g_cfg.folder_header, g_cfg.folder_bar, g_cfg.close_browser, g_cfg.repo);
+          g_cfg.show_running, g_cfg.folder_header, g_cfg.folder_bar, g_cfg.folder_edit, g_cfg.folder_debug, g_cfg.repo);
   fclose(f);
   return rename(tmp, g_settings);
 }
@@ -216,12 +240,14 @@ static void handle_status(int fd) {
   sb_json_str(&sb, ip);
   sb_printf(&sb, ",\"settings\":{\"open_browser\":%d,\"reapply\":%s,\"auto_check\":%s,"
                  "\"folders_first\":%s,\"show_running\":%s,\"folder_header\":%s,\"folder_bar\":%s,"
-                 "\"close_browser\":%s,\"repo\":",
+                 "\"folder_edit\":%s,\"folder_debug\":%s,\"repo\":",
             g_cfg.open_browser, g_cfg.reapply ? "true" : "false",
             g_cfg.auto_check ? "true" : "false", g_cfg.folders_first ? "true" : "false",
             g_cfg.show_running ? "true" : "false", g_cfg.folder_header ? "true" : "false",
-            g_cfg.folder_bar ? "true" : "false", g_cfg.close_browser ? "true" : "false");
+            g_cfg.folder_bar ? "true" : "false", g_cfg.folder_edit ? "true" : "false", g_cfg.folder_debug ? "true" : "false");
   sb_json_str(&sb, g_cfg.repo);
+  sb_puts(&sb, ",\"default_repo\":");
+  sb_json_str(&sb, g_default_repo);
   sb_puts(&sb, "}");
   sb_printf(&sb, ",\"released_locked\":%d,\"folders_fixed\":%d,\"updated_to\":", g_released,
             g_folders_fixed);
@@ -326,9 +352,7 @@ static void handle_launch(int fd, const char *query) {
     return;
   }
 
-  /* only when the page runs in the PS5's own browser (local): from a phone or PC there is
-   * no browser on the console to close */
-  int job = launch_start(tid, name, close_running, g_cfg.close_browser && local);
+  int job = launch_start(tid, name, close_running);
   if (job < 0) {
     send_error(fd, 409, "Still starting the last game. Try again in a moment.");
     return;
@@ -466,6 +490,10 @@ static void handle_tab_move(int fd, const char *query) {
 }
 
 static void handle_folder_take_out(int fd, const char *query) {
+  if (g_import_running) {
+    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    return;
+  }
   char tid[32];
   if (http_query_get(query, "id", tid, sizeof(tid)) || !hh_valid_tid(tid)) {
     send_error(fd, 400, "Missing or invalid title id.");
@@ -672,10 +700,11 @@ static void handle_settings(int fd, const char *query) {
     while (n && (r[n - 1] == '/' || r[n - 1] == ' ')) r[--n] = '\0';
     if (n > 4 && !strcmp(r + n - 4, ".git")) r[n - 4] = '\0';
     if (!upd_valid_repo(r)) {
-      send_error(fd, 400, "Use the form owner/name, for example yourname/HomeHider.");
+      send_error(fd, 400, "Use the form owner/name, for example yourname/HomeScreenManager.");
       return;
     }
-    memcpy(g_cfg.repo, r, strlen(r) + 1); /* upd_valid_repo caps it at 100 */
+    if (n) memcpy(g_cfg.repo, r, strlen(r) + 1); /* upd_valid_repo caps it at 100 */
+    else snprintf(g_cfg.repo, sizeof(g_cfg.repo), "%s", g_default_repo); /* cleared: back to the default */
     upd_set_repo(g_cfg.repo);
   }
   if (!http_query_get(query, "open_browser", v, sizeof(v)))
@@ -685,7 +714,8 @@ static void handle_settings(int fd, const char *query) {
   if (!http_query_get(query, "show_running", v, sizeof(v))) g_cfg.show_running = atoi(v) ? 1 : 0;
   if (!http_query_get(query, "folder_header", v, sizeof(v))) g_cfg.folder_header = atoi(v) ? 1 : 0;
   if (!http_query_get(query, "folder_bar", v, sizeof(v))) g_cfg.folder_bar = atoi(v) ? 1 : 0;
-  if (!http_query_get(query, "close_browser", v, sizeof(v))) g_cfg.close_browser = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "folder_edit", v, sizeof(v))) g_cfg.folder_edit = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "folder_debug", v, sizeof(v))) g_cfg.folder_debug = atoi(v) ? 1 : 0;
   if (!http_query_get(query, "folders_first", v, sizeof(v))) {
     int on = atoi(v) ? 1 : 0;
     if (on != g_cfg.folders_first) {
@@ -852,7 +882,7 @@ static void handle_update_upload(int fd, http_req_t *r) {
   size_t len = 0;
   int rc = http_read_body(fd, r, &body, &len, UPD_MAX_ELF);
   if (rc == -2) {
-    send_error(fd, 413, "Send a Home Hider .elf file (up to 32 MB).");
+    send_error(fd, 413, "Send a Home Screen Manager .elf file (up to 32 MB).");
     return;
   }
   if (rc) {
@@ -900,15 +930,156 @@ static void handle_folder(int fd, const char *query) {
   if (folders_get_json(&h, id, &sb)) send_error(fd, 404, h.err);
   else {
     /* how the folder page is laid out (the page is one fixed file) */
-    sb_printf(&sb, ",\"page\":{\"header\":%s,\"bar\":%s}}", g_cfg.folder_header ? "true" : "false",
-              g_cfg.folder_bar ? "true" : "false");
+    sb_printf(&sb, ",\"page\":{\"header\":%s,\"bar\":%s,\"edit\":%s,\"debug\":%s}}", g_cfg.folder_header ? "true" : "false",
+              g_cfg.folder_bar ? "true" : "false", g_cfg.folder_edit ? "true" : "false", g_cfg.folder_debug ? "true" : "false");
     send_json(fd, 200, &sb);
   }
   sb_free(&sb);
   hh_close(&h);
 }
 
+/* ---- saving a folder in the background ----
+ * Adding a folder's tile goes through the console's installer, which takes about
+ * 90 seconds on newer firmware. With ?async=1 the save runs on its own thread and
+ * the answer comes at once ({"job":N}); the menu then asks /api/folders/job until
+ * it is done. Without it the save is answered when it has finished, as before. */
+static void sb_error_json(strbuf_t *sb, const char *msg) {
+  sb_puts(sb, "{\"ok\":false,\"error\":");
+  sb_json_str(sb, msg);
+  sb_puts(sb, "}");
+}
+
+/* the answer for a folder that was saved (the same for both ways of asking) */
+static void sb_saved_json(strbuf_t *sb, hh_t *h, const char *out_id, const char *note, int changed) {
+  sb_printf(sb, "{\"ok\":true,\"id\":\"%s\",\"changed\":%s,\"note\":", out_id, changed ? "true" : "false");
+  sb_json_str(sb, note[0] ? note : NULL);
+  sb_puts(sb, ",\"folder\":");
+  folders_get_json(h, out_id, sb);
+  sb_puts(sb, "}");
+}
+
+typedef struct {
+  char id[32], name[256], tab[16], color[16];
+  char *items;
+  int  refresh;  /* restart the home screen when this is done (if anything changed) */
+} fjob_args_t;
+
+static struct {
+  pthread_mutex_t mx;
+  int  last;     /* number of the latest job */
+  int  running;
+  int  done;
+  char *result;  /* the JSON answer of the latest job */
+} FJ = {PTHREAD_MUTEX_INITIALIZER, 0, 0, 0, NULL};
+
+static void *folder_job_worker(void *arg) {
+  fjob_args_t *a = arg;
+  strbuf_t sb;
+  sb_init(&sb);
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    sb_error_json(&sb, h.err);
+  } else {
+    char out_id[16] = "", note[200] = "";
+    int changed = 1;
+    if (folders_save(&h, a->id, a->name, a->tab, a->color, a->items, out_id, note, sizeof(note), &changed)) {
+      hh_log("folder job: not saved: %s", h.err);
+      sb_error_json(&sb, h.err);
+    } else {
+      sb_saved_json(&sb, &h, out_id, note, changed);
+      if (a->refresh && changed) request_home_refresh();
+    }
+    hh_close(&h);
+  }
+  char *res = NULL;
+  if (!sb.oom && sb.data) {
+    res = malloc(sb.len + 1);
+    if (res) {
+      memcpy(res, sb.data, sb.len);
+      res[sb.len] = '\0';
+    }
+  }
+  if (!res) res = strdup("{\"ok\":false,\"error\":\"Out of memory.\"}");
+  sb_free(&sb);
+  pthread_mutex_lock(&FJ.mx);
+  free(FJ.result);
+  FJ.result = res;
+  FJ.running = 0;
+  FJ.done = 1;
+  pthread_mutex_unlock(&FJ.mx);
+  free(a->items);
+  free(a);
+  return NULL;
+}
+
+/* job number, -1 if another folder change is still running, -2 if out of memory */
+static int folder_job_start(const char *id, const char *name, const char *tab, const char *color,
+                            const char *items, int refresh) {
+  pthread_mutex_lock(&FJ.mx);
+  if (FJ.running) {
+    pthread_mutex_unlock(&FJ.mx);
+    return -1;
+  }
+  fjob_args_t *a = calloc(1, sizeof(*a));
+  if (a) a->items = strdup(items);
+  if (!a || !a->items) {
+    if (a) free(a->items);
+    free(a);
+    pthread_mutex_unlock(&FJ.mx);
+    return -2;
+  }
+  snprintf(a->id, sizeof(a->id), "%s", id);
+  snprintf(a->name, sizeof(a->name), "%s", name);
+  snprintf(a->tab, sizeof(a->tab), "%s", tab);
+  snprintf(a->color, sizeof(a->color), "%s", color);
+  a->refresh = refresh;
+  pthread_t t;
+  if (pthread_create(&t, NULL, folder_job_worker, a) != 0) {
+    free(a->items);
+    free(a);
+    pthread_mutex_unlock(&FJ.mx);
+    return -2;
+  }
+  pthread_detach(t);
+  FJ.last++;
+  FJ.running = 1;
+  FJ.done = 0;
+  free(FJ.result);
+  FJ.result = NULL;
+  int job = FJ.last;
+  pthread_mutex_unlock(&FJ.mx);
+  return job;
+}
+
+static void handle_folder_job(int fd, const char *query) {
+  char v[16] = "";
+  http_query_get(query, "job", v, sizeof(v));
+  int job = atoi(v);
+  strbuf_t sb;
+  sb_init(&sb);
+  int code = 200;
+  pthread_mutex_lock(&FJ.mx);
+  if (job <= 0 || job != FJ.last) {
+    code = 404;
+    sb_error_json(&sb, "Unknown folder job.");
+  } else if (FJ.running || !FJ.done) {
+    sb_puts(&sb, "{\"ok\":true,\"done\":false}");
+  } else {
+    sb_puts(&sb, "{\"ok\":true,\"done\":true,\"result\":");
+    sb_puts(&sb, FJ.result ? FJ.result : "{\"ok\":false,\"error\":\"No result.\"}");
+    sb_puts(&sb, "}");
+  }
+  pthread_mutex_unlock(&FJ.mx);
+  send_json(fd, code, &sb);
+  sb_free(&sb);
+}
+
 static void handle_folder_save(int fd, http_req_t *r) {
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    return;
+  }
   unsigned char *body = NULL;
   size_t len = 0;
   if (http_read_body(fd, r, &body, &len, 64 * 1024)) {
@@ -940,6 +1111,27 @@ static void handle_folder_save(int fd, http_req_t *r) {
   http_query_get(form, "items", items, len + 1);
   free(form);
 
+  char av[8] = "", rv[8] = "";
+  int refresh = !http_query_get(r->query, "refresh", rv, sizeof(rv)) && atoi(rv);
+  if (!http_query_get(r->query, "async", av, sizeof(av)) && atoi(av)) {
+    int job = folder_job_start(id, name, tab, color, items, refresh);
+    free(items);
+    if (job == -1) {
+      send_error(fd, 409, "Another folder change is still being made. Please wait until it has finished.");
+    } else if (job < 0) {
+      send_error(fd, 500, "Out of memory.");
+    } else {
+      strbuf_t sb;
+      sb_init(&sb);
+      sb_printf(&sb, "{\"ok\":true,\"job\":%d,\"id\":", job);
+      sb_json_str(&sb, id);
+      sb_puts(&sb, "}");
+      send_json(fd, 200, &sb);
+      sb_free(&sb);
+    }
+    return;
+  }
+
   hh_t h;
   if (hh_open(&h, g_app_db, g_state_db)) {
     free(items);
@@ -947,24 +1139,26 @@ static void handle_folder_save(int fd, http_req_t *r) {
     return;
   }
   char out_id[16] = "", note[200] = "";
-  if (folders_save(&h, id, name, tab, color, items, out_id, note, sizeof(note))) {
+  int changed = 1;
+  if (folders_save(&h, id, name, tab, color, items, out_id, note, sizeof(note), &changed)) {
     send_error(fd, 409, h.err);
   } else {
     strbuf_t sb;
     sb_init(&sb);
-    sb_printf(&sb, "{\"ok\":true,\"id\":\"%s\",\"note\":", out_id);
-    sb_json_str(&sb, note[0] ? note : NULL);
-    sb_puts(&sb, ",\"folder\":");
-    folders_get_json(&h, out_id, &sb);
-    sb_puts(&sb, "}");
+    sb_saved_json(&sb, &h, out_id, note, changed);
     send_json(fd, 200, &sb);
     sb_free(&sb);
+    if (refresh && changed) request_home_refresh();
   }
   free(items);
   hh_close(&h);
 }
 
 static void handle_folder_delete(int fd, const char *query) {
+  if (g_import_running) {
+    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    return;
+  }
   char id[32] = "";
   http_query_get(query, "id", id, sizeof(id));
   hh_t h;
@@ -978,6 +1172,11 @@ static void handle_folder_delete(int fd, const char *query) {
 }
 
 static void handle_folder_icon_set(int fd, http_req_t *r) {
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    return;
+  }
   char id[32] = "", v[8];
   http_query_get(r->query, "id", id, sizeof(id));
   int reset = !http_query_get(r->query, "reset", v, sizeof(v)) && atoi(v);
@@ -1006,8 +1205,14 @@ static void handle_folder_icon_set(int fd, http_req_t *r) {
     send_error(fd, 500, h.err);
     return;
   }
-  if (folders_set_icon(&h, id, reset ? NULL : body, len)) send_error(fd, 409, h.err);
-  else send_ok(fd, reset ? "Back to the automatic icon." : "Folder picture updated.");
+  char rv[8] = "";
+  int want_refresh = !http_query_get(r->query, "refresh", rv, sizeof(rv)) && atoi(rv);
+  if (folders_set_icon(&h, id, reset ? NULL : body, len)) {
+    send_error(fd, 409, h.err);
+  } else {
+    send_ok(fd, reset ? "Back to the automatic icon." : "Folder picture updated.");
+    if (want_refresh) request_home_refresh();
+  }
   free(body);
   hh_close(&h);
 }
@@ -1128,6 +1333,11 @@ static void handle_custom_bg_get(int fd, const char *query) {
 }
 
 static void handle_folder_bg_set(int fd, http_req_t *r) {
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    return;
+  }
   char id[32] = "", v[8];
   http_query_get(r->query, "id", id, sizeof(id));
   int reset = !http_query_get(r->query, "reset", v, sizeof(v)) && atoi(v);
@@ -1140,8 +1350,14 @@ static void handle_folder_bg_set(int fd, http_req_t *r) {
     send_error(fd, 500, h.err);
     return;
   }
-  if (folders_set_bg(&h, id, reset ? NULL : body, len)) send_error(fd, 409, h.err);
-  else send_ok(fd, reset ? "Background removed." : "Background saved.");
+  char rv[8] = "";
+  int want_refresh = !http_query_get(r->query, "refresh", rv, sizeof(rv)) && atoi(rv);
+  if (folders_set_bg(&h, id, reset ? NULL : body, len)) {
+    send_error(fd, 409, h.err);
+  } else {
+    send_ok(fd, reset ? "Background removed." : "Background saved.");
+    if (want_refresh) request_home_refresh();
+  }
   free(body);
   hh_close(&h);
 }
@@ -1194,6 +1410,329 @@ static void handle_folder_icon(int fd, const char *query) {
     http_send_text(fd, 404, "text/plain", "no icon");
 }
 
+/* ------------------------------------------------------------------------- */
+/* export and import of everything the manager manages                       */
+/* ------------------------------------------------------------------------- */
+
+#define IMPORT_MAX_BYTES (128u * 1024 * 1024)
+
+static struct {
+  backup_t *pending; /* an opened file waiting for the Import button */
+  int token, job;
+  volatile int done;
+  backup_progress_t prog;
+  char result[1600];
+  time_t t0;
+} g_imp;
+static pthread_mutex_t g_imp_mx = PTHREAD_MUTEX_INITIALIZER;
+
+static int dir_exists(const char *p) {
+  struct stat st;
+  return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int usb_root(int i, char *out, size_t n) {
+  if ((size_t)snprintf(out, n, g_usb_fmt, i) >= n) return 0;
+  return dir_exists(out);
+}
+
+static void backup_file_name(char *out, size_t n) {
+  time_t now = time(NULL);
+  struct tm tm;
+  char stamp[32] = "";
+  if (localtime_r(&now, &tm)) strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M", &tm);
+  snprintf(out, n, "HomeScreenManager-backup-%s.zip", stamp);
+}
+
+static int make_backup(strbuf_t *sb, char *err, size_t errsz) {
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    snprintf(err, errsz, "%.150s", h.err);
+    return -1;
+  }
+  int rc = backup_export(&h, g_settings, sb);
+  hh_close(&h);
+  if (rc) snprintf(err, errsz, "Couldn't make the backup file.");
+  return rc;
+}
+
+static void handle_export_download(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  char err[200], name[96], hdr[200];
+  if (make_backup(&sb, err, sizeof(err))) {
+    sb_free(&sb);
+    send_error(fd, 500, err);
+    return;
+  }
+  backup_file_name(name, sizeof(name));
+  snprintf(hdr, sizeof(hdr), "Content-Disposition: attachment; filename=\"%s\"\r\n", name);
+  http_send(fd, 200, "application/zip", sb.data, sb.len, hdr);
+  sb_free(&sb);
+}
+
+static void handle_export_usb(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  char err[200], name[96], root[260], path[400];
+  if (make_backup(&sb, err, sizeof(err))) {
+    sb_free(&sb);
+    send_error(fd, 500, err);
+    return;
+  }
+  backup_file_name(name, sizeof(name));
+  int saved = 0;
+  for (int i = 0; i < 8 && !saved; i++) {
+    if (!usb_root(i, root, sizeof(root))) continue;
+    snprintf(path, sizeof(path), "%s/%s", root, name);
+    FILE *f = fopen(path, "wb");
+    if (!f) continue;
+    size_t w = fwrite(sb.data, 1, sb.len, f);
+    int closed = fclose(f) == 0;
+    struct stat st;
+    if (w == sb.len && closed && stat(path, &st) == 0 && (size_t)st.st_size == sb.len) saved = 1;
+    else unlink(path);
+  }
+  if (!saved) {
+    sb_free(&sb);
+    send_error(fd, 409, "Couldn't write to a USB drive. Plug one in (exFAT or FAT32), then try again.");
+    return;
+  }
+  hh_log("export: backup written to %s (%zu bytes)", path, sb.len);
+  strbuf_t js;
+  sb_init(&js);
+  sb_puts(&js, "{\"ok\":true,\"path\":");
+  sb_json_str(&js, path);
+  sb_printf(&js, ",\"size\":%zu}", sb.len);
+  send_json(fd, 200, &js);
+  sb_free(&js);
+  sb_free(&sb);
+}
+
+static int ends_with_zip(const char *s) {
+  size_t n = strlen(s);
+  return n > 4 && !strcasecmp(s + n - 4, ".zip");
+}
+
+static void handle_import_usb_files(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"files\":[");
+  int first = 1;
+  for (int i = 0; i < 8; i++) {
+    char root[260];
+    if (!usb_root(i, root, sizeof(root))) continue;
+    DIR *d = opendir(root);
+    if (!d) continue;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+      if (!ends_with_zip(e->d_name) || strncasecmp(e->d_name, "HomeScreenManager-backup", 24)) continue;
+      char path[400];
+      struct stat st;
+      if ((size_t)snprintf(path, sizeof(path), "%s/%s", root, e->d_name) >= sizeof(path) || stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+        continue;
+      sb_printf(&sb, "%s{\"path\":", first ? "" : ",");
+      sb_json_str(&sb, path);
+      sb_puts(&sb, ",\"name\":");
+      sb_json_str(&sb, e->d_name);
+      sb_printf(&sb, ",\"size\":%lld}", (long long)st.st_size);
+      first = 0;
+    }
+    closedir(d);
+  }
+  sb_puts(&sb, "]}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+/* only a .zip on one of the USB drives, with no ".." in the way */
+static int usb_zip_path_ok(const char *path) {
+  if (!ends_with_zip(path) || strstr(path, "..")) return 0;
+  for (int i = 0; i < 8; i++) {
+    char root[260];
+    if (!usb_root(i, root, sizeof(root))) continue;
+    size_t rl = strlen(root);
+    if (!strncmp(path, root, rl) && path[rl] == '/') return 1;
+  }
+  return 0;
+}
+
+static void handle_import_inspect(int fd, http_req_t *r) {
+  char usb[400] = "";
+  http_query_get(r->query, "usb", usb, sizeof(usb));
+  unsigned char *body = NULL;
+  size_t len = 0;
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    return;
+  }
+  if (usb[0]) {
+    http_drain(fd, r);
+    struct stat st;
+    FILE *f = usb_zip_path_ok(usb) && stat(usb, &st) == 0 && S_ISREG(st.st_mode) && (size_t)st.st_size <= IMPORT_MAX_BYTES
+                  ? fopen(usb, "rb")
+                  : NULL;
+    if (!f) {
+      send_error(fd, 400, "That backup file isn't on a USB drive any more. Plug the drive back in and try again.");
+      return;
+    }
+    body = malloc((size_t)st.st_size + 1);
+    len = body ? fread(body, 1, (size_t)st.st_size, f) : 0;
+    fclose(f);
+    if (!body || len != (size_t)st.st_size) {
+      free(body);
+      send_error(fd, 500, "Couldn't read the backup file from the USB drive.");
+      return;
+    }
+  } else {
+    int rc = http_read_body(fd, r, &body, &len, IMPORT_MAX_BYTES);
+    if (rc) {
+      send_error(fd, rc == -2 ? 413 : 400, "Send the backup file (a .zip of up to 128 MB).");
+      return;
+    }
+  }
+  char err[240] = "";
+  backup_t *b = backup_open(body, len, err, sizeof(err));
+  if (!b) {
+    free(body);
+    send_error(fd, 400, err[0] ? err : "That isn't a Home Screen Manager backup file.");
+    return;
+  }
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    backup_close(b);
+    send_error(fd, 500, h.err);
+    return;
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  backup_summary_json(&h, b, &sb);
+  hh_close(&h);
+  pthread_mutex_lock(&g_imp_mx);
+  backup_close(g_imp.pending);
+  g_imp.pending = b;
+  int token = ++g_imp.token;
+  pthread_mutex_unlock(&g_imp_mx);
+  if (sb.len && sb.data[sb.len - 1] == '}') sb.len--; /* add the token to the object */
+  sb_printf(&sb, ",\"token\":%d}", token);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+/* the backup's settings.txt replaces the current settings file and is loaded */
+static int import_settings(const char *text, size_t len) {
+  char tmp[420];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", g_settings);
+  FILE *f = fopen(tmp, "w");
+  if (!f) return -1;
+  size_t w = fwrite(text, 1, len, f);
+  int closed = fclose(f) == 0;
+  if (w != len || !closed || rename(tmp, g_settings) != 0) {
+    unlink(tmp);
+    return -1;
+  }
+  load_settings();
+  upd_set_repo(g_cfg.repo);
+  return 0;
+}
+
+static void *import_worker(void *arg) {
+  backup_t *b = arg;
+  hh_t h;
+  char err[240] = "";
+  int rc = -1;
+  if (hh_open(&h, g_app_db, g_state_db) == 0) {
+    folders_hold(1);
+    rc = backup_apply(&h, b, &g_imp.prog, import_settings, err, sizeof(err));
+    folders_hold(0);
+    hh_close(&h);
+  } else {
+    snprintf(err, sizeof(err), "%.200s", h.err);
+  }
+  backup_close(b);
+  strbuf_t sb;
+  sb_init(&sb);
+  const backup_progress_t *p = &g_imp.prog;
+  if (rc == 0) {
+    sb_printf(&sb, "{\"ok\":true,\"folders_made\":%d,\"folders_skipped\":%d,\"hidden\":%d,\"custom\":%d,\"order\":%d,\"settings\":%s,\"problems\":%d,\"notes\":",
+              p->folders_made, p->folders_skipped, p->hidden_done, p->custom_done, p->order_done, p->settings_done ? "true" : "false",
+              p->problems);
+    sb_json_str(&sb, p->notes);
+    sb_puts(&sb, "}");
+    hh_log("import: %d folder(s) made, %d skipped, %d hidden, %d custom, order %d, %d problem(s)%s%s", p->folders_made,
+           p->folders_skipped, p->hidden_done, p->custom_done, p->order_done, p->problems, p->notes[0] ? ": " : "", p->notes);
+  } else {
+    sb_puts(&sb, "{\"ok\":false,\"error\":");
+    sb_json_str(&sb, err);
+    sb_puts(&sb, "}");
+    hh_log("import: not done: %s", err);
+  }
+  snprintf(g_imp.result, sizeof(g_imp.result), "%s", sb.data ? sb.data : "{\"ok\":false}");
+  sb_free(&sb);
+  if (rc == 0 && (p->folders_made || p->hidden_done || p->custom_done || p->order_done || p->settings_done)) request_home_refresh();
+  g_imp.done = 1;
+  g_import_running = 0;
+  return NULL;
+}
+
+static void handle_import_apply(int fd, const char *query) {
+  char v[16];
+  int token = http_query_get(query, "token", v, sizeof(v)) ? 0 : atoi(v);
+  if (g_import_running || folders_busy()) {
+    send_error(fd, 409, "Another change is still being made. Please wait until it has finished.");
+    return;
+  }
+  pthread_mutex_lock(&g_imp_mx);
+  backup_t *b = g_imp.pending;
+  int ok = b && token == g_imp.token;
+  if (ok) g_imp.pending = NULL;
+  pthread_mutex_unlock(&g_imp_mx);
+  if (!ok) {
+    send_error(fd, 409, "Choose the backup file again, then press Import.");
+    return;
+  }
+  memset(&g_imp.prog, 0, sizeof(g_imp.prog));
+  snprintf(g_imp.prog.phase, sizeof(g_imp.prog.phase), "Starting…");
+  g_imp.result[0] = '\0';
+  g_imp.done = 0;
+  g_imp.t0 = time(NULL);
+  g_imp.job++;
+  g_import_running = 1;
+  pthread_t t;
+  if (pthread_create(&t, NULL, import_worker, b) != 0) {
+    g_import_running = 0;
+    backup_close(b);
+    send_error(fd, 500, "Couldn't start the import.");
+    return;
+  }
+  pthread_detach(t);
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"job\":%d}", g_imp.job);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_import_job(int fd, const char *query) {
+  char v[16];
+  int job = http_query_get(query, "job", v, sizeof(v)) ? 0 : atoi(v);
+  if (job == 0 || job != g_imp.job) {
+    send_error(fd, 404, "Unknown import job.");
+    return;
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  int done = g_imp.done;
+  sb_printf(&sb, "{\"ok\":true,\"done\":%s,\"elapsed\":%ld,\"folder_i\":%d,\"folder_n\":%d,\"phase\":", done ? "true" : "false",
+            (long)(time(NULL) - g_imp.t0), g_imp.prog.folder_i, g_imp.prog.folder_n);
+  sb_json_str(&sb, g_imp.prog.phase);
+  if (done) sb_printf(&sb, ",\"result\":%s", g_imp.result[0] ? g_imp.result : "{\"ok\":false}");
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
 static void handle_client(int fd) {
   struct timeval tv = {5, 0};
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -1212,7 +1751,8 @@ static void handle_client(int fd) {
   int cbg = post && !strcmp(p, "/api/custom/bg");
   int fbg = post && !strcmp(p, "/api/folders/bg");
   int asave = post && !strcmp(p, "/api/arrange/save");
-  if (!upload && !fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave) http_drain(fd, &r);
+  int iinspect = post && !strcmp(p, "/api/import/inspect"); /* reads the backup file itself */
+  if (!upload && !fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave && !iinspect) http_drain(fd, &r);
 
   if (!strcmp(p, "/") || !strcmp(p, "/index.html")) {
     http_send(fd, 200, "text/html; charset=utf-8", WEBUI_HTML, WEBUI_HTML_LEN, NULL);
@@ -1255,6 +1795,14 @@ static void handle_client(int fd) {
     handle_live_thumb(fd, r.query);
   } else if (!strcmp(p, "/api/launch_status")) {
     handle_launch_status(fd, r.query);
+  } else if (!strcmp(p, "/api/folders/job")) {
+    handle_folder_job(fd, r.query);
+  } else if (!strcmp(p, "/api/import/job")) {
+    handle_import_job(fd, r.query);
+  } else if (!strcmp(p, "/api/import/usb_files")) {
+    handle_import_usb_files(fd);
+  } else if (!strcmp(p, "/api/export")) {
+    handle_export_download(fd);
   } else if (!strcmp(p, "/api/update/status")) {
     handle_update_status(fd);
   } else if (!strcmp(p, "/api/backup")) {
@@ -1263,6 +1811,12 @@ static void handle_client(int fd) {
     send_error(fd, 405, "Use POST for this action.");
   } else if (http_is_cross_origin(&r)) {
     send_error(fd, 403, "Requests from other web sites are not allowed.");
+  } else if (!strcmp(p, "/api/export/usb")) {
+    handle_export_usb(fd);
+  } else if (!strcmp(p, "/api/import/inspect")) {
+    handle_import_inspect(fd, &r);
+  } else if (!strcmp(p, "/api/import/apply")) {
+    handle_import_apply(fd, r.query);
   } else if (!strcmp(p, "/api/hide")) {
     handle_hide(fd, r.query, 1);
   } else if (!strcmp(p, "/api/unhide")) {
@@ -1328,7 +1882,7 @@ static void handle_client(int fd) {
 /* startup                                                                   */
 /* ------------------------------------------------------------------------- */
 
-/* Asks an already running Home Hider to exit so we can take over the port.
+/* Asks an already running Home Screen Manager to exit so we can take over the port.
  * Returns 1 if one was running. */
 static int stop_previous_instance(void) {
   int s = socket(AF_INET, SOCK_STREAM, 0);
@@ -1436,7 +1990,7 @@ static void watchdog_pass(hh_t *h) {
 
 /* The system makes a tile visible again after its game is played, which
  * un-hides games that are inside folders (and anything else on the hide
- * list), cluttering the home screen until Home Hider runs again. While Home
+ * list), cluttering the home screen until Home Screen Manager runs again. While Home
  * Hider is running, this thread re-hides them by itself every few seconds,
  * and keeps folders and the chosen order in place, so the home screen heals
  * without re-running the payload.
@@ -1454,7 +2008,7 @@ static void *rehide_watchdog(void *arg) {
   char prev[32];
   game_now(prev, sizeof(prev));
   while (g_running) {
-    int closed = 0;
+    int closed = 0, refresh = 0;
     char closed_tid[32] = "";
     for (int t = 0; t < 6000 && g_running; t += 250) {
       usleep(250000);
@@ -1466,7 +2020,8 @@ static void *rehide_watchdog(void *arg) {
         closed = 1;
       }
       snprintf(prev, sizeof(prev), "%s", now);
-      if (closed) break;
+      if (g_refresh_request) refresh = 1; /* a folder was created or changed */
+      if (closed || refresh) break;
     }
     if (!g_running) break;
     hh_t h;
@@ -1491,22 +2046,62 @@ static void *rehide_watchdog(void *arg) {
         if (i % 60 == 0) watchdog_pass(&h); /* and everything again at 1.5 s, 3 s and 4.5 s */
       }
     }
+    if (refresh) {
+      /* A folder was created or really changed. The console shuffles tiles while it works and
+       * may write a little after it is done, so: put the tile positions right, wait, put them
+       * right again, and only then restart the home screen, so that it reads the right layout. */
+      g_refresh_request = 0;
+      hh_log("home screen refresh: the folder change is done, putting the tile positions right first");
+      for (int i = 0; i < 8 && g_running; i++) usleep(250000);
+      watchdog_pass(&h);
+      hh_close(&h);
+      int rc = plat_reload_shellui();
+      hh_log("home screen refresh: restarting the home screen process%s", rc ? " (the process wasn't found)" : "");
+      continue;
+    }
     hh_close(&h);
   }
   return NULL;
 }
 
+/* After asking an older copy to quit: wait (up to 3 seconds) until it no longer answers,
+ * so that its data folder isn't being written while it is moved or opened. */
+static void wait_previous_instance_gone(void) {
+  for (int i = 0; i < 30; i++) {
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0) return;
+    struct timeval tv = {0, 200000};
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(HH_PORT);
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    int up = connect(s, (struct sockaddr *)&a, sizeof(a)) == 0;
+    close(s);
+    if (!up) return;
+    usleep(100000);
+  }
+}
+
 int main(void) {
   signal(SIGPIPE, SIG_IGN);
   plat_init();
+  int was_running = stop_previous_instance(); /* first: the data folder may be moved next */
+  if (was_running) wait_previous_instance_gone();
   setup_paths();
   load_settings();
-  int was_running = stop_previous_instance();
+  {
+    backup_cfg_t bcfg = {g_data_dir, HH_VERSION};
+    backup_init(&bcfg);
+  }
   {
     char lp[320];
     snprintf(lp, sizeof(lp), "%s/log.txt", g_data_dir);
     hh_log_init(lp);
-    hh_log("Home Hider %s starting", HH_VERSION);
+    hh_log("Home Screen Manager %s starting", HH_VERSION);
+    if (g_data_note[0]) hh_log("%s", g_data_note);
   }
   {
     char tc[320], pics[320];
@@ -1531,7 +2126,7 @@ int main(void) {
   /* safety copies of the home screen database */
   char err[256] = "";
   if (!file_exists(g_backup_orig) && hh_copy_db(g_app_db, g_backup_orig, err, sizeof(err)))
-    plat_notify("Home Hider: backup failed (%s)", err);
+    plat_notify("Home Screen Manager: backup failed (%s)", err);
   hh_copy_db(g_app_db, g_backup_launch, err, sizeof(err));
 
   {
@@ -1572,7 +2167,7 @@ int main(void) {
 
   int srv = open_server();
   if (srv < 0) {
-    plat_notify("Home Hider: port %d is busy.\nRestart the PS5 and try again.", HH_PORT);
+    plat_notify("Home Screen Manager: port %d is busy.\nRestart the PS5 and try again.", HH_PORT);
     return 1;
   }
 
@@ -1580,12 +2175,12 @@ int main(void) {
   char url[96];
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/", HH_PORT);
   if (just_updated)
-    plat_notify("Home Hider updated to v%s", HH_VERSION);
+    plat_notify("Home Screen Manager updated to v%s", HH_VERSION);
   else if (plat_get_ip(ip, sizeof(ip)) == 0)
-    plat_notify("Home Hider %s running\nMenu: http://%s:%d%s", HH_VERSION, ip, HH_PORT,
+    plat_notify("Home Screen Manager %s running\nMenu: http://%s:%d%s", HH_VERSION, ip, HH_PORT,
                 g_reapplied ? "\n(re-hid tiles the system restored)" : "");
   else
-    plat_notify("Home Hider %s running on port %d", HH_VERSION, HH_PORT);
+    plat_notify("Home Screen Manager %s running on port %d", HH_VERSION, HH_PORT);
 
   if (g_cfg.auto_check && !just_updated) upd_start_check(g_cfg.repo[0] != '\0', 1, 1);
 
@@ -1601,7 +2196,7 @@ int main(void) {
   hh_log("startup: menu mode %d, already running %d, first start since boot %d -> %s",
          g_cfg.open_browser, was_running, first_boot_start, open_menu ? "open menu" : "quiet");
   if (open_menu && plat_launch_browser(url))
-    plat_notify("Home Hider: couldn't open the browser.\nUse http://%s:%d from a phone/PC.",
+    plat_notify("Home Screen Manager: couldn't open the browser.\nUse http://%s:%d from a phone/PC.",
                 ip[0] ? ip : "<PS5-IP>", HH_PORT);
 
   /* keep the home screen de-cluttered after games are played */
@@ -1620,6 +2215,6 @@ int main(void) {
     close(c);
   }
   close(srv);
-  plat_notify("Home Hider closed");
+  plat_notify("Home Screen Manager closed");
   return 0;
 }

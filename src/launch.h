@@ -2,7 +2,7 @@
  *
  * - Web link tiles (Payload Manager, Web File Explorer, ...) have no program
  *   to start: their param.json holds a deeplinkUri the home screen opens in
- *   the browser. Home Hider opens that address instead of asking the
+ *   the browser. Home Screen Manager opens that address instead of asking the
  *   launcher, which can only answer "can't open".
  * - Everything else is started on a worker thread, so the menu gets an answer
  *   right away and polls for the result (the browser may be paused while the
@@ -31,9 +31,7 @@ int  launch_web_url(hh_t *h, const char *tid, char *url, size_t n);
 /* Starts a launch job. name = title shown in messages; close_running =
  * close the game that is running first (after the user said OK). Returns
  * the job id (> 0), or -1 if the previous job is still running. */
-/* close_browser (experimental): once the game is on its way, also close the
- * PS5 browser app (the folder page runs in it and otherwise stays in front). */
-int  launch_start(const char *tid, const char *name, int close_running, int close_browser);
+int  launch_start(const char *tid, const char *name, int close_running);
 
 /* JSON for /api/launch_status. name_of looks up a title's name (called on
  * the caller's thread, for the "another game is running" answer). */

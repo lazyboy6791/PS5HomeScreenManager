@@ -30,7 +30,7 @@ typedef struct {
  * BC7, 3840x2160, no mips). Returns -1 for an unknown extension. */
 int  tex_probe(const char *path, tex_fmt_t *f);
 
-/* 1 if Home Hider can write this format. */
+/* 1 if Home Screen Manager can write this format. */
 int  tex_supported(const tex_fmt_t *f);
 
 /* Short text such as "DDS BC7 3840x2160, 12 mips", for logs. */

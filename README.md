@@ -77,6 +77,7 @@ A folder is one tile on the **Games** or **Media** tab. Selecting it opens a pag
 - Use the four games as the folder picture, or choose your own picture and background.
 - Web apps such as Payload Manager can go in folders too. Selecting one opens its page.
 - If another game is running, the folder page asks before closing it.
+- The d-pad works on the folder page. The first game is highlighted when a folder opens, the d-pad moves the highlight, and X starts the highlighted game. Moving the pointer takes over again. If it doesn't behave, turn on **Folder page: show what the controller sends** in Folder options to see what the browser receives.
 - The folder page shows the folder's picture and name at the top, a row with the count and the **Sort by** button, and an **Edit this folder in Home Screen Manager** link under the games. Each can be switched off in **Folder options**.
 - Adding a tile goes through the console's installer, which can take about 90 seconds on newer firmware. The folder editor warns about this above its buttons, the menu shows **Creating folder…** and waits, and Home Screen Manager keeps answering meanwhile. When a folder has been created or really changed, Home Screen Manager puts the tile positions right and then restarts the home screen by itself, because the console shuffles tiles while it works and the home screen only shows the repaired layout after a restart. Saving a folder without changing anything does nothing and says **Nothing was changed**.
 - Editing a folder that already exists (name, colour, games, picture) is put straight into the home screen database whenever that is possible, which takes seconds. Creating a folder, changing its background, or a folder whose tile can't be updated that way, go through the installer.
@@ -155,6 +156,8 @@ Because the PS5 re-sorts by recency, Home Screen Manager re-applies your order e
 
 Turn on **Keep folders first** (in the home screen section) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Screen Manager next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in **Tile hiding options** turns that off). Home Screen Manager keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
 
+
+
 ## Run it automatically
 
 Add Home Screen Manager to Payload Manager's Autoload so folders always work and your changes are kept:
@@ -176,7 +179,7 @@ Go to **Updates** in the menu:
 - **GitHub:** enter this repository under **Update settings**. Downloads are checked against GitHub's SHA-256 checksum.
 - **File:** upload it from your phone or PC.
 
-Nothing installs until you press **Install**. The old version is kept in `/data/homescreenmanager/backup/`.
+Opening **Update settings** looks for a newer version on a USB drive; nothing checks in the background. Nothing installs until you press **Install**. The old version is kept in `/data/homescreenmanager/backup/`.
 
 ## Undo
 

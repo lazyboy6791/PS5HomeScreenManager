@@ -1,4 +1,4 @@
-/* Home Hider - home screen tile hiding logic (PS5 app.db).
+/* Home Screen Manager - home screen tile hiding logic (PS5 app.db).
  *
  * How a tile is hidden (per console user <u>):
  *   1. tbl_iconinfo_<u>.visible       -> 0
@@ -14,7 +14,7 @@
 #include "strbuf.h"
 #include "third_party/sqlite/sqlite3.h"
 
-#define HH_VERSION      "2.1.0"
+#define HH_VERSION      "2.2.0"
 #define HH_MAX_USERS    16
 #define HH_USER_LEN     48
 #define HH_BIT_GAMES    0x02
@@ -44,7 +44,7 @@ typedef struct {
   int present;      /* found in at least one user's tables */
   int visible;      /* visible != 0 for at least one user */
   int in_myhome;    /* pinned in at least one user's MyHome group */
-  int wanted;       /* Home Hider has this title on its hide list */
+  int wanted;       /* Home Screen Manager has this title on its hide list */
   int disp;         /* dispLocation of first user that has the title, -1 if none */
 } hh_state_t;
 

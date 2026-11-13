@@ -127,7 +127,6 @@ typedef struct {
   char tid[16];
   char name[160];
   int  close_running;
-  int  close_browser;
 } job_args_t;
 
 static struct {
@@ -175,58 +174,6 @@ static void finish(const char *result, const char *note, const char *error, unsi
   pthread_mutex_unlock(&J.mx);
 }
 
-/* When the browser app can't be found, write down what the console reports, so
- * the right way to find it can be worked out from the log. Nothing is closed. */
-static void log_browser_clues(void) {
-  char d[1024];
-  plat_browser_diag(d, sizeof(d));
-  hh_log("browser lookup: %s", d);
-  char names[4096];
-  plat_process_names(names, sizeof(names));
-  /* in pieces, so no line gets very long */
-  size_t len = strlen(names), at = 0;
-  int part = 1;
-  while (at < len) {
-    size_t take = len - at > 300 ? 300 : len - at;
-    if (at + take < len) { /* end on a separator */
-      while (take > 1 && names[at + take] != ',' ) take--;
-    }
-    hh_log("processes (%d): %.*s", part++, (int)take, names + at);
-    at += take;
-    while (at < len && (names[at] == ',' || names[at] == ' ')) at++;
-  }
-}
-
-/* The folder page runs in the PS5's browser, which stays in front of the game
- * that was just started until you press circle. Closing the browser's app
- * leaves the game. Only a system app (title id NPXS...) is ever closed here,
- * never a game, and the log says what was found. */
-static void close_browser_app(const char *for_tid) {
-  usleep(700000); /* the game is on its way */
-  uint32_t bid = 0;
-  char bt[64] = "";
-  int rc = plat_browser_app(&bid, bt, sizeof(bt));
-  if (rc != 0) {
-    /* the console doesn't hand out the browser's app id: end its own process */
-    hh_log("launch %s: the console gives no app id for the browser, ending its process instead", for_tid);
-    char r[300];
-    int pr = plat_close_browser(r, sizeof(r));
-    hh_log("launch %s: closing the browser by its process: %s", for_tid, r);
-    if (pr != 0) {
-      hh_log("launch %s: the browser app wasn't found, left as it is", for_tid);
-      log_browser_clues();
-    }
-    return;
-  }
-  if (strncmp(bt, "NPXS", 4) != 0) {
-    hh_log("launch %s: the app in front (%08x, title '%s') isn't a system app, left as it is", for_tid, bid, bt);
-    return;
-  }
-  char r[200];
-  plat_kill_app(bid, r, sizeof(r));
-  hh_log("launch %s: closing the browser (app %08x, title %s): %s", for_tid, bid, bt, r);
-}
-
 static void *worker(void *arg) {
   job_args_t a = *(job_args_t *)arg;
   free(arg);
@@ -245,7 +192,6 @@ static void *worker(void *arg) {
   if (rc == 0 || (unsigned)rc == LNC_ERR_ALREADY_RUNNING) {
     snprintf(msg, sizeof(msg), "%s %s", rc ? "Switching to" : "Starting", a.name);
     finish("ok", msg, NULL, (unsigned)rc, NULL);
-    if (a.close_browser) close_browser_app(a.tid);
     return NULL;
   }
   if ((unsigned)rc == LNC_ERR_KILL_NEEDED || (unsigned)rc == LNC_ERR_SUSPEND_NEEDED) {
@@ -264,13 +210,12 @@ static void *worker(void *arg) {
   return NULL;
 }
 
-int launch_start(const char *tid, const char *name, int close_running, int close_browser) {
+int launch_start(const char *tid, const char *name, int close_running) {
   job_args_t *a = calloc(1, sizeof(*a));
   if (!a) return -1;
   snprintf(a->tid, sizeof(a->tid), "%s", tid);
   snprintf(a->name, sizeof(a->name), "%s", name && name[0] ? name : tid);
   a->close_running = close_running;
-  a->close_browser = close_browser;
 
   pthread_mutex_lock(&J.mx);
   if (J.busy) {

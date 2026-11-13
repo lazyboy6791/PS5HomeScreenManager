@@ -1,6 +1,6 @@
-# Home Hider - PS5 payload
+# Home Screen Manager - PS5 payload
 #
-#   make            build HomeHider.elf with the ps5-payload-sdk
+#   make            build HomeScreenManager.elf with the ps5-payload-sdk
 #   make host       build a desktop copy for testing (no PS5 needed)
 #   make test       run the desktop test suite against a mock app.db
 #   make clean
@@ -9,16 +9,17 @@ PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST        ?= ps5
 PS5_PORT        ?= 9021
 
-ELF     := HomeHider.elf
+ELF     := HomeScreenManager.elf
 BUILD   := build
 
 # GitHub repository the updater checks by default (owner/name). It can also be
-# set from the menu: Updates > GitHub repository.
-HH_GITHUB_REPO ?=
+# set from the menu: Update settings > GitHub repository (empty = this default).
+# Override it for a build with: make HH_GITHUB_REPO=owner/name
+HH_GITHUB_REPO ?= lazyboy6791/PS5HomeScreenManager
 
 SRCS    := src/main.c src/hider.c src/http.c src/strbuf.c src/updater.c src/json.c src/sha256.c \
-           src/folders.c src/icons.c src/log.c src/usbpics.c src/launch.c src/custom.c src/texture.c src/liveshell.c src/arrange.c src/tabs.c
-HEADERS := src/hider.h src/http.h src/strbuf.h src/platform.h src/updater.h src/json.h \
+           src/folders.c src/icons.c src/log.c src/datadir.c src/backup.c src/usbpics.c src/launch.c src/custom.c src/texture.c src/liveshell.c src/arrange.c src/tabs.c
+HEADERS := src/hider.h src/datadir.h src/backup.h src/http.h src/strbuf.h src/platform.h src/updater.h src/json.h \
            src/sha256.h src/folders.h src/icons.h src/log.h src/usbpics.h src/launch.h src/custom.h src/texture.h src/liveshell.h src/liveshell_elf.h src/arrange.h src/tabs.h third_party/stb/stb_image.h third_party/stb/stb_image_write.h src/webui_html.h src/folder_html.h
 DEFS    := -DHH_DEFAULT_REPO='"$(HH_GITHUB_REPO)"'
 
@@ -35,7 +36,7 @@ src/webui_html.h: web/index.html tools/embed.py
 src/folder_html.h: web/folder.html tools/embed.py
 	python3 tools/embed.py $< $@ FOLDER_HTML
 
-# LiveShell Engine by ZiZc3 (GPL-3.0), unchanged, carried inside Home Hider
+# LiveShell Engine by ZiZc3 (GPL-3.0), unchanged, carried inside Home Screen Manager
 src/liveshell_elf.h: third_party/liveshell/liveshell.elf tools/embed.py
 	python3 tools/embed.py $< $@ LIVESHELL_ELF
 
@@ -54,6 +55,11 @@ $(ELF): $(SRCS) src/platform_ps5.c $(HEADERS) $(BUILD)/ps5/sqlite3.o
 	    $(BUILD)/ps5/sqlite3.o $(PS5_LIBS)
 	$(PS5_STRIP) $@
 
+# Puts the build, its SHA-256 and a ready-to-paste release note in ./release/ (uploads nothing).
+# Needs a CHANGELOG.md entry for the version in src/hider.h. See BUILDING.md, "Publishing a release".
+release: $(ELF)
+	python3 tools/release.py $(ELF)
+
 deploy: $(ELF)
 	$(PS5_PAYLOAD_SDK)/bin/prospero-deploy -h $(PS5_HOST) -p $(PS5_PORT) $(ELF)
 
@@ -64,16 +70,16 @@ $(BUILD)/host/sqlite3.o: third_party/sqlite/sqlite3.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) -O1 $(SQLITE_DEFS) -c -o $@ $<
 
-host: $(BUILD)/host/homehider
+host: $(BUILD)/host/homescreenmanager
 
-$(BUILD)/host/homehider: $(SRCS) src/platform_host.c $(HEADERS) $(BUILD)/host/sqlite3.o
-	$(HOST_CC) -g -O2 -DHH_HOST $(WARN) $(DEFS) -fsanitize=address,undefined -I. -o $@ \
+$(BUILD)/host/homescreenmanager: $(SRCS) src/platform_host.c $(HEADERS) $(BUILD)/host/sqlite3.o
+	$(HOST_CC) -g -O2 -DHH_HOST $(WARN) -DHH_DEFAULT_REPO='""' -fsanitize=address,undefined -I. -o $@ \
 	    $(SRCS) src/platform_host.c $(BUILD)/host/sqlite3.o -lm -lpthread
 
 test: host
-	python3 tests/test_host.py $(BUILD)/host/homehider
+	python3 tests/test_host.py $(BUILD)/host/homescreenmanager
 
 clean:
 	rm -rf $(BUILD) $(ELF) src/webui_html.h src/folder_html.h
 
-.PHONY: all host test deploy clean
+.PHONY: all host test deploy release clean

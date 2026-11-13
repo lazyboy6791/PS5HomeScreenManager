@@ -8,7 +8,7 @@
 
 #include "icons.h"
 
-/* DXGI formats Home Hider can write */
+/* DXGI formats Home Screen Manager can write */
 #define DXGI_RGBA8       28
 #define DXGI_RGBA8_SRGB  29
 #define DXGI_BC1         71

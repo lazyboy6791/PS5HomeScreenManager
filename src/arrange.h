@@ -2,7 +2,7 @@
  *
  * The PS5 sorts each tab's tiles by how recently they were used
  * (tbl_iconinfo_<u>.lastAccessIndex, counted by tbl_version.access_index).
- * There is no manual reorder in the stock UI, so Home Hider forces an order
+ * There is no manual reorder in the stock UI, so Home Screen Manager forces an order
  * by writing lastAccessIndex values above the counter: arranged tiles then
  * sit in front, in the chosen order, and normal play (which gets the next,
  * smaller index) doesn't disturb them. "Pin" also adds the tile to the

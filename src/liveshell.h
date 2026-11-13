@@ -1,10 +1,10 @@
 /* Live wallpapers: LiveShell Engine by ZiZc3 (GPL-3.0), carried inside
- * Home Hider. https://github.com/ZiZc3/LiveShell
+ * Home Screen Manager. https://github.com/ZiZc3/LiveShell
  *
- * Home Hider holds an unchanged copy of liveshell.elf (third_party/liveshell)
+ * Home Screen Manager holds an unchanged copy of liveshell.elf (third_party/liveshell)
  * and hands it to the ELF loader, exactly as if it had been loaded from
  * Payload Manager. LiveShell then runs on its own and serves its API on
- * 127.0.0.1:9050; Home Hider's menu talks to that API for the basics (on/off,
+ * 127.0.0.1:9050; Home Screen Manager's menu talks to that API for the basics (on/off,
  * pick and delete videos) and links to LiveShell's own page for the rest.
  */
 #pragma once

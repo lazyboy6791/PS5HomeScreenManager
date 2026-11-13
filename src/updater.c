@@ -18,11 +18,15 @@
 
 #include "hider.h"
 #include "json.h"
+#include "log.h"
 #include "platform.h"
 #include "sha256.h"
 
 /* Kept in the binary so other builds (and this updater) can read our version. */
-__attribute__((used)) static const char MARKER[] = "HOMEHIDER-ELF-VERSION=" HH_VERSION ";";
+__attribute__((used)) static const char MARKER[] = "HOMESCREENMANAGER-ELF-VERSION=" HH_VERSION ";";
+/* The marker of the builds from before the rename. Those builds look for it to read the version
+ * of a file (to offer it as an update), so this build carries it as well. */
+__attribute__((used)) static const char MARKER_BEFORE_RENAME[] = "HOMEHIDER-ELF-VERSION=" HH_VERSION ";";
 const char *upd_marker(void) { return MARKER; }
 
 #define MIN_ELF   (16u * 1024)
@@ -116,9 +120,7 @@ static const unsigned char *mem_find(const unsigned char *h, size_t hl,
   return NULL;
 }
 
-int upd_find_version(const unsigned char *buf, size_t len, char *ver, size_t versz) {
-  static const char key[] = "HOMEHIDER-ELF-VERSION=";
-  const size_t kl = sizeof(key) - 1;
+static int find_version_with_key(const unsigned char *buf, size_t len, const char *key, size_t kl, char *ver, size_t versz) {
   size_t off = 0;
   while (off < len) {
     const unsigned char *p = mem_find(buf + off, len - off, key, kl);
@@ -137,9 +139,17 @@ int upd_find_version(const unsigned char *buf, size_t len, char *ver, size_t ver
   return -1;
 }
 
+/* Reads the version out of a file: the marker of this name, or else the one from before the rename. */
+int upd_find_version(const unsigned char *buf, size_t len, char *ver, size_t versz) {
+  static const char key_new[] = "HOMESCREENMANAGER-ELF-VERSION=";
+  static const char key_old[] = "HOMEHIDER-ELF-VERSION=";
+  if (find_version_with_key(buf, len, key_new, sizeof(key_new) - 1, ver, versz) == 0) return 0;
+  return find_version_with_key(buf, len, key_old, sizeof(key_old) - 1, ver, versz);
+}
+
 static int validate_elf(const unsigned char *b, size_t len, char *ver, size_t versz,
                         char *err, size_t errsz) {
-  if (len < MIN_ELF) { snprintf(err, errsz, "The file is too small to be Home Hider."); return -1; }
+  if (len < MIN_ELF) { snprintf(err, errsz, "The file is too small to be Home Screen Manager."); return -1; }
   if (len > UPD_MAX_ELF) { snprintf(err, errsz, "The file is too large."); return -1; }
   if (memcmp(b, "\x7f" "ELF", 4) != 0 || b[4] != 2 || b[5] != 1) {
     snprintf(err, errsz, "That isn't a PS5 payload (.elf) file.");
@@ -150,7 +160,7 @@ static int validate_elf(const unsigned char *b, size_t len, char *ver, size_t ve
     return -1;
   }
   if (upd_find_version(b, len, ver, versz)) {
-    snprintf(err, errsz, "That .elf isn't a Home Hider build (no version marker).");
+    snprintf(err, errsz, "That .elf isn't a Home Screen Manager build (no version marker).");
     return -1;
   }
   return 0;
@@ -239,6 +249,7 @@ static void scan_copies(const char *dir, int depth, copy_t *out, int *n) {
     char ver[32] = "";
     int ours = len > 4 && memcmp(b, "\x7f" "ELF", 4) == 0 &&
                (upd_find_version(b, len, ver, sizeof(ver)) == 0 ||
+                mem_find(b, len, "/data/homescreenmanager", 23) != NULL ||
                 mem_find(b, len, "/data/homehider", 15) != NULL);
     free(b);
     if (!ours) continue;
@@ -258,7 +269,7 @@ static int install_bytes(const unsigned char *b, size_t len, const char *ver,
 
   for (int i = 0; i < n; i++) {
     char bk[600];
-    snprintf(bk, sizeof(bk), "%s/HomeHider-%s.elf", C.backup_dir,
+    snprintf(bk, sizeof(bk), "%s/HomeScreenManager-%s.elf", C.backup_dir,
              copies[i].version[0] ? copies[i].version : "previous");
     struct stat st;
     if (stat(bk, &st) != 0) {
@@ -274,12 +285,12 @@ static int install_bytes(const unsigned char *b, size_t len, const char *ver,
   }
   if (n == 0 && is_dir(C.pldmgr_dir)) {
     char p[512];
-    snprintf(p, sizeof(p), "%s/HomeHider.elf", C.pldmgr_dir);
+    snprintf(p, sizeof(p), "%s/HomeScreenManager.elf", C.pldmgr_dir);
     if (write_atomic(p, b, len) == 0) written++;
     else failed++;
   }
   char own[512];
-  snprintf(own, sizeof(own), "%s/HomeHider.elf", C.data_dir);
+  snprintf(own, sizeof(own), "%s/HomeScreenManager.elf", C.data_dir);
   int own_ok = write_atomic(own, b, len) == 0;
 
   if (written == 0 && !own_ok) {
@@ -345,7 +356,7 @@ static void *relaunch_later(void *arg) {
   relaunch_job_t *j = arg;
   usleep(400000); /* let the HTTP reply reach the browser first */
   if (relaunch(j->buf, j->len, j->ver))
-    set_phase("done", "Installed v%s. Quit Home Hider and start it again from Payload Manager.", j->ver);
+    set_phase("done", "Installed v%s. Quit Home Screen Manager and start it again from Payload Manager.", j->ver);
   free(j->buf);
   free(j);
   return NULL;
@@ -360,7 +371,7 @@ static int install_and_restart(unsigned char *b, size_t len, const char *ver, in
     free(b);
     return -1;
   }
-  set_phase("restarting", "%s Restarting Home Hider…", msg);
+  set_phase("restarting", "%s Restarting Home Screen Manager…", msg);
   if (async_restart) {
     relaunch_job_t *j = malloc(sizeof(*j));
     pthread_t t;
@@ -378,7 +389,7 @@ static int install_and_restart(unsigned char *b, size_t len, const char *ver, in
   int rc = relaunch(b, len, ver);
   free(b);
   if (rc)
-    set_phase("done", "%s Quit Home Hider and start it again from Payload Manager.", msg);
+    set_phase("done", "%s Quit Home Screen Manager and start it again from Payload Manager.", msg);
   return 0;
 }
 
@@ -398,6 +409,7 @@ static void check_github(void) {
 
   char err[200] = "";
   if (!repo[0]) {
+    hh_log("update check: no GitHub repository is set, GitHub was not checked");
     pthread_mutex_lock(&g_mx);
     snprintf(S.gh_error, sizeof(S.gh_error), "No GitHub repository set.");
     pthread_mutex_unlock(&g_mx);
@@ -414,6 +426,10 @@ static void check_github(void) {
     if (status == 404) snprintf(err, sizeof(err), "No published release found in %s.", repo);
     else if (status < 0) snprintf(err, sizeof(err), "Couldn't reach GitHub (error %d).", status);
     else snprintf(err, sizeof(err), "GitHub answered HTTP %d.", status);
+    if (status < 0)
+      hh_log("update check: GitHub %s: couldn't connect (code 0x%08X, failed while: %s)", repo, (unsigned)status,
+             plat_http_last_step()[0] ? plat_http_last_step() : "unknown");
+    else hh_log("update check: GitHub %s: %s", repo, err);
     free(b);
     pthread_mutex_lock(&g_mx);
     snprintf(S.gh_error, sizeof(S.gh_error), "%s", err);
@@ -439,7 +455,7 @@ static void check_github(void) {
       char name[128] = "";
       if (json_str(js, t, json_get(js, t, n, a, "name"), name, sizeof(name)) != 0) continue;
       if (!ends_with_ci(name, ".elf")) continue;
-      int score = contains_ci(name, "homehider") ? 2 : 1;
+      int score = (contains_ci(name, "homescreenmanager") || contains_ci(name, "homehider")) ? 2 : 1;
       if (score <= best_score) continue;
       char u[700] = "", api[300] = "", dg[80] = "";
       if (json_str(js, t, json_get(js, t, n, a, "browser_download_url"), u, sizeof(u)) != 0) continue;
@@ -457,7 +473,7 @@ static void check_github(void) {
 
   pthread_mutex_lock(&g_mx);
   if (n <= 0) {
-    snprintf(S.gh_error, sizeof(S.gh_error), "GitHub sent a reply Home Hider couldn't read.");
+    snprintf(S.gh_error, sizeof(S.gh_error), "GitHub sent a reply Home Screen Manager couldn't read.");
   } else if (!tag[0]) {
     snprintf(S.gh_error, sizeof(S.gh_error), "The latest release has no version tag.");
   } else if (best_score < 0) {
@@ -477,6 +493,8 @@ static void check_github(void) {
     }
     S.gh_newer = upd_version_cmp(S.gh_version, HH_VERSION) > 0;
   }
+  hh_log("update check: GitHub %s: %s", repo,
+         S.gh_ok ? (S.gh_newer ? "a newer version is available" : "no newer version") : S.gh_error);
   pthread_mutex_unlock(&g_mx);
 }
 
@@ -542,8 +560,8 @@ static void check_usb(void) {
     if (!d) continue;
     struct dirent *e;
     while ((e = readdir(d))) {
-      if (strcasecmp(e->d_name, "homehider") && strcasecmp(e->d_name, "payloads") &&
-          strcasecmp(e->d_name, "ps5"))
+      if (strcasecmp(e->d_name, "homescreenmanager") && strcasecmp(e->d_name, "homehider") &&
+          strcasecmp(e->d_name, "payloads") && strcasecmp(e->d_name, "ps5"))
         continue;
       char sub[540];
       snprintf(sub, sizeof(sub), "%s/%s", root, e->d_name);
@@ -557,6 +575,7 @@ static void check_usb(void) {
   snprintf(S.usb_path, sizeof(S.usb_path), "%s", best_path);
   snprintf(S.usb_version, sizeof(S.usb_version), "%s", best_ver);
   S.usb_newer = S.usb_found && upd_version_cmp(best_ver, HH_VERSION) > 0;
+  hh_log("update check: USB drives: %s", S.usb_found ? (S.usb_newer ? "a newer version was found" : "no newer version") : "no payload found");
   pthread_mutex_unlock(&g_mx);
 }
 
@@ -612,7 +631,7 @@ static void run_install(const char *source) {
     snprintf(path, sizeof(path), "%s", S.usb_path);
     pthread_mutex_unlock(&g_mx);
     if (!ok || read_file(path, UPD_MAX_ELF, &b, &len)) {
-      set_phase("error", "No newer Home Hider found on USB.");
+      set_phase("error", "No newer Home Screen Manager found on USB.");
       return;
     }
   } else {
@@ -649,9 +668,9 @@ static void *worker(void *arg) {
     pthread_mutex_unlock(&g_mx);
     if (gh || usb) {
       const char *v = gh && (!usb || upd_version_cmp(gv, uv) >= 0) ? gv : uv;
-      set_phase("available", "Home Hider v%s is available.", v);
+      set_phase("available", "Home Screen Manager v%s is available.", v);
       if (j.notify)
-        plat_notify("Home Hider v%s is available%s.\nOpen the menu to install it.", v,
+        plat_notify("Home Screen Manager v%s is available%s.\nOpen the menu to install it.", v,
                     gh ? " on GitHub" : " on USB");
     } else {
       set_phase("idle", "You have the latest version (v%s).", HH_VERSION);

@@ -7,8 +7,8 @@
 
 #define ICON_SIZE 512
 
-/* Known colour names: blue, purple, red, orange, green, teal, gray, and
- * none (no background: the picture keeps its see-through parts).
+/* Known colour names: blue, purple, red, orange, green, teal, gray, darkgray,
+ * black, and none (no background: the picture keeps its see-through parts).
  * Returns 1 if name is one of them. */
 int  icon_valid_color(const char *name);
 

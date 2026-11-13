@@ -21,7 +21,7 @@
 static struct {
   char data_dir[256];
   char appmeta_dir[256];
-} C = {"/data/homehider", "/user/appmeta"};
+} C = {"/data/homescreenmanager", "/user/appmeta"};
 
 void custom_init(const custom_cfg_t *cfg) {
   snprintf(C.data_dir, sizeof(C.data_dir), "%s", cfg->data_dir);
@@ -398,7 +398,7 @@ static int apply_name(hh_t *h, const char *tid, const char *name, int *changed) 
   free(set);
   if (rc) return -1;
   if (!matched) {
-    cerr(h, "Home Hider couldn't find this tile's name in the home screen database, so it can't be renamed.");
+    cerr(h, "Home Screen Manager couldn't find this tile's name in the home screen database, so it can't be renamed.");
     return -1;
   }
   return 0;
@@ -420,7 +420,7 @@ static int can_customize(hh_t *h, const char *tid) {
     return 0;
   }
   if (h->nusers == 0) {
-    cerr(h, "This firmware's home screen database has a layout Home Hider doesn't know yet.");
+    cerr(h, "This firmware's home screen database has a layout Home Screen Manager doesn't know yet.");
     return 0;
   }
   return 1;
@@ -594,7 +594,7 @@ int custom_set_icon(hh_t *h, const char *tid, const unsigned char *img, size_t l
   int changed = 0, found = 0, rc = run(h, "BEGIN IMMEDIATE", NULL, NULL, NULL, NULL) < 0 ? -1 : 0;
   if (rc == 0) rc = point_icons(h, tid, meta, prev, &changed, &found);
   if (rc == 0 && found == 0) {
-    cerr(h, "This tile's picture isn't stored in the home screen database, so Home Hider can't change it.");
+    cerr(h, "This tile's picture isn't stored in the home screen database, so Home Screen Manager can't change it.");
     rc = -1;
   }
   char orig[256] = "";
@@ -677,7 +677,7 @@ static int apply_bg(hh_t *h, const char *tid, const unsigned char *img, size_t l
   int n = find_cells(h, tid, K_BG, cells, MAX_CELLS);
   if (!n) {
     free(cells);
-    cerr(h, "This tile has no background in the home screen database, so Home Hider can't change it.");
+    cerr(h, "This tile has no background in the home screen database, so Home Screen Manager can't change it.");
     return -1;
   }
   char pre[400];
@@ -708,7 +708,7 @@ static int apply_bg(hh_t *h, const char *tid, const unsigned char *img, size_t l
     tex_describe(&f, desc, sizeof(desc));
     if (!tex_supported(&f)) {
       hh_log("background %s: %s uses %s", tid, orig[i], desc);
-      snprintf(h->err, sizeof(h->err), "This background uses a picture format Home Hider can't write yet (%s).", desc);
+      snprintf(h->err, sizeof(h->err), "This background uses a picture format Home Screen Manager can't write yet (%s).", desc);
       rc = -1;
       break;
     }
@@ -724,7 +724,7 @@ static int apply_bg(hh_t *h, const char *tid, const unsigned char *img, size_t l
     which[i] = k;
   }
   if (rc == 0 && nf == 0) {
-    cerr(h, "This tile's background isn't a picture file Home Hider can replace.");
+    cerr(h, "This tile's background isn't a picture file Home Screen Manager can replace.");
     rc = -1;
   }
 
@@ -806,6 +806,98 @@ static int reset_bg(hh_t *h, const char *tid) {
   char src[400];
   bg_source(tid, src, sizeof(src));
   unlink(src);
+  return 0;
+}
+
+/* Folder tiles: the name and the picture, straight into the home screen
+ * database. A folder's files are the source of truth (the console's installer
+ * reads them next time), so nothing is saved as an "original" and nothing is
+ * re-applied at start-up; the only thing kept is the name of the last picture
+ * file we made, to remove it when the next one replaces it. */
+int custom_refresh_folder_tile(hh_t *h, const char *tid, const char *name, const unsigned char *png,
+                               size_t len) {
+  if (!hh_valid_tid(tid) || !folders_is_folder(tid)) {
+    cerr(h, "That isn't a folder tile.");
+    return -1;
+  }
+  if (h->nusers == 0) {
+    cerr(h, "This firmware's home screen database has a layout Home Screen Manager doesn't know yet.");
+    return -1;
+  }
+  if (!name || !name[0] || !png || !len) {
+    cerr(h, "The folder has no name or picture to put in the database.");
+    return -1;
+  }
+
+  /* the picture: a file name never used before, so no cached copy is shown */
+  char prev[512] = "", meta[600], dir[400];
+  text1(h, "SELECT icon_meta FROM hh.folder_meta WHERE title_id=?1", tid, prev, sizeof(prev));
+  snprintf(dir, sizeof(dir), "%s/%s", C.appmeta_dir, tid);
+  mkdirs(dir);
+  long stamp = (long)time(NULL);
+  do {
+    snprintf(meta, sizeof(meta), "%s/hh_icon0_%ld.png", dir, stamp++);
+  } while (!strcmp(meta, prev) || file_exists(meta));
+  if (write_file(meta, png, len)) {
+    unlink(meta);
+    cerr(h, "Couldn't save the folder's picture on the console.");
+    return -1;
+  }
+
+  cell_t *cells = calloc(MAX_CELLS, sizeof(cell_t));
+  if (!cells) {
+    unlink(meta);
+    cerr(h, "Out of memory.");
+    return -1;
+  }
+  int rc = run(h, "BEGIN IMMEDIATE", NULL, NULL, NULL, NULL) < 0 ? -1 : 0;
+  int names = 0, icons = 0, changed = 0;
+  if (rc == 0) {
+    int n = find_cells(h, tid, K_NAME, cells, MAX_CELLS);
+    for (int i = 0; i < n && rc == 0; i++) {
+      if (!is_title_name_col(cells[i].col)) continue;
+      names++;
+      if (!strcmp(cells[i].value, name)) continue;
+      int ch = set_cell(h, &cells[i], cells[i].value, name);
+      if (ch < 0) rc = -1;
+      else changed += ch;
+    }
+  }
+  if (rc == 0) {
+    int n = find_cells(h, tid, K_ICON, cells, MAX_CELLS);
+    for (int i = 0; i < n && rc == 0; i++) {
+      icons++;
+      if (!strcmp(cells[i].value, meta)) continue;
+      int ch = set_cell(h, &cells[i], cells[i].value, meta);
+      if (ch < 0) rc = -1;
+      else changed += ch;
+    }
+  }
+  if (rc == 0 && names == 0) {
+    cerr(h, "Home Screen Manager couldn't find this folder's name in the home screen database.");
+    rc = -1;
+  }
+  if (rc == 0 && icons == 0) {
+    cerr(h, "This folder's picture isn't stored in the home screen database, so it can't be changed there.");
+    rc = -1;
+  }
+  if (rc == 0 &&
+      run(h, "INSERT OR REPLACE INTO hh.folder_meta(title_id, icon_meta) VALUES(?1, ?2)", tid, meta, NULL,
+          NULL) < 0)
+    rc = -1;
+  if (rc == 0 && run(h, "COMMIT", NULL, NULL, NULL, NULL) < 0) rc = -1;
+  free(cells);
+  if (rc) {
+    char keep[512];
+    snprintf(keep, sizeof(keep), "%s", h->err);
+    sqlite3_exec(h->db, "ROLLBACK", NULL, NULL, NULL);
+    snprintf(h->err, sizeof(h->err), "%s", keep);
+    unlink(meta);
+    return -1;
+  }
+  if (prev[0]) unlink(prev);
+  hh_log("folder %s: name and picture put in the home screen database (%d name cell(s), %d picture cell(s), %d value(s) changed)",
+         tid, names, icons, changed);
   return 0;
 }
 

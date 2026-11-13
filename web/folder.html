@@ -24,7 +24,7 @@ body.nobar .bar{display:none}
 .bar{display:flex;align-items:center;justify-content:space-between;margin:0 0 14px;color:var(--muted);font-size:.85em}
 .sort{font:inherit;color:var(--muted);background:none;border:2px solid transparent;border-radius:10px;padding:6px 12px;cursor:pointer}
 .sort b{color:var(--text);font-weight:500}
-.sort:focus,.sort:hover{border-color:#ffffff55;outline:none}
+.sort:focus{border-color:#ffffff55;outline:none}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));grid-gap:44px 18px;gap:44px 18px}
 @media (min-width:900px){.grid{grid-template-columns:repeat(5,1fr)}}
 @media (min-width:1350px){.grid{grid-template-columns:repeat(6,1fr)}}
@@ -36,9 +36,9 @@ body.nobar .bar{display:none}
 .tile .ph{position:absolute;left:0;right:0;top:40%;padding:0 12px;text-align:center;font-weight:600;font-size:.9em;color:#cfd6e4}
 .tile .name{position:absolute;left:0;right:0;top:calc(100% + 8px);text-align:center;font-size:.8em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .12s}
-.tile:focus,.tile:hover{outline:none;transform:scale(1.06);z-index:2}
-.tile:focus .art,.tile:hover .art{box-shadow:0 0 0 4px var(--focus),0 12px 30px #000a}
-.tile:focus .name,.tile:hover .name{opacity:1}
+.tile:focus{outline:none;transform:scale(1.06);z-index:2}
+.tile:focus .art{box-shadow:0 0 0 4px var(--focus),0 12px 30px #000a}
+.tile:focus .name{opacity:1}
 .row-gap{height:22px}
 .empty,.msg{color:var(--muted);text-align:center;padding:60px 16px}
 .toast{position:fixed;left:50%;bottom:36px;transform:translateX(-50%);background:#1d2436;border:1px solid #2f6df566;
@@ -55,8 +55,9 @@ body.nobar .bar{display:none}
 .ask button.ghost{background:#2a3142}
 .ask button:focus{outline:3px solid #fff;outline-offset:3px}
 .foot{margin-top:60px;text-align:center}
+body.noedit .foot{display:none}
 .foot a{color:var(--muted);font-size:.8em;text-decoration:none;border:2px solid transparent;border-radius:8px;padding:6px 10px}
-.foot a:focus,.foot a:hover{border-color:#ffffff55;outline:none;color:#fff}
+.foot a:focus{border-color:#ffffff55;outline:none;color:#fff}
 </style>
 </head>
 <body>
@@ -71,7 +72,7 @@ body.nobar .bar{display:none}
   </div>
   <div id="grid" class="grid"></div>
   <div id="msg" class="msg" style="display:none"></div>
-  <div class="foot"><a id="edit" href="/">Edit this folder in Home Hider</a></div>
+  <div class="foot"><a id="edit" href="/">Edit this folder in Home Screen Manager</a></div>
 </div>
 <div class="toast" id="toast"></div>
 <div class="ask" id="ask"><div class="box"><div class="t" id="askT"></div><div class="s" id="askS"></div>
@@ -96,7 +97,7 @@ function req(method, url, cb) {
   x.timeout = 20000;
   x.onload = function () { var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; } cb(j); };
   x.onerror = x.ontimeout = function () {
-    cb({ ok: false, network: true, error: 'Home Hider is not running. Start it from Payload Manager, then open this folder again.' });
+    cb({ ok: false, network: true, error: 'Home Screen Manager is not running. Start it from Payload Manager, then open this folder again.' });
   };
   x.send(method === 'POST' ? '' : null);
 }
@@ -125,11 +126,13 @@ function load() {
     document.title = folder.name;
     /* the settings decide whether the picture + name and the count/sort row show */
     var pg = j.page || {};
+    dbgOn = !!pg.debug;
     if (pg.header) {
       document.getElementById('title').textContent = folder.name;
       document.getElementById('ficon').src = '/api/folder_icon?id=' + id + '&v=' + Date.now();
     }
-    document.body.className = 'ready' + (pg.header ? ' hdr' : '') + (pg.bar === false ? ' nobar' : '');
+    document.body.className = 'ready' + (pg.header ? ' hdr' : '') + (pg.bar === false ? ' nobar' : '') +
+      (pg.edit === false ? ' noedit' : '');
     render();
   });
 }
@@ -153,10 +156,10 @@ function render() {
       '<span class="name">' + esc(t.name) + '</span></button>';
   }
   document.getElementById('grid').innerHTML = html;
-  if (!items.length) showMsg('This folder is empty. Add games to it in Home Hider.');
+  if (!items.length) showMsg('This folder is empty. Add games to it in Home Screen Manager.');
   var tiles = document.querySelectorAll('.tile');
   for (var k = 0; k < tiles.length; k++) art(tiles[k]);
-  if (tiles.length) tiles[0].focus();
+  if (tiles.length) { tiles[0].focus(); lastPad = Date.now(); } /* the first game starts highlighted, and X starts it */
   measure();
 }
 
@@ -276,12 +279,60 @@ function goFull() {
 document.addEventListener('keydown', goFull, true);
 document.addEventListener('mousedown', goFull, true);
 
-/* D-pad / arrow keys move between tiles like the Game Library */
-document.addEventListener('keydown', function (e) {
+/* D-pad and pointer: one highlight at a time.
+ * The first game is highlighted when the folder opens, and X starts it right away.
+ * The PS5 browser treats X as a click wherever the pointer is, and its mouse-down moves the focus away from
+ * the highlighted game before the click arrives. So once the d-pad was used last, the mouse-down is stopped
+ * and the click is passed on to the highlighted item. Moving the pointer moves the highlight to what is
+ * under it, and clicks go there again. */
+var lastPad = 0, lastPtr = 0, ptrX = -1, ptrY = -1, redirecting = false, downFocus = null;
+var dbgOn = false, dbgLines = [];
+
+function dbgName(el) { return el ? (el.id || (el.className && String(el.className).split(' ')[0]) || el.tagName || '?') : 'none'; }
+function dbg(msg) {
+  if (!dbgOn) return;
+  dbgLines.push(msg);
+  if (dbgLines.length > 12) dbgLines.shift();
+  var el = document.getElementById('dbg');
+  el.textContent = dbgLines.join('\n');
+  el.style.display = 'block';
+}
+
+function askOpen() { return document.getElementById('ask').className.indexOf('show') >= 0; }
+
+function isOurs(el) {
+  return !!(el && el.classList && (el.classList.contains('tile') || el.id === 'sortBtn' || el.id === 'edit'));
+}
+
+/* Where the d-pad goes from el: the sort button, the games, then the edit link. Returns an element or null. */
+function padTarget(el, code) {
+  var tiles = document.querySelectorAll('.tile'), n = tiles.length;
+  var sortBtn = document.getElementById('sortBtn'), edit = document.getElementById('edit');
+  var editOk = edit && edit.offsetParent !== null;
+  if (el === sortBtn) return code === 40 && n ? tiles[0] : null;
+  if (el === edit) return code === 38 && n ? tiles[n - 1] : null;
+  if (!el.classList || !el.classList.contains('tile')) return null;
+  var i = parseInt(el.getAttribute('data-i'), 10), j = i;
+  if (code === 37) j = i - 1;
+  else if (code === 39) j = i + 1;
+  else if (code === 38) { j = i - cols; if (j < 0) return sortBtn || null; }
+  else if (code === 40) {
+    j = i + cols;
+    if (j >= n) {
+      if (i < Math.floor((n - 1) / cols) * cols) j = n - 1; /* a shorter last row */
+      else return editOk ? edit : null;
+    }
+  } else return null;
+  if (j < 0 || j >= n) return null;
+  return tiles[j];
+}
+
+function padKey(e) {
   var el = document.activeElement;
-  if (document.getElementById('ask').className.indexOf('show') >= 0) {
+  if (askOpen()) {
     if (e.keyCode === 37 || e.keyCode === 39) {
       e.preventDefault();
+      lastPad = Date.now();
       document.getElementById(el && el.id === 'askYes' ? 'askNo' : 'askYes').focus();
     } else if (e.keyCode === 27) {
       e.preventDefault();
@@ -289,20 +340,82 @@ document.addEventListener('keydown', function (e) {
     }
     return;
   }
-  if (!el || !el.classList || !el.classList.contains('tile')) return;
-  var i = parseInt(el.getAttribute('data-i'), 10), n = document.querySelectorAll('.tile').length, j = i;
-  if (e.keyCode === 37) j = i - 1;
-  else if (e.keyCode === 39) j = i + 1;
-  else if (e.keyCode === 38) j = i - cols;
-  else if (e.keyCode === 40) j = i + cols;
-  else return;
-  if (j < 0 || j >= n) return;
+  if (e.keyCode < 37 || e.keyCode > 40) return;
+  var next = null;
+  if (isOurs(el)) next = padTarget(el, e.keyCode);
+  else { var all = document.querySelectorAll('.tile'); next = all.length ? all[0] : null; } /* nothing highlighted yet */
+  dbg('d-pad ' + e.keyCode + ' -> ' + dbgName(next));
+  if (!next) return;
   e.preventDefault();
-  var next = document.querySelector('.tile[data-i="' + j + '"]');
-  if (next) { next.focus(); if (next.scrollIntoView) next.scrollIntoView(false); }
-});
+  lastPad = Date.now();
+  next.focus();
+  if (next.scrollIntoView) next.scrollIntoView(false);
+}
+
+function pointerMove(x, y, target) {
+  if (x === ptrX && y === ptrY) return; /* a scroll can repeat the event without the pointer moving */
+  ptrX = x;
+  ptrY = y;
+  lastPtr = Date.now();
+  var t = target && target.closest ? target.closest('.tile, .sort, .foot a, .ask button') : null;
+  dbg('pointer ' + x + ',' + y + ' over ' + dbgName(t || target));
+  if (t && document.activeElement !== t) {
+    try { t.focus({ preventScroll: true }); } catch (err) { t.focus(); }
+  }
+}
+
+/* The button went down: if the d-pad was used last, keep the highlight where it is and remember it. */
+function padDown(e) {
+  downFocus = null;
+  if (redirecting) return;
+  var fo = document.activeElement;
+  if (!fo || fo === document.body || typeof fo.click !== 'function') return;
+  if (!(lastPad > lastPtr)) return; /* the pointer was used last: normal */
+  if (fo === e.target || (fo.contains && fo.contains(e.target))) return;
+  downFocus = fo;
+  e.preventDefault(); /* the browser would move the focus to what is under the pointer */
+}
+
+function fireRedirect() {
+  var fo = downFocus;
+  downFocus = null;
+  if (!fo) return false;
+  dbg('X passed on to ' + dbgName(fo));
+  redirecting = true;
+  try { fo.click(); } finally { redirecting = false; }
+  return true;
+}
+
+/* true if the click was passed on to the highlighted item instead */
+function redirectClick(e) {
+  if (redirecting) return false;
+  if (!downFocus) { /* no mouse-down was seen: decide now */
+    var fo = document.activeElement;
+    if (!isOurs(fo) && !(fo && fo.id && fo.id.indexOf('ask') === 0)) return false;
+    if (!(lastPad > lastPtr) || fo === e.target || (fo.contains && fo.contains(e.target))) return false;
+    downFocus = fo;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  return fireRedirect();
+}
+
+/* the button came up but no click followed: do it anyway */
+function padUp() { if (downFocus) setTimeout(function () { fireRedirect(); }, 80); }
+
+document.addEventListener('keydown', padKey);
+document.addEventListener('mousemove', function (e) { pointerMove(e.clientX, e.clientY, e.target); });
+document.addEventListener('mousedown', padDown, true);
+document.addEventListener('mouseup', padUp, true);
+document.addEventListener('click', redirectClick, true);
+/* for the test display */
+document.addEventListener('keydown', function (e) { dbg('keydown ' + e.keyCode + ' ' + (e.key || '') + ' on ' + dbgName(e.target) + ', focus ' + dbgName(document.activeElement)); }, true);
+document.addEventListener('keyup', function (e) { dbg('keyup ' + e.keyCode); }, true);
+document.addEventListener('mousedown', function (e) { dbg('mousedown b' + e.button + ' on ' + dbgName(e.target) + ', focus ' + dbgName(document.activeElement)); }, true);
+document.addEventListener('click', function (e) { dbg('click on ' + dbgName(e.target) + ', focus ' + dbgName(document.activeElement)); }, true);
 window.addEventListener('resize', measure);
 load();
 </script>
+<pre id="dbg" style="display:none;position:fixed;left:8px;top:8px;z-index:99;background:#000d;color:#9f9;font:14px/1.3 monospace;padding:6px 10px;border-radius:8px;max-width:70%;white-space:pre-wrap;pointer-events:none"></pre>
 </body>
 </html>

@@ -1,5 +1,6 @@
 /* Desktop stand-ins for the PS5 services, used by the host test build. */
 #include "platform.h"
+#include "log.h"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -108,39 +109,6 @@ int plat_app_id(const char *title_id, uint32_t *app_id) {
   return -1;
 }
 
-int plat_close_browser(char *report, size_t n) {
-  /* tests: HH_BROWSER_PROC=none means the browser's process isn't running */
-  const char *e = getenv("HH_BROWSER_PROC");
-  if (e && !strcmp(e, "none")) {
-    snprintf(report, n, "no SceNKUIProcess is running");
-    return -1;
-  }
-  snprintf(report, n, "SceNKUIProcess pid 4242: SIGTERM sent; gone after SIGTERM");
-  printf("[lnc] would end the browser process\n");
-  fflush(stdout);
-  return 0;
-}
-
-void plat_browser_diag(char *out, size_t n) {
-  snprintf(out, n, "host test build: by title NPXS40169: %s; ", getenv("HH_BROWSER_TITLE") ? "as set" : "app 60000001");
-}
-
-void plat_process_names(char *out, size_t n) {
-  snprintf(out, n, "SceShellUI, SceShellCore, SceWebBrowser, SceGame");
-}
-
-int plat_browser_app(uint32_t *app_id, char *title, size_t n) {
-  /* tests: HH_BROWSER_TITLE = the browser's title id, or "none" (not found) */
-  const char *t = getenv("HH_BROWSER_TITLE");
-  if (t && !strcmp(t, "none")) {
-    title[0] = '\0';
-    return -1;
-  }
-  snprintf(title, n, "%s", t ? t : "NPXS40169");
-  *app_id = 0x60000001;
-  return 0;
-}
-
 int plat_running_game(char *title_id, size_t n, uint32_t *app_id) {
   /* tests: HH_RUNNING_FILE names a file holding the running game's title id
    * (empty or missing = none), so a game can "close" without a launch */
@@ -227,7 +195,7 @@ static int http_once(const char *url, int *status, char *location, size_t locsz,
   freeaddrinfo(ai);
   char reqbuf[1400];
   int rl = snprintf(reqbuf, sizeof(reqbuf),
-                    "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: HomeHider-host\r\n\r\n", path, host);
+                    "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: HomeScreenManager-host\r\n\r\n", path, host);
   send(fd, reqbuf, (size_t)rl, 0);
   size_t cap = 65536, len = 0;
   unsigned char *b = malloc(cap);
@@ -263,6 +231,8 @@ static int http_once(const char *url, int *status, char *location, size_t locsz,
   free(b);
   return 0;
 }
+
+const char *plat_http_last_step(void) { return ""; }
 
 int plat_http_get(const char *url, unsigned char **out, size_t *out_len,
                   size_t max, volatile long long *progress) {
@@ -306,6 +276,11 @@ static sqlite3 *open_app_db(void) {
 }
 
 int plat_app_install(const char *title_id, const char *app_dir) {
+  /* tests: HH_INSTALL_DELAY_MS makes the install slow, like the console's on newer firmware */
+  const char *dl = getenv("HH_INSTALL_DELAY_MS");
+  int delay_ms = dl ? atoi(dl) : 0;
+  hh_log("install %s: host test build%s", title_id, delay_ms > 0 ? " (slow install simulated)" : "");
+  if (delay_ms > 0) usleep((useconds_t)delay_ms * 1000);
   char path[600], name[200] = "";
   snprintf(path, sizeof(path), "%s/%s/sce_sys/param.json", app_dir, title_id);
   FILE *f = fopen(path, "r");
@@ -333,15 +308,71 @@ int plat_app_install(const char *title_id, const char *app_dir) {
                          -1, &q, NULL) == SQLITE_OK) {
     while (sqlite3_step(q) == SQLITE_ROW) {
       sqlite3_stmt *ins;
+      const char *tbl = (const char *)sqlite3_column_text(q, 0);
+      /* like the console: the tile's picture path is registered where the table has a place for it */
+      int has_icon = 0;
+      char chk[300];
+      snprintf(chk, sizeof(chk), "SELECT count(*) FROM pragma_table_info('%s') WHERE name='icon0Info'", tbl);
+      sqlite3_stmt *c2;
+      if (sqlite3_prepare_v2(db, chk, -1, &c2, NULL) == SQLITE_OK) {
+        if (sqlite3_step(c2) == SQLITE_ROW) has_icon = sqlite3_column_int(c2, 0) > 0;
+        sqlite3_finalize(c2);
+      }
       snprintf(sql, sizeof(sql),
-               "INSERT OR REPLACE INTO \"%s\"(titleId, titleName, dispLocation, visible, installStatus) "
-               "VALUES(?1, ?2, COALESCE((SELECT dispLocation FROM \"%s\" WHERE titleId=?1), 188), 1, 2)",
-               (const char *)sqlite3_column_text(q, 0), (const char *)sqlite3_column_text(q, 0));
+               has_icon ? "INSERT OR REPLACE INTO \"%s\"(titleId, titleName, dispLocation, visible, installStatus, icon0Info) "
+                          "VALUES(?1, ?2, COALESCE((SELECT dispLocation FROM \"%s\" WHERE titleId=?1), 188), 1, 2, ?3)"
+                        : "INSERT OR REPLACE INTO \"%s\"(titleId, titleName, dispLocation, visible, installStatus) "
+                          "VALUES(?1, ?2, COALESCE((SELECT dispLocation FROM \"%s\" WHERE titleId=?1), 188), 1, 2)",
+               tbl, tbl);
       if (sqlite3_prepare_v2(db, sql, -1, &ins, NULL) == SQLITE_OK) {
+        char icon[600];
+        const char *am = getenv("HH_APPMETA_DIR");
+        snprintf(icon, sizeof(icon), "%s/%s/icon0.png", am ? am : "/user/appmeta", title_id);
         sqlite3_bind_text(ins, 1, title_id, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(ins, 2, name, -1, SQLITE_TRANSIENT);
+        if (has_icon) sqlite3_bind_text(ins, 3, icon, -1, SQLITE_TRANSIENT);
         sqlite3_step(ins);
         sqlite3_finalize(ins);
+
+        /* and, like the console, a concept row that holds the name and the picture path */
+        if (!strncmp(tbl, "tbl_iconinfo_", 13)) {
+          char ctbl[160], cid[64], q2[500];
+          snprintf(ctbl, sizeof(ctbl), "tbl_concepticoninfo_%s", tbl + 13);
+          snprintf(cid, sizeof(cid), "cid:local:%s", title_id);
+          snprintf(q2, sizeof(q2),
+                   "SELECT (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='%s') "
+                   "AND (SELECT count(*) FROM pragma_table_info('%s') WHERE name='localConceptId')", ctbl, tbl);
+          sqlite3_stmt *c3;
+          int concept_ok = 0;
+          if (sqlite3_prepare_v2(db, q2, -1, &c3, NULL) == SQLITE_OK) {
+            if (sqlite3_step(c3) == SQLITE_ROW) concept_ok = sqlite3_column_int(c3, 0) > 0;
+            sqlite3_finalize(c3);
+          }
+          if (concept_ok) {
+            sqlite3_stmt *u3;
+            snprintf(q2, sizeof(q2), "UPDATE \"%s\" SET localConceptId=?1 WHERE titleId=?2", tbl);
+            if (sqlite3_prepare_v2(db, q2, -1, &u3, NULL) == SQLITE_OK) {
+              sqlite3_bind_text(u3, 1, cid, -1, SQLITE_TRANSIENT);
+              sqlite3_bind_text(u3, 2, title_id, -1, SQLITE_TRANSIENT);
+              sqlite3_step(u3);
+              sqlite3_finalize(u3);
+            }
+            snprintf(q2, sizeof(q2), "DELETE FROM \"%s\" WHERE localConceptId=?1", ctbl);
+            if (sqlite3_prepare_v2(db, q2, -1, &u3, NULL) == SQLITE_OK) {
+              sqlite3_bind_text(u3, 1, cid, -1, SQLITE_TRANSIENT);
+              sqlite3_step(u3);
+              sqlite3_finalize(u3);
+            }
+            snprintf(q2, sizeof(q2), "INSERT INTO \"%s\"(localConceptId, conceptName, icon0Info) VALUES(?1, ?2, ?3)", ctbl);
+            if (sqlite3_prepare_v2(db, q2, -1, &u3, NULL) == SQLITE_OK) {
+              sqlite3_bind_text(u3, 1, cid, -1, SQLITE_TRANSIENT);
+              sqlite3_bind_text(u3, 2, name, -1, SQLITE_TRANSIENT);
+              sqlite3_bind_text(u3, 3, icon, -1, SQLITE_TRANSIENT);
+              sqlite3_step(u3);
+              sqlite3_finalize(u3);
+            }
+          }
+        }
       }
     }
     sqlite3_finalize(q);
@@ -361,8 +392,20 @@ int plat_app_uninstall(const char *title_id) {
                          -1, &q, NULL) == SQLITE_OK) {
     while (sqlite3_step(q) == SQLITE_ROW) {
       sqlite3_stmt *del;
-      snprintf(sql, sizeof(sql), "DELETE FROM \"%s\" WHERE titleId=?1",
-               (const char *)sqlite3_column_text(q, 0));
+      const char *tbl = (const char *)sqlite3_column_text(q, 0);
+      /* the concept row the fake installer added goes too (it is only there for tables that have one) */
+      if (!strncmp(tbl, "tbl_iconinfo_", 13)) {
+        char cs[320];
+        snprintf(cs, sizeof(cs), "DELETE FROM \"tbl_concepticoninfo_%s\" WHERE localConceptId=?1", tbl + 13);
+        char cid[64];
+        snprintf(cid, sizeof(cid), "cid:local:%s", title_id);
+        if (sqlite3_prepare_v2(db, cs, -1, &del, NULL) == SQLITE_OK) {
+          sqlite3_bind_text(del, 1, cid, -1, SQLITE_TRANSIENT);
+          sqlite3_step(del);
+          sqlite3_finalize(del);
+        }
+      }
+      snprintf(sql, sizeof(sql), "DELETE FROM \"%s\" WHERE titleId=?1", tbl);
       if (sqlite3_prepare_v2(db, sql, -1, &del, NULL) == SQLITE_OK) {
         sqlite3_bind_text(del, 1, title_id, -1, SQLITE_TRANSIENT);
         sqlite3_step(del);

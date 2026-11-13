@@ -1,4 +1,4 @@
-/* Small on-disk log (/data/homehider/log.txt) shown in Diagnostics, so
+/* Small on-disk log (/data/homescreenmanager/log.txt) shown in Diagnostics, so
  * problems on the console can be reported without a debugger. */
 #pragma once
 

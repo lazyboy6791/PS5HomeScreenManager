@@ -1,5 +1,5 @@
 /* Pictures on USB drives, for folder artwork chosen on the PS5 itself
- * (the PS5 browser can't pick files, so Home Hider browses the drive). */
+ * (the PS5 browser can't pick files, so Home Screen Manager browses the drive). */
 #pragma once
 
 #include <stddef.h>

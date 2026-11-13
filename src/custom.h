@@ -6,7 +6,7 @@
  *              tbl_contentinfo, ... found by titleId or concept id)
  *   - picture: the icon0Info path in those rows
  *   - background: the pic0Info / pic1Info paths (see texture.h for formats)
- * Home Hider writes the new picture to <appmeta>/<title id>/hh_icon0_<n>.png
+ * Home Screen Manager writes the new picture to <appmeta>/<title id>/hh_icon0_<n>.png
  * (a new file name each time, so the home screen can't show a cached copy),
  * points icon0Info at it and changes the name cells. Every original value is
  * saved in state.db, so "Use the original" puts back exactly what was there.
@@ -35,6 +35,15 @@ int  custom_set_name(hh_t *h, const char *tid, const char *name);
 int  custom_set_icon(hh_t *h, const char *tid, const unsigned char *img, size_t len, int clear);
 /* Home screen background (pic0/pic1). img NULL puts the original back. */
 int  custom_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t len);
+/* Folder tiles only: puts a folder's current name and picture into the home
+ * screen database without the console's installer (which takes about 90 seconds
+ * on newer firmware). The folder's own files stay the source of truth, so no
+ * "originals" are saved. png is the finished picture. Returns -1 (h->err says
+ * why) if the tile's name or picture can't be found in the database, so the
+ * caller can use the installer instead. */
+int  custom_refresh_folder_tile(hh_t *h, const char *tid, const char *name, const unsigned char *png,
+                                size_t len);
+
 /* The chosen background picture (a JPEG copy), for previews. 0 if any. */
 int  custom_bg_path(hh_t *h, const char *tid, char *out, size_t n);
 
@@ -46,6 +55,6 @@ int  custom_get_json(hh_t *h, const char *tid, strbuf_t *sb);
  * restored the originals. *fixed = number of values changed. */
 int  custom_reapply(hh_t *h, int *fixed);
 
-/* Deletes Home Hider's picture files (before the original database is
+/* Deletes Home Screen Manager's picture files (before the original database is
  * restored, which brings back the original names and pictures). */
 void custom_forget_all(hh_t *h);

@@ -8,10 +8,33 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "custom.h"
 #include "icons.h"
 #include "texture.h"
 #include "log.h"
 #include "platform.h"
+
+#include <time.h>
+
+/* Adding a tile needs the console's installer, which can take about 90 seconds
+ * on newer firmware. While a folder is being saved the background check must
+ * not "repair" its tile (it isn't in the console's database yet, so the check
+ * would start a second install of the same tile). */
+static volatile int g_busy;
+
+
+void folders_hold(int on) {
+  if (on) __sync_fetch_and_add(&g_busy, 1);
+  else __sync_fetch_and_sub(&g_busy, 1);
+}
+
+int folders_busy(void) { return g_busy > 0; }
+
+static long now_ms(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (long)(t.tv_sec * 1000L + t.tv_nsec / 1000000L);
+}
 
 static struct {
   char data_dir[256];
@@ -355,8 +378,9 @@ static int install_tile(hh_t *h, const char *tid, char *note, size_t notesz) {
     return -1;
   }
   hh_log("folder %s: tile files written to %s/%s", tid, F.app_dir, tid);
+  long t_inst = now_ms();
   int err = plat_app_install(tid, F.app_dir);
-  hh_log("folder %s: app install returned 0x%08X", tid, (unsigned)err);
+  hh_log("folder %s: app install returned 0x%08X after %ld ms", tid, (unsigned)err, now_ms() - t_inst);
   if (err) {
     char msg[64];
     snprintf(msg, sizeof(msg), "0x%08X", (unsigned)err);
@@ -381,6 +405,63 @@ static int install_tile(hh_t *h, const char *tid, char *note, size_t notesz) {
   int moved = place_tile(h, tid, tab);
   hh_log("folder %s: placed on %s tab (changed=%d)", tid, tab, moved);
   return 0;
+}
+
+/* The tab the folder is set to live on. */
+static void folder_tab(hh_t *h, const char *tid, char *tab, size_t n) {
+  snprintf(tab, n, "games");
+  sqlite3_stmt *st = prep(h, "SELECT tab FROM hh.folders WHERE title_id=?1");
+  if (!st) return;
+  sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) snprintf(tab, n, "%s", sqlite3_column_text(st, 0));
+  sqlite3_finalize(st);
+}
+
+/* The folder's current name and the finished picture (written by write_tile)
+ * into the home screen database. 0 on success; -1 with h->err if it can't. */
+static int refresh_in_place(hh_t *h, const char *tid) {
+  char name[FOLDER_NAME_MAX * 2] = "", path[520];
+  sqlite3_stmt *st = prep(h, "SELECT name FROM hh.folders WHERE title_id=?1");
+  if (!st) return -1;
+  sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) snprintf(name, sizeof(name), "%s", sqlite3_column_text(st, 0));
+  sqlite3_finalize(st);
+  snprintf(path, sizeof(path), "%s/%s/sce_sys/icon0.png", F.app_dir, tid);
+  unsigned char *png = NULL;
+  size_t png_len = 0;
+  if (read_file(path, &png, &png_len)) {
+    ferr(h, "Couldn't read the folder's picture back.%s", "");
+    return -1;
+  }
+  int rc = custom_refresh_folder_tile(h, tid, name, png, png_len);
+  free(png);
+  return rc;
+}
+
+/* Brings the folder's tile up to date after a change. A tile that is already
+ * in the home screen database is updated there directly (seconds); a new tile,
+ * or one that can't be updated that way, goes through the console's installer
+ * (about 90 seconds on newer firmware). */
+static int update_tile(hh_t *h, const char *tid, char *note, size_t notesz) {
+  if (tile_present(h, tid)) {
+    long t0 = now_ms();
+    if (write_tile(h, tid) == 0) {
+      hh_log("folder %s: tile files written to %s/%s", tid, F.app_dir, tid);
+      if (refresh_in_place(h, tid) == 0) {
+        char tab[16];
+        folder_tab(h, tid, tab, sizeof(tab));
+        int moved = place_tile(h, tid, tab);
+        hh_log("folder %s: updated without the installer in %ld ms (placed on %s tab, changed=%d)", tid,
+               now_ms() - t0, tab, moved);
+        return 0;
+      }
+      hh_log("folder %s: couldn't update it in the database (%s), using the installer", tid, h->err);
+    } else {
+      hh_log("folder %s: writing tile files failed: %s", tid, h->err);
+      return -1;
+    }
+  }
+  return install_tile(h, tid, note, notesz);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -485,9 +566,41 @@ static int clean_name(const char *in, char *out, size_t outsz) {
   return n > 0 && n <= FOLDER_NAME_MAX ? 0 : -1;
 }
 
-int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *tab,
-                 const char *color, const char *items_csv, char *out_tid,
-                 char *note, size_t notesz) {
+/* 1 if the folder already has exactly this name, tab, colour and games in this
+ * order (and its tile is in the home screen database), so saving would do nothing. */
+static int folder_unchanged(hh_t *h, const char *tid, const char *name, const char *tab, const char *color,
+                            char (*items)[16], int n) {
+  if (!tile_present(h, tid)) return 0;
+  sqlite3_stmt *st = prep(h, "SELECT name, tab, color FROM hh.folders WHERE title_id=?1");
+  if (!st) return 0;
+  sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
+  int same = 0;
+  if (sqlite3_step(st) == SQLITE_ROW)
+    same = !strcmp(name, (const char *)sqlite3_column_text(st, 0)) &&
+           !strcmp(tab, (const char *)sqlite3_column_text(st, 1)) &&
+           !strcmp(color, (const char *)sqlite3_column_text(st, 2));
+  sqlite3_finalize(st);
+  if (!same) return 0;
+  st = prep(h, "SELECT title_id FROM hh.folder_items WHERE folder=?1 ORDER BY pos");
+  if (!st) return 0;
+  sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
+  int i = 0;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    if (i >= n || strcmp(items[i], (const char *)sqlite3_column_text(st, 0))) {
+      same = 0;
+      break;
+    }
+    i++;
+  }
+  sqlite3_finalize(st);
+  return same && i == n;
+}
+
+static int folders_save_impl(hh_t *h, const char *tid_in, const char *name_in, const char *tab,
+                             const char *color, const char *items_csv, char *out_tid,
+                             char *note, size_t notesz, int *changed) {
+  long t_start = now_ms();
+  if (changed) *changed = 1;
   if (note) note[0] = '\0';
   hh_log("folder save: id='%s' tab=%s color=%s items='%.200s'", tid_in ? tid_in : "", tab ? tab : "",
          color ? color : "", items_csv ? items_csv : "");
@@ -546,6 +659,15 @@ int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *t
       ferr(h, "You already have the maximum of %s folders.", "99");
       return -1;
     }
+  }
+
+  /* an existing folder that is already exactly like this: nothing to do */
+  if (tid_in && tid_in[0] && folder_unchanged(h, tid, name, tab, color, items, n)) {
+    hh_log("folder %s: nothing changed, nothing done", tid);
+    if (changed) *changed = 0;
+    snprintf(out_tid, 16, "%s", tid);
+    free(items);
+    return 0;
   }
 
   /* 1. records (one transaction) */
@@ -631,9 +753,10 @@ int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *t
       hh_unhide(h, removed[i]); /* left its last folder */
 
   /* 3. the tile itself */
-  int rc = install_tile(h, tid, note, notesz);
+  int rc = update_tile(h, tid, note, notesz);
   if (rc) goto fail;
-  hh_log("folder %s: saved, %d game(s), %d hide failure(s), %d removed", tid, n, missing, nrem);
+  hh_log("folder %s: saved, %d game(s), %d hide failure(s), %d removed (%ld ms in all)", tid, n, missing, nrem,
+         now_ms() - t_start);
   if (missing && note && !note[0])
     snprintf(note, notesz, "%d game(s) couldn't be hidden from the home screen.", missing);
 
@@ -654,6 +777,14 @@ fail:
   free(removed);
   free(removed_hidden);
   return -1;
+}
+
+int folders_save(hh_t *h, const char *tid_in, const char *name_in, const char *tab, const char *color,
+                 const char *items_csv, char *out_tid, char *note, size_t notesz, int *changed) {
+  __sync_fetch_and_add(&g_busy, 1);
+  int rc = folders_save_impl(h, tid_in, name_in, tab, color, items_csv, out_tid, note, notesz, changed);
+  __sync_fetch_and_sub(&g_busy, 1);
+  return rc;
 }
 
 static void remove_tile_files(const char *tid) {
@@ -735,7 +866,7 @@ int folders_remove_member(hh_t *h, const char *tid, const char *folder_in) {
     sb_init(&items);
     for (int i = 0; i < n; i++) sb_printf(&items, "%s%s", i ? "," : "", keep[i]);
     char out_id[16], note[160];
-    rc = items.oom ? -1 : folders_save(h, folder, name, tab, color, items.data, out_id, note, sizeof(note));
+    rc = items.oom ? -1 : folders_save(h, folder, name, tab, color, items.data, out_id, note, sizeof(note), NULL);
     sb_free(&items);
   }
   free(keep);
@@ -763,6 +894,7 @@ int folders_delete(hh_t *h, const char *tid) {
     sqlite3_finalize(st);
   }
   if (run1(h, "DELETE FROM hh.folder_items WHERE folder=?1", tid, NULL) ||
+      run1(h, "DELETE FROM hh.folder_meta WHERE title_id=?1", tid, NULL) ||
       run1(h, "DELETE FROM hh.folders WHERE title_id=?1", tid, NULL)) {
     free(show);
     return -1;
@@ -783,7 +915,7 @@ int folders_delete(hh_t *h, const char *tid) {
   return 0;
 }
 
-int folders_set_icon(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
+static int folders_set_icon_impl(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
   if (!folders_is_folder(tid) ||
       count1(h, "SELECT count(*) FROM hh.folders WHERE title_id=?1", tid) == 0) {
     ferr(h, "That folder doesn't exist.%s", "");
@@ -811,10 +943,10 @@ int folders_set_icon(hh_t *h, const char *tid, const unsigned char *img, size_t 
   }
   if (run1(h, "UPDATE hh.folders SET custom_icon=?2 WHERE title_id=?1", tid, img ? "1" : "0"))
     return -1;
-  return install_tile(h, tid, NULL, 0);
+  return update_tile(h, tid, NULL, 0);
 }
 
-int folders_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
+static int folders_set_bg_impl(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
   if (!folders_is_folder(tid) ||
       count1(h, "SELECT count(*) FROM hh.folders WHERE title_id=?1", tid) == 0) {
     ferr(h, "That folder doesn't exist.%s", "");
@@ -853,9 +985,24 @@ int folders_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t le
   return install_tile(h, tid, NULL, 0);
 }
 
+int folders_set_icon(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
+  __sync_fetch_and_add(&g_busy, 1);
+  int rc = folders_set_icon_impl(h, tid, img, len);
+  __sync_fetch_and_sub(&g_busy, 1);
+  return rc;
+}
+
+int folders_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
+  __sync_fetch_and_add(&g_busy, 1);
+  int rc = folders_set_bg_impl(h, tid, img, len);
+  __sync_fetch_and_sub(&g_busy, 1);
+  return rc;
+}
+
 int folders_reapply(hh_t *h, int *fixed) {
   *fixed = 0;
   if (h->nusers == 0) return 0;
+  if (g_busy > 0) return 0; /* a folder is being saved: its tile is on its way (see g_busy) */
   sqlite3_stmt *st = prep(h, "SELECT title_id, tab FROM hh.folders");
   if (!st) return -1;
   char ids[FOLDER_MAX][16], tabs[FOLDER_MAX][8];

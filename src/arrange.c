@@ -215,7 +215,7 @@ static int apply_locked(hh_t *h, int *fixed) {
   /* The base comes from the PS5's own numbers only. Our own earlier values
    * (arranged tiles, and folders kept first) must not count, or every pass
    * would raise the base by another ARRANGE_BASE_GAP and the numbers would
-   * climb for as long as Home Hider runs. */
+   * climb for as long as Home Screen Manager runs. */
   long long maxacc = 0;
   for (int ui = 0; ui < h->nusers; ui++) {
     char sql[360];
@@ -230,7 +230,7 @@ static int apply_locked(hh_t *h, int *fixed) {
   long long ver = scalar1(h, "SELECT status FROM main.tbl_version WHERE category='access_index'",
                           NULL, 0);
   /* Keep Folders first raises the counter to the top of the folder block. That
-   * value is Home Hider's own, not the PS5's progress, so it doesn't count. */
+   * value is Home Screen Manager's own, not the PS5's progress, so it doesn't count. */
   long long set_ver = fs_get(h, "counter", -1);
   if (set_ver >= 0 && ver <= set_ver) ver = 0;
   long long base = (ver > maxacc ? ver : maxacc) + ARRANGE_BASE_GAP;
@@ -326,7 +326,7 @@ static int in_csv(const char *csv, const char *tid) {
 
 int arrange_set(hh_t *h, const char *items_csv, const char *pinned_csv) {
   if (h->nusers == 0) {
-    aerr(h, "This firmware's home screen database has a layout Home Hider doesn't know yet.");
+    aerr(h, "This firmware's home screen database has a layout Home Screen Manager doesn't know yet.");
     return -1;
   }
   if (!items_csv) items_csv = "";
@@ -458,7 +458,7 @@ int arrange_json(hh_t *h, strbuf_t *sb) {
 typedef struct {
   char      id[16];
   long long cur;      /* value in app.db now */
-  long long written;  /* value Home Hider put there last time */
+  long long written;  /* value Home Screen Manager put there last time */
   long long orig;     /* the PS5's own value, put back when this is switched off */
   int       old_rank; /* position in the block last time (0 = first) */
   int       known;    /* has a saved state row */

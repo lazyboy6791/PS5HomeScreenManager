@@ -254,6 +254,7 @@ int hh_open(hh_t *h, const char *app_db, const char *state_db) {
                    " title_id TEXT NOT NULL, user TEXT NOT NULL,"
                    " orig_access INTEGER, orig_pinned INTEGER, orig_idx INTEGER,"
                    " PRIMARY KEY(title_id, user));"
+                   "CREATE TABLE IF NOT EXISTS folder_meta(title_id TEXT PRIMARY KEY, icon_meta TEXT);"
                    "CREATE TABLE IF NOT EXISTS front_state(k TEXT PRIMARY KEY, v INTEGER);"
                    "CREATE TABLE IF NOT EXISTS front_folders("
                    " title_id TEXT NOT NULL, user TEXT NOT NULL, orig_access INTEGER,"
@@ -319,7 +320,7 @@ void hh_close(hh_t *h) {
 
 static int need_users(hh_t *h) {
   if (h->nusers > 0) return 0;
-  set_err(h, "This firmware's home screen database has a layout Home Hider "
+  set_err(h, "This firmware's home screen database has a layout Home Screen Manager "
              "doesn't know yet (no usable tbl_iconinfo_* tables). Open "
              "Advanced > Diagnostics and share the output.%s", "");
   return -1;
@@ -429,11 +430,11 @@ int hh_hide(hh_t *h, const char *tid) {
     return -1;
   }
   if (strncmp(tid, "HHFD", 4) == 0) {
-    set_err(h, "%s is a Home Hider folder. Manage it in the Folders section.", tid);
+    set_err(h, "%s is a Home Screen Manager folder. Manage it in the Folders section.", tid);
     return -1;
   }
   /* Game/App Library (locked tiles) can be hidden now: the PS5 may add them
-   * back, but the keep-hidden watchdog hides them again while Home Hider runs. */
+   * back, but the keep-hidden watchdog hides them again while Home Screen Manager runs. */
   if (need_users(h)) return -1;
   if (exec(h, "BEGIN IMMEDIATE")) return -1;
 
@@ -587,7 +588,7 @@ int hh_unhide_all(hh_t *h, int *count) {
 
 int hh_release_locked(hh_t *h, int *count) {
   /* Game/App Library can now be hidden on purpose, and the watchdog keeps them
-   * hidden, so Home Hider no longer force-shows them at launch. */
+   * hidden, so Home Screen Manager no longer force-shows them at launch. */
   (void)h;
   *count = 0;
   return 0;
@@ -691,11 +692,11 @@ typedef struct {
   int       vis_any;
   int       pinned;      /* in a MyHome group now */
   int       installed;   /* installStatus == 2 (or column missing) */
-  int       on_list;     /* on Home Hider's hide list */
+  int       on_list;     /* on Home Screen Manager's hide list */
   char      folder[16];  /* first folder holding this title, "" if none */
-  int       renamed;     /* Home Hider changed its name */
-  int       custom_icon; /* Home Hider changed its picture */
-  int       custom_bg;   /* Home Hider changed its background */
+  int       renamed;     /* Home Screen Manager changed its name */
+  int       custom_icon; /* Home Screen Manager changed its picture */
+  int       custom_bg;   /* Home Screen Manager changed its background */
   long long orig_disp;   /* dispLocation before we hid it, -1 unknown */
   int       orig_pinned; /* we removed a MyHome pin */
 } list_item_t;
@@ -994,7 +995,7 @@ int hh_icon_path(hh_t *h, const char *tid, char *out, size_t outsz) {
   struct stat sbuf;
   char sql[512], cand[512];
 
-  /* 0. a picture chosen in Home Hider */
+  /* 0. a picture chosen in Home Screen Manager */
   if (h->db) {
     sqlite3_stmt *st = prep(h, "SELECT icon_file FROM hh.custom WHERE title_id=?1 AND icon_file IS NOT NULL",
                             tid, NULL, NULL);
@@ -1141,7 +1142,7 @@ static void dump_cols(hh_t *h, strbuf_t *o, const char *table) {
 }
 
 void hh_diag(hh_t *h, strbuf_t *o) {
-  sb_printf(o, "Home Hider %s diagnostics\nSQLite %s\napp.db: %s\n", HH_VERSION,
+  sb_printf(o, "Home Screen Manager %s diagnostics\nSQLite %s\napp.db: %s\n", HH_VERSION,
             sqlite3_libversion(), h->app_db_path);
   if (!h->db) {
     sb_printf(o, "Database not open: %s\n", h->err);
@@ -1215,7 +1216,7 @@ void hh_diag(hh_t *h, strbuf_t *o) {
     dump_rows(h, o, sql, NULL, "   ");
   }
 
-  sb_puts(o, "\nHome Hider hide list:\n");
+  sb_puts(o, "\nHome Screen Manager hide list:\n");
   dump_rows(h, o, "SELECT * FROM hh.wanted", NULL, "   ");
   sb_puts(o, "Saved originals:\n");
   dump_rows(h, o, "SELECT * FROM hh.hidden", NULL, "   ");

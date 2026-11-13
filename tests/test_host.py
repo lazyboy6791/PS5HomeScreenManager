@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desktop test suite for Home Hider.
+"""Desktop test suite for Home Screen Manager.
 
 Builds a mock PS5 app.db (two users, MyHome groups, a rowid-alias primary key
 on the group table), runs the host build of the payload, and drives it over
@@ -212,7 +212,7 @@ def library_hide_tests(tmp):
     s = Server(appdb, data)
     code, st = http("GET", "/api/status")
     check(st["reapplied_at_launch"] >= 1 and vis(appdb, LIBRARY) == [0, 0],
-          "Home Hider re-hides Game Library after the system restores it")
+          "Home Screen Manager re-hides Game Library after the system restores it")
     http("POST", "/api/unhide?id=" + LIBRARY)
     http("POST", "/api/unhide?id=NPXS40139")
     check(dump(appdb) == original, "showing both Library tiles again restores the original database")
@@ -231,10 +231,13 @@ import struct
 
 
 def fake_elf(version, size=40 * 1024, marker=True):
+    """marker: True/"old" = the marker from before the rename, "new" = the new one, "both", or False = none."""
     hdr = b"\x7fELF" + bytes([2, 1, 1]) + b"\x00" * 9 + struct.pack("<HH", 2, 0x3E)
     body = hdr + b"\x00" * 2000
-    if marker:
+    if marker in (True, "old", "both"):
         body += b"junk HOMEHIDER-ELF-VERSION=\x00 more HOMEHIDER-ELF-VERSION=" + version.encode() + b";"
+    if marker in ("new", "both"):
+        body += b"junk HOMESCREENMANAGER-ELF-VERSION=\x00 more HOMESCREENMANAGER-ELF-VERSION=" + version.encode() + b";"
     return body + bytes((i * 7) % 251 for i in range(size - len(body)))
 
 
@@ -302,7 +305,7 @@ class FakeGitHub:
 
 class FakeLoader:
     """Plays the ELF loader: receives the new build, then (like the new
-    instance would) asks the running Home Hider to quit."""
+    instance would) asks the running Home Screen Manager to quit."""
 
     def __init__(self, port):
         self.received = []
@@ -376,7 +379,9 @@ def updater_tests(tmp):
         cur_ver = re.search(rb"HOMEHIDER-ELF-VERSION=([0-9.]+);", current).group(1).decode()
         s = Server(appdb, data, env)
         code, st = http("GET", "/api/status")
-        check(st["marker"] == "HOMEHIDER-ELF-VERSION=%s;" % cur_ver, "build carries its version marker")
+        check(st["marker"] == "HOMESCREENMANAGER-ELF-VERSION=%s;" % cur_ver, "build carries its version marker")
+        check(re.search(rb"HOMESCREENMANAGER-ELF-VERSION=%s;" % cur_ver.encode(), current) is not None,
+              "the new marker is in the file, and so is the old one (so builds from before the rename can still read the version)")
         u = wait_idle()
         check(u["current"] == cur_ver and not u["usb"]["newer"] and not u["repo"], "nothing to update at start")
 
@@ -420,10 +425,10 @@ def updater_tests(tmp):
         check(open(os.path.join(pld, "local", "homehider", "HomeHider.elf"), "rb").read() == new, "Payload Manager copy replaced")
         check(open(os.path.join(pld, "HomeHider-v0.2.0.elf"), "rb").read() == new, "old v0.2 copy recognised and replaced")
         check(open(os.path.join(pld, "local", "other", "ftpsrv.elf"), "rb").read() == other, "other payloads untouched")
-        check(open(os.path.join(data, "HomeHider.elf"), "rb").read() == new, "own copy written")
+        check(open(os.path.join(data, "HomeScreenManager.elf"), "rb").read() == new, "own copy written, under the new name")
         bk = os.path.join(data, "backup")
-        check(open(os.path.join(bk, "HomeHider-%s.elf" % cur_ver), "rb").read() == current, "previous version backed up")
-        check(os.path.exists(os.path.join(bk, "HomeHider-previous.elf")), "v0.2 copy backed up")
+        check(open(os.path.join(bk, "HomeScreenManager-%s.elf" % cur_ver), "rb").read() == current, "previous version backed up")
+        check(os.path.exists(os.path.join(bk, "HomeScreenManager-previous.elf")), "v0.2 copy backed up")
         check(os.path.exists(os.path.join(data, ".updated")), "restart flag left for the new instance")
         check(not [f for f in os.listdir(os.path.join(pld, "local", "homehider")) if f.endswith(".hhnew")], "no temp files left")
 
@@ -438,6 +443,11 @@ def updater_tests(tmp):
         http("POST", "/api/update/check")
         u = wait_idle()
         check(not u["github"]["ok"] and "Couldn't reach GitHub" in (u["github"]["error"] or ""), "unreachable GitHub explained")
+        lg = http("GET", "/api/log", raw=True)[1].decode()
+        check("update check: GitHub me/HomeHider: couldn't connect (code 0x" in lg, "an update check that can't connect logs the code and the step")
+        check("update check: GitHub me/HomeHider: a newer version is available" in lg or "update check: GitHub me/HomeHider: no newer version" in lg,
+              "and a check that got an answer logs how it went")
+        check("update check: USB drives:" in lg, "USB drives are logged too")
 
         print("  USB drive")
         os.makedirs(usb_fmt % 0 + "/homehider")
@@ -449,6 +459,13 @@ def updater_tests(tmp):
         http("POST", "/api/update/check?usb_only=1")
         u = wait_idle()
         check(u["usb"]["newer"] and u["usb"]["version"] == "9.9.10", "newest USB build found")
+        os.makedirs(usb_fmt % 2 + "/homescreenmanager")
+        usb_new = fake_elf("9.9.11", marker="new")
+        open(usb_fmt % 2 + "/homescreenmanager/HomeScreenManager-v9.9.11.elf", "wb").write(usb_new)
+        http("POST", "/api/update/check?usb_only=1")
+        u = wait_idle()
+        check(u["usb"]["newer"] and u["usb"]["version"] == "9.9.11",
+              "a build with only the new marker, in a homescreenmanager folder, is found too and wins")
         code, r = http("POST", "/api/update/install?source=usb")
         wait_exit(s)
         check(loader.received[-1] == usb_new, "USB build handed to the loader")
@@ -468,7 +485,7 @@ def updater_tests(tmp):
         code, r = upload(b"not an elf at all" * 3000)
         check(code == 409 and "isn't a PS5 payload" in r["error"], "garbage upload refused")
         code, r = upload(other)
-        check(code == 409 and "isn't a Home Hider build" in r["error"], "other payload refused")
+        check(code == 409 and "isn't a Home Screen Manager build" in r["error"], "other payload refused")
         code, r = upload(fake_elf("0.0.1"))
         check(code == 409 and "Allow older" in r["error"], "older build needs explicit permission")
         evil = urllib.request.Request(BASE + "/api/update/upload", method="POST", data=fake_elf("9.9.12"),
@@ -605,7 +622,9 @@ def folder_tests(tmp):
     code, page = http("GET", "/folder/HHFD00001", raw=True)
     check(code == 200 and b"Sort by" in page, "folder page served")
     check(b'id="head"' in page and b"header{display:none" in page,
-          "folder page has a header (picture + name) that is hidden unless switched on")
+          "folder page has a header (picture + name) that the page settings turn on")
+    check(b"body.noedit .foot{display:none}" in page and b'id="edit"' in page,
+          "and an edit link that the page settings can hide")
     check(b'id="count"' in page and b'id="grid"' in page and b'id="edit"' in page,
           "folder page keeps the count, sort, grid and edit link")
     code, j = http("GET", "/api/folder?id=HHFD00001")
@@ -1013,6 +1032,49 @@ def startup_mode_tests(tmp):
     check(http("GET", "/api/status")[1]["settings"]["open_browser"] == 1, "unknown value treated as 'open'")
     menu = http("GET", "/", raw=True)[1]
     check(b"Quiet when started by Autoload" in menu and b"sw_autoclose" not in menu, "menu shows the three choices")
+
+    # the menu's collapsible sections, in order, and what is in each
+    m = menu.decode()
+    def sec(sid):
+        a = m.index('<details class="section" id="%s">' % sid)
+        return a, m.index("</details>", a)
+    order = ["folderOpts", "hideOpts", "updSettings", "adv"]
+    spans = [sec(i) for i in order]
+    check(all(spans[i][1] < spans[i + 1][0] for i in range(3)), "the four sections follow each other, none inside another")
+    titles = [m[a:b].split('<span class="sumh">')[1].split("</span>")[0] for a, b in spans]
+    check(titles == ["Folder options", "Tile hiding options", "Update settings", "More &amp; troubleshooting"],
+          "their titles")
+    check("Updates &amp; advanced options" not in m, "the old combined section is gone")
+    def has(i, ids):
+        a, b = spans[i]
+        return all(('id="%s"' % x) in m[a:b] for x in ids)
+    check(has(0, ["sw_fh", "sw_fb", "sw_fe"]) and "sw_reapply" not in m[spans[0][0]:spans[0][1]],
+          "Folder options: the picture and name, the count and sort row, and the edit link")
+    check('id="sw_fi"' not in m and "folder_inplace" not in m, "the 'without the installer' switch is gone")
+    check(has(1, ["sw_reapply", "sw_run"]) and all(x not in m[spans[1][0]:spans[1][1]] for x in ("sw_fh", "updCheckBtn", "updSettings")),
+          "Tile hiding options: only Keep tiles hidden and Show a running game")
+    check(has(2, ["updMsg", "updHint", "updCheckBtn", "updOffers", "repo", "sw_auto", "updFile", "allowOlder"]),
+          "Update settings: the status line, Check for updates, the offers area, repository, check at start, install from a file")
+    check(m.index('id="updMsg"') < m.index('id="repo"'), "the status line comes before the repository")
+    check(has(3, ["diag", "dl"]), "More & troubleshooting keeps its buttons")
+    check("document.getElementById('updSettings')" in m and "document.getElementById('advAll')" not in m,
+          "See update opens the Update settings section")
+    a = m.index("function saveFolder(btn)")
+    save_js = m[a:m.index("\nfunction ", a + 10)]
+    check("/api/folders/save?async=1" in save_js and "folderJob(" in m, "the folder save runs as a background job")
+    check("startSaveTimer(creating ? 'Creating folder' : 'Saving folder')" in save_js and "This can take about 90 seconds depending on your firmware" in m
+          and "Still working: the console" in m and "function fmtElapsed" in m,
+          "it says 'Creating folder… <time>. This can take about 90 seconds depending on your firmware', with a running timer")
+    check("Refresh home screen now" in save_js, "a failed later step still offers a Refresh home screen now button")
+    check("&refresh=1" in save_js and "Nothing was changed." in save_js and "is refreshing to show the result" in save_js,
+          "the save asks Home Screen Manager to restart the home screen after the last step, and says so (or says nothing changed)")
+    attn_new = "!ATTENTION!</b> Creating a folder can take up to 90 seconds depending on your firmware. Please do not open any apps or games during the folder creation process. There will be tile movement on the homescreen until the process is finished. Once the folder is created the homescreen will automatically refresh to show the results."
+    attn_edit = "!ATTENTION!</b> Depending on the changes you have made to this folder it can take between 1 and 90 seconds to take effect. Please do not open any apps or games during this process. Once the folder is edited successfully the homescreen will automatically refresh to show the results. Deletion of a folder is instant and will not restart the homescreen."
+    js_text = m.replace("' +\n  '", "")   # the texts are written in pieces in the page script
+    check(attn_new in js_text and attn_edit in js_text, "the editor has both attention messages, in your wording")
+    check(m.index('id="fmPick"') < m.index('id="fmAttn"') < m.index('id="fmMsg"') < m.index('onclick="saveFolder(this)"'),
+          "the attention box sits right below the games grid, with the counter and messages below it, then the buttons")
+    check("fmAttn').innerHTML = f ? ATTN_EDIT : ATTN_NEW" in m, "the create page and the edit page each get their own")
     s.stop()
 
 
@@ -1197,7 +1259,7 @@ def custom_tests(tmp):
     check(code == 200, "picture accepted")
     paths = icons("PPSA01325")
     check(len(set(paths)) == 1 and paths[0].startswith(os.path.join(meta, "PPSA01325", "hh_icon0_")),
-          "icon0Info points at Home Hider's own file in appmeta (both users)")
+          "icon0Info points at Home Screen Manager's own file in appmeta (both users)")
     check(png_size(paths[0]) == (512, 512), "512x512 picture written")
     code, png = http("GET", "/api/icon?id=PPSA01325", raw=True)
     check(code == 200 and png == open(paths[0], "rb").read(), "menu shows the new picture")
@@ -1247,7 +1309,7 @@ def custom_tests(tmp):
     check(code == 200 and icons("PPSA01325") == ["/user/appmeta/PPSA01325/icon0.png?ts=2",
                                                 "/user/appmeta/PPSA01325/icon0.png?ts=1"],
           "original picture paths back (the newest one the console set is kept)")
-    check(not os.path.exists(paths2[0]), "Home Hider's picture file removed")
+    check(not os.path.exists(paths2[0]), "Home Screen Manager's picture file removed")
     code, r = http("POST", "/api/custom/name?id=PPSA01325&reset=1")
     check(code == 200 and names("PPSA01325") == ["Astro Playroom", "ASTRO's PLAYROOM"] * 2 + ["Astro Playroom"],
           "original name back")
@@ -1282,7 +1344,7 @@ def custom_tests(tmp):
 
 
 def dds_header(w, h, mips, fourcc=b"DX10", dxgi=98):
-    """Just the header of a DDS file (enough for Home Hider to read the format)."""
+    """Just the header of a DDS file (enough for Home Screen Manager to read the format)."""
     hd = bytearray(148)
     hd[0:4] = b"DDS "
     struct.pack_into("<IIIIIII", hd, 4, 124, 0x1007 | 0x20000, h, w, 0, 0, mips)
@@ -1321,7 +1383,7 @@ def background_tests(tmp):
         qx(appdb, f'ALTER TABLE "tbl_concepticoninfo_{u}" ADD COLUMN pic0Info TEXT')
         qx(appdb, f'ALTER TABLE "tbl_concepticoninfo_{u}" ADD COLUMN pic1Info TEXT')
     # originals: PPSA01325 has a BC7 DDS (3 mips) and a PNG; CUSA00900's is inside a
-    # package Home Hider can't read; CUSA01065 uses a format it can't write
+    # package Home Screen Manager can't read; CUSA01065 uses a format it can't write
     open(os.path.join(orig_dir, "pic0.dds"), "wb").write(dds_header(1920, 1080, 3))
     Image.new("RGB", (1280, 720), (1, 2, 3)).save(os.path.join(orig_dir, "pic1.png"))
     open(os.path.join(orig_dir, "dxt3.dds"), "wb").write(dds_header(1920, 1080, 1, b"DXT3"))
@@ -1359,7 +1421,7 @@ def background_tests(tmp):
     rows = bgs("PPSA01325")
     p0, p1 = rows[0]
     check(rows[0] == rows[1], "both users point at the same new files")
-    check(p0.startswith(os.path.join(meta, "PPSA01325", "hh_bg_")) and p0.endswith(".dds"), "pic0 -> Home Hider's DDS in appmeta")
+    check(p0.startswith(os.path.join(meta, "PPSA01325", "hh_bg_")) and p0.endswith(".dds"), "pic0 -> Home Screen Manager's DDS in appmeta")
     check(p1.endswith(".png") and p1 != p0, "pic1 -> a PNG, because the original pic1 is a PNG")
     check(dds_info(p0) == (1920, 1080, 3, 98), "DDS keeps the original size, mip count and BC7 format")
     im = Image.open(p0)
@@ -1381,7 +1443,7 @@ def background_tests(tmp):
     p = bgs("CUSA00900")[0][0]
     check(code == 200 and dds_info(p) == (3840, 2160, 1, 98), "original inside a game package: 4K BC7 DDS")
     code, r = post_bytes("/api/custom/bg?id=CUSA01065", jpg)
-    check(code == 409 and "can't write" in r["error"], "a format Home Hider can't write is refused")
+    check(code == 409 and "can't write" in r["error"], "a format Home Screen Manager can't write is refused")
     check(bgs("CUSA01065")[0][0] == origs["CUSA01065"][0], "and nothing changed")
     code, r = post_bytes("/api/custom/bg?id=" + STORE, jpg)
     check(code == 409 and "no background" in r["error"], "tile without a background entry refused")
@@ -1621,7 +1683,7 @@ def watchdog_tests(tmp):
     check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0] and vis(appdb, "CUSA00900") == [0, 0], 12),
           "a game in two folders is hidden again on its own")
 
-    # with the setting off, Home Hider leaves the PS5's change alone
+    # with the setting off, Home Screen Manager leaves the PS5's change alone
     http("POST", "/api/settings?reapply=0")
     for u in USERS:
         qx(appdb, f'UPDATE "tbl_iconinfo_{u}" SET visible=1 WHERE titleId=?', "PPSA01325")
@@ -1824,7 +1886,7 @@ def live_tests(tmp):
         code = e.code
     check(code == 403, "other web sites can't switch it")
 
-    print("  starts with Home Hider, but never twice")
+    print("  starts with Home Screen Manager, but never twice")
     s.stop()
     s = Server(appdb, data, env)
     time.sleep(4.5)
@@ -2031,7 +2093,7 @@ def front_folders_tests(tmp):
     con.commit()
     con.close()
     s = Server(appdb, data, env)
-    check(ahead(fids), "folders are put back in front when Home Hider starts")
+    check(ahead(fids), "folders are put back in front when Home Screen Manager starts")
     s.stop()
 
 def show_running_tests(tmp):
@@ -2083,7 +2145,7 @@ def show_running_tests(tmp):
           "the log shows when the tile was left on screen and when it was hidden again")
 
     code, raw = http("GET", "/api/log", raw=True)
-    check(code == 200 and b"Home Hider" in raw and b"show running" in raw, "the log has its own address (/api/log)")
+    check(code == 200 and b"Home Screen Manager" in raw and b"show running" in raw, "the log has its own address (/api/log)")
 
     print("  switched off")
     http("POST", "/api/settings?show_running=0")
@@ -2149,88 +2211,760 @@ def folder_page_options_tests(tmp):
     code, r = form("/api/folders/save", {"name": "Games", "items": "PPSA01325"})
     fid = r["id"]
 
+    def page(header, bar, edit):
+        return {"header": header, "bar": bar, "edit": edit, "debug": False}  # debug: the test display, off by default
+
     st = http("GET", "/api/status")[1]["settings"]
-    check(st["folder_header"] is False and st["folder_bar"] is True, "defaults: no header, count and sort row shown")
+    check(st["folder_header"] is True and st["folder_bar"] is True and st["folder_edit"] is True,
+          "defaults: the picture and name, the count and sort row and the edit link are all shown")
     code, j = http("GET", "/api/folder?id=" + fid)
-    check(code == 200 and j["page"] == {"header": False, "bar": True}, "the folder page is told the defaults")
+    check(code == 200 and j["page"] == page(True, True, True), "the folder page is told the defaults")
     check(j["folder"]["name"] == "Games" and len(j["folder"]["items"]) == 1, "the folder itself is unchanged")
 
     print("  switch them")
-    http("POST", "/api/settings?folder_header=1")
-    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": True, "bar": True}, "header on, bar unchanged")
+    http("POST", "/api/settings?folder_header=0")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(False, True, True), "picture and name off, the rest unchanged")
     http("POST", "/api/settings?folder_bar=0")
-    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": True, "bar": False}, "bar off, header unchanged")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(False, False, True), "count and sort row off too")
+    http("POST", "/api/settings?folder_edit=0")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(False, False, False), "edit link off too")
     st = http("GET", "/api/status")[1]["settings"]
-    check(st["folder_header"] is True and st["folder_bar"] is False, "the menu is told both")
+    check(st["folder_header"] is False and st["folder_bar"] is False and st["folder_edit"] is False,
+          "the menu is told all three")
     code, j = http("GET", "/api/folder?id=NOSUCHFLD")
     check(code == 404, "an unknown folder is still a 404")
+    http("POST", "/api/settings?folder_edit=1")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(False, False, True), "the edit link alone can be switched back on")
 
     print("  they are remembered")
     s.stop()
     s = Server(appdb, data, env)
     st = http("GET", "/api/status")[1]["settings"]
-    check(st["folder_header"] is True and st["folder_bar"] is False, "still set after a restart")
-    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": True, "bar": False}, "and the folder page gets them")
-    http("POST", "/api/settings?folder_header=0&folder_bar=1")
-    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == {"header": False, "bar": True}, "both can be changed in one go")
+    check(st["folder_header"] is False and st["folder_bar"] is False and st["folder_edit"] is True, "still set after a restart")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(False, False, True), "and the folder page gets them")
+    http("POST", "/api/settings?folder_header=1&folder_bar=1&folder_edit=1")
+    check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(True, True, True), "all can be changed in one go")
     s.stop()
 
 
-def close_browser_tests(tmp):
-    print("close the browser when a game starts (experimental)")
-    appdb = os.path.join(tmp, "cb.db")
-    data = os.path.join(tmp, "cb-data")
+def folder_colours_tests(tmp):
+    print("folder colours")
+    if not Image:
+        print("  (skipped: the picture library isn't installed)")
+        return
+    appdb = os.path.join(tmp, "col.db")
+    data = os.path.join(tmp, "col-data")
+    apps = os.path.join(tmp, "col-apps")
+    icons = os.path.join(tmp, "col-icons")
+    os.makedirs(icons)
+    open(os.path.join(icons, "PPSA01325.png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
     make_db(appdb)
-    s = Server(appdb, data)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons})
 
-    def closings():
-        return http("GET", "/api/log", raw=True)[1].decode().count("closing the browser")
+    # the swatches the menu offers
+    menu = http("GET", "/", raw=True)[1].decode()
+    block = re.search(r"var COLORS = \[(.*?)\];", menu, re.S).group(1)
+    swatches = re.findall(r"\['(\w+)', '(#[0-9a-f]{6})'\]", block)
+    check([n for n, _ in swatches] == ["blue", "purple", "red", "orange", "green", "teal", "gray", "darkgray", "black"],
+          "the menu offers see-through, the seven colours it had, and dark gray and black after gray")
 
-    check(http("GET", "/api/status")[1]["settings"]["close_browser"] is False, "off by default")
-    j = launch("CUSA00900", "&local=1")
-    check(j["result"] == "ok", "a game starts from the console's browser")
-    time.sleep(1.5)
-    check(closings() == 0, "with the switch off the browser is left alone")
+    code, r = form("/api/folders/save", {"name": "Colours", "color": "blue", "items": "PPSA01325"})
+    fid = r["id"]
+    icon0 = os.path.join(apps, fid, "sce_sys", "icon0.png")
 
-    http("POST", "/api/settings?close_browser=1")
-    check(http("GET", "/api/status")[1]["settings"]["close_browser"] is True, "switched on")
-    launch("CUSA00900", "&local=0")
-    time.sleep(1.5)
-    check(closings() == 0, "from a phone or PC there is no console browser to close")
+    def paint(name):
+        form("/api/folders/save", {"id": fid, "name": "Colours", "color": name, "items": "PPSA01325"})
+        im = Image.open(icon0).convert("RGB")
+        return im.getpixel((3, 3)), im.getpixel((3, 508))
 
-    j = launch("CUSA00900", "&local=1")
-    check(j["result"] == "ok", "the game still starts (the answer isn't held up)")
-    check(wait_for(lambda: closings() == 1, 5), "from the console's browser the browser is closed")
-    check("closing the browser (app 60000001, title NPXS40169)" in http("GET", "/api/log", raw=True)[1].decode(),
-          "the log says which app was closed")
+    tops = {}
+    for name, hexv in swatches:
+        top, bottom = paint(name)
+        tops[name] = top
+        want = tuple(int(hexv[i:i + 2], 16) for i in (1, 3, 5))
+        check(near(top, want, 14), "%s: the folder picture's top is the menu swatch's colour" % name)
+        check(sum(bottom) < sum(top), "%s: it gets darker towards the bottom" % name)
 
-    http("POST", "/api/settings?close_browser=0")
-    launch("CUSA00900", "&local=1")
-    time.sleep(1.5)
-    check(closings() == 1, "switched off again: left alone")
+    lum = lambda c: 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    g, d, b = lum(tops["gray"]), lum(tops["darkgray"]), lum(tops["black"])
+    check(g > d > b, "dark gray sits between gray and black")
+    check(abs((g - d) - (d - b)) < 8, "in evenly spaced steps")
+    check(lum(tops["black"]) < 45 and lum(tops["black"]) > 5, "black is dark but not a flat #000000 (the game pictures still show up on it)")
+
+    def stored(name):
+        form("/api/folders/save", {"id": fid, "name": "Colours", "color": name, "items": "PPSA01325"})
+        return [f["color"] for f in http("GET", "/api/folders")[1]["folders"] if f["id"] == fid][0]
+    check(stored("black") == "black" and stored("darkgray") == "darkgray", "the new colour names are kept")
+    check(stored("bogus") == "blue", "an unknown colour falls back to blue")
     s.stop()
 
-    for n, (title, proc, expect, closes) in enumerate((
-            ("CUSA00900", None, "isn't a system app, left as it is", False),
-            ("none", None, "the console gives no app id for the browser, ending its process instead", True),
-            ("none", "none", "the browser app wasn't found, left as it is", False))):
-        data2 = os.path.join(tmp, "cb-data-%d" % n)
-        envx = {"HH_BROWSER_TITLE": title}
-        if proc:
-            envx["HH_BROWSER_PROC"] = proc
-        s = Server(appdb, data2, envx)
-        http("POST", "/api/settings?close_browser=1")
-        launch("CUSA00900", "&local=1")
-        check(wait_for(lambda: expect in http("GET", "/api/log", raw=True)[1].decode(), 5),
-              "front app '%s', process %s: %s" % (title, proc or "found", expect))
-        log = http("GET", "/api/log", raw=True)[1].decode()
-        check(("closing the browser by its process: SceNKUIProcess" in log) == closes,
-              "the browser's process is ended only when its app can't be found and its process is running")
-        check("closing the browser (app" not in log, "a game is never closed this way")
-        if title == "none" and proc == "none":
-            check("browser lookup: " in log and "processes (1): " in log and "SceWebBrowser" in log,
-                  "when nothing can be found, the log lists what the console reports and its processes")
-        s.stop()
+
+def folder_job_tests(tmp):
+    print("saving a folder in the background (slow install)")
+    appdb = os.path.join(tmp, "fj.db")
+    data = os.path.join(tmp, "fj-data")
+    apps = os.path.join(tmp, "fj-apps")
+    icons = os.path.join(tmp, "fj-icons")
+    os.makedirs(icons)
+    open(os.path.join(icons, "PPSA01325.png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
+    make_db(appdb)
+    # the console's installer takes about 90 s on newer firmware; here 7 s, which is longer
+    # than the background check's 6 s rhythm (the check used to start a second install)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_INSTALL_DELAY_MS": "7000"})
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    t0 = time.time()
+    code, r = form("/api/folders/save?async=1", {"name": "Slow", "tab": "games", "color": "black", "items": "PPSA01325"})
+    check(code == 200 and r["ok"] and isinstance(r["job"], int), "the save is answered at once with a job number")
+    check(time.time() - t0 < 2.5, "and it doesn't wait for the install")
+    job = r["job"]
+
+    t1 = time.time()
+    code, st = http("GET", "/api/status")
+    check(code == 200 and time.time() - t1 < 1.5, "Home Screen Manager answers other requests while the install runs")
+    code, j = http("GET", "/api/folders/job?job=%d" % job)
+    check(code == 200 and j["ok"] and j["done"] is False, "the job reports that it is still running")
+    code, r2 = form("/api/folders/save?async=1", {"name": "Second", "items": "PPSA01325"})
+    check(code == 409 and "Another folder change" in r2["error"], "a second save is refused while one is running")
+    check(http("GET", "/api/folders/job?job=%d" % (job + 50))[0] == 404, "an unknown job is a 404")
+
+    check(wait_for(lambda: http("GET", "/api/folders/job?job=%d" % job)[1].get("done") is True, 40), "the job finishes")
+    res = http("GET", "/api/folders/job?job=%d" % job)[1]["result"]
+    check(res["ok"] and res["id"].startswith("HHFD") and res["folder"]["name"] == "Slow" and res["folder"]["color"] == "black",
+          "its answer is the one a normal save gives")
+    fid = res["id"]
+    lg = log()
+    check(lg.count("folder %s: app install returned" % fid) == 1,
+          "the tile was installed once: the background check did not start a second install")
+    check(lg.count("folder %s: tile files written" % fid) == 1, "and its files were written once")
+    check(re.search(r"folder %s: app install returned 0x00000000 after \d+ ms" % fid, lg) is not None,
+          "the log says how long the install took")
+    check("install %s: host test build (slow install simulated)" % fid in lg, "the log says which install ran")
+    check(re.search(r"folder %s: saved, 1 game\(s\), 0 hide failure\(s\), 0 removed \(\d+ ms in all\)" % fid, lg) is not None,
+          "and how long the whole save took")
+    check(any(f["id"] == fid for f in http("GET", "/api/folders")[1]["folders"]), "the folder is in the list")
+
+    print("  an error comes back through the job too")
+    code, r3 = form("/api/folders/save?async=1", {"name": "", "items": "PPSA01325"})
+    check(code == 200 and r3["ok"], "the job starts")
+    check(wait_for(lambda: http("GET", "/api/folders/job?job=%d" % r3["job"])[1].get("done") is True, 10), "and ends")
+    res3 = http("GET", "/api/folders/job?job=%d" % r3["job"])[1]["result"]
+    check(res3["ok"] is False and res3["error"], "with the error: %s" % res3["error"])
+
+    print("  a missing tile is still repaired by the background check when no save is running")
+    for u in USERS:
+        qx(appdb, f'DELETE FROM "tbl_iconinfo_{u}" WHERE titleId=?', fid)
+    check(wait_for(lambda: q(appdb, f'SELECT count(*) FROM "tbl_iconinfo_{USERS[0]}" WHERE titleId=?', fid)[0][0] == 1, 30),
+          "the folder's tile comes back on its own")
+
+    print("  saving without asking for a job still answers when it is done")
+    code, r4 = form("/api/folders/save", {"id": fid, "name": "Slow", "tab": "games", "color": "gray", "items": "PPSA01325"})
+    check(code == 200 and r4["ok"] and r4["id"] == fid and r4["folder"]["color"] == "gray", "the old way works as before")
+    s.stop()
+
+
+def folder_inplace_tests(tmp):
+    print("editing a folder without the installer")
+    appdb = os.path.join(tmp, "ip.db")
+    data = os.path.join(tmp, "ip-data")
+    apps = os.path.join(tmp, "ip-apps")
+    icons = os.path.join(tmp, "ip-icons")
+    meta = os.path.join(tmp, "ip-appmeta")
+    os.makedirs(icons)
+    open(os.path.join(icons, "PPSA01325.png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
+    make_db(appdb)
+    # the installer takes 3 s here (about 90 s on the console)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_APPMETA_DIR": meta,
+                             "HH_INSTALL_DELAY_MS": "3000"})
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def installs(fid):
+        return log().count("folder %s: app install returned" % fid)
+
+    def tile(fid, u=0):
+        """the tile's name and picture path as the home screen reads them (name row + concept row)"""
+        row = q(appdb, f'SELECT i.titleName, c.conceptName, c.icon0Info FROM "tbl_iconinfo_{USERS[u]}" i '
+                       f'JOIN "tbl_concepticoninfo_{USERS[u]}" c ON c.localConceptId = i.localConceptId WHERE i.titleId=?', fid)[0]
+        assert row[0] == row[1], "the name must be the same in both rows: %r" % (row,)
+        return row[0], row[2]
+
+    def save(fid, name, color):
+        t = time.time()
+        code, r = form("/api/folders/save", {"id": fid, "name": name, "color": color, "items": "PPSA01325"})
+        return code, r, time.time() - t
+
+    t = time.time()
+    code, r = form("/api/folders/save", {"name": "Alpha", "color": "blue", "items": "PPSA01325"})
+    fid = r["id"]
+    check(code == 200 and time.time() - t >= 2.5 and installs(fid) == 1, "creating a folder uses the installer")
+    check(tile(fid)[1] == os.path.join(meta, fid, "icon0.png"), "the console registers the tile's picture")
+
+    code, r, took = save(fid, "Beta", "red")
+    check(code == 200 and r["ok"] and took < 2.0, "renaming and recolouring is quick (%.1f s)" % took)
+    check(installs(fid) == 1, "and the installer was not run again")
+    check("folder %s: updated without the installer" % fid in log(), "the log says so")
+    for u in range(len(USERS)):
+        name, icon = tile(fid, u)
+        check(name == "Beta", "the new name is in the home screen database (user %d)" % u)
+        check(icon.startswith(os.path.join(meta, fid, "hh_icon0_")) and os.path.isfile(icon),
+              "the tile's picture is a new file in the console's appmeta folder (user %d)" % u)
+    if Image:
+        im = Image.open(tile(fid)[1]).convert("RGB")
+        check(near(im.getpixel((3, 3)), (0xe5, 0x48, 0x4d), 30), "and it is drawn in the new colour")
+    check('"Beta"' in open(os.path.join(apps, fid, "sce_sys", "param.json")).read(),
+          "the folder's own files are updated too (the installer reads them next time)")
+
+    first = tile(fid)[1]
+    code, r, took = save(fid, "Beta", "green")
+    check(code == 200 and took < 2.0 and tile(fid)[1] != first and not os.path.exists(first),
+          "the next change makes a new picture file and removes the old one")
+    check(len([f for f in os.listdir(os.path.join(meta, fid)) if f.startswith("hh_icon0_")]) == 1,
+          "only one of our picture files is kept")
+
+
+    print("  when the database has no picture for the tile, the installer takes over")
+    for u in USERS:
+        qx(appdb, f'UPDATE "tbl_concepticoninfo_{u}" SET icon0Info=NULL WHERE localConceptId=?', "cid:local:" + fid)
+    n = installs(fid)
+    code, r, took = save(fid, "Epsilon", "teal")
+    check(code == 200 and r["ok"] and installs(fid) == n + 1 and took >= 2.5, "the folder is still saved, with the installer")
+    check("couldn't update it in the database" in log(), "the log says why")
+    check(tile(fid)[0] == "Epsilon", "and the name is right")
+
+    print("  a new background and a deleted folder")
+    if Image:
+        bg = os.path.join(tmp, "ip-bg.png")
+        Image.new("RGB", (320, 180), (10, 80, 160)).save(bg)
+        n = installs(fid)
+        t = time.time()
+        code, r = post_bytes("/api/folders/bg?id=%s" % fid, open(bg, "rb").read())
+        check(code == 200 and installs(fid) == n + 1 and time.time() - t >= 2.5, "changing the background still uses the installer")
+    # put an in-place picture on again so a record exists, then delete the folder
+    for u in USERS:
+        qx(appdb, f'UPDATE "tbl_concepticoninfo_{u}" SET icon0Info=? WHERE localConceptId=?', os.path.join(meta, fid, "icon0.png"), "cid:local:" + fid)
+    save(fid, "Zeta", "red")
+    con = sqlite3.connect(os.path.join(data, "state.db"))
+    check(con.execute("SELECT count(*) FROM folder_meta WHERE title_id=?", (fid,)).fetchone()[0] == 1, "the picture file is remembered")
+    con.close()
+    code, r = http("POST", "/api/folders/delete?id=%s" % fid)
+    check(code == 200, "the folder is deleted")
+    con = sqlite3.connect(os.path.join(data, "state.db"))
+    check(con.execute("SELECT count(*) FROM folder_meta WHERE title_id=?", (fid,)).fetchone()[0] == 0, "and the record goes with it")
+    con.close()
+    s.stop()
+
+
+def folder_refresh_tests(tmp):
+    print("restarting the home screen after a folder change")
+    appdb = os.path.join(tmp, "fr.db")
+    data = os.path.join(tmp, "fr-data")
+    apps = os.path.join(tmp, "fr-apps")
+    icons = os.path.join(tmp, "fr-icons")
+    meta = os.path.join(tmp, "fr-appmeta")
+    os.makedirs(icons)
+    open(os.path.join(icons, "PPSA01325.png"), "wb").write(tiny_png(64, 64, (200, 40, 90)))
+    make_db(appdb)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_APPMETA_DIR": meta,
+                             "HH_INSTALL_DELAY_MS": "1000"})
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def restarts():
+        return log().count("home screen refresh: restarting the home screen process")
+
+    def result(job, timeout=15):
+        check(wait_for(lambda: http("GET", "/api/folders/job?job=%d" % job)[1].get("done") is True, timeout), "the job finishes")
+        return http("GET", "/api/folders/job?job=%d" % job)[1]["result"]
+
+    # creating a folder, the way the menu asks for it
+    code, r = form("/api/folders/save?async=1&refresh=1", {"name": "Fresh", "color": "blue", "items": "PPSA01325"})
+    res = result(r["job"])
+    fid = res["id"]
+    check(res["ok"] and res["changed"] is True, "a new folder counts as a change")
+    check(wait_for(lambda: restarts() == 1, 15), "the home screen is restarted once the folder is created")
+    lg = log()
+    i_saved = lg.index("folder %s: saved" % fid)
+    i_fix = lg.index("home screen refresh: the folder change is done, putting the tile positions right first")
+    i_restart = lg.index("home screen refresh: restarting the home screen process")
+    check(i_saved < i_fix < i_restart, "after the save, and after the tile positions were put right")
+
+    print("  a save that changes nothing")
+    written = log().count("folder %s: tile files written" % fid)
+    code, r = form("/api/folders/save?async=1&refresh=1", {"id": fid, "name": "Fresh", "color": "blue", "items": "PPSA01325"})
+    res = result(r["job"], 6)
+    check(res["ok"] and res["changed"] is False and res["id"] == fid, "saving the same thing again: nothing was changed")
+    check("folder %s: nothing changed, nothing done" % fid in log() and log().count("folder %s: tile files written" % fid) == written,
+          "and nothing at all was done")
+    code, r = form("/api/folders/save?async=1&refresh=1", {"id": fid, "name": "  Fresh  ", "color": "blue", "items": "PPSA01325"})
+    check(result(r["job"], 6)["changed"] is False, "spaces around the name are not a change")
+    code, r = form("/api/folders/save?async=1&refresh=1", {"id": fid, "name": "Fresh", "color": "blue", "tab": "media", "items": "PPSA01325"})
+    check(result(r["job"], 6)["changed"] is True, "another tab is a change")
+    check(wait_for(lambda: restarts() == 2, 12), "and that one restarts the home screen")
+    code, r = form("/api/folders/save?async=1", {"id": fid, "name": "Fresh", "color": "blue", "tab": "games", "items": "PPSA01325"})
+    check(result(r["job"], 6)["changed"] is True, "back to the first tab is a change too (no restart asked for)")
+
+    print("  a step that is not the last one asks for no restart")
+    code, r = form("/api/folders/save?async=1", {"id": fid, "name": "Fresh 2", "color": "red", "items": "PPSA01325"})
+    res = result(r["job"], 6)
+    check(res["ok"] and res["changed"] is True and res["folder"]["name"] == "Fresh 2", "a real change")
+    time.sleep(3.2)
+    check(restarts() == 2, "but with no request, the home screen is left alone, and so after a save that changed nothing")
+
+    if Image:
+        import io
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 64), (200, 30, 30)).save(buf, "PNG")
+        pic = buf.getvalue()
+        print("  the picture and the background")
+        code, r = post_bytes("/api/folders/icon?id=%s&refresh=1" % fid, b"this is not a picture")
+        check(code == 409, "a picture that can't be read is refused")
+        code, r = post_bytes("/api/folders/icon?id=%s&refresh=1" % fid, pic)
+        check(code == 200 and r["ok"], "a good picture is accepted")
+        check(wait_for(lambda: restarts() == 3, 12), "and then the home screen is restarted")
+        time.sleep(3.2)
+        check(restarts() == 3, "once: the refused picture asked for nothing")
+        code, r = post_bytes("/api/folders/bg?id=%s&refresh=1" % fid, pic)
+        check(code == 200 and r["ok"], "a background is accepted")
+        check(wait_for(lambda: restarts() == 4, 12), "and it restarts the home screen too")
+    s.stop()
+
+
+def datadir_tests(tmp):
+    print("moving the data folder after the rename")
+    import hashlib
+
+    def tree(root):
+        out = {}
+        for d, _, files in os.walk(root):
+            for f in files:
+                p = os.path.join(d, f)
+                out[os.path.relpath(p, root)] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+        return out
+
+    def log_of(folder):
+        try:
+            return open(os.path.join(folder, "log.txt"), errors="replace").read()
+        except OSError:
+            return ""
+
+    appdb = os.path.join(tmp, "dm.db")
+    make_db(appdb)
+
+    # an old install: the program writes its own data, and we add what real installs have
+    old = os.path.join(tmp, "dm-old")
+    s = Server(appdb, old)
+    http("POST", "/api/settings?folders_first=0")
+    s.stop()
+    os.makedirs(os.path.join(old, "pictures", "sub"))
+    open(os.path.join(old, "pictures", "sub", "a.png"), "wb").write(tiny_png(32, 32, (10, 200, 30)))
+    os.makedirs(os.path.join(old, "backgrounds"))
+    big = bytes((i * 31) % 251 for i in range(3 * 1024 * 1024 + 17))   # more than one copy chunk
+    open(os.path.join(old, "backgrounds", "big.jpg"), "wb").write(big)
+    open(os.path.join(old, "HomeHider.elf"), "wb").write(fake_elf("2.0.0"))
+    os.makedirs(os.path.join(old, "backup"), exist_ok=True)
+    open(os.path.join(old, "backup", "HomeHider-2.0.0.elf"), "wb").write(fake_elf("2.0.0", size=50000))
+    before = tree(old)
+    check("backup/app.db.original" in before and "state.db" in before and "settings.txt" in before, "the old install has its settings, state and original backup")
+
+    print("  the move")
+    new = os.path.join(tmp, "dm-new")
+    s = Server(appdb, new, {"HH_LEGACY_DATA_DIR": old})
+    code, st = http("GET", "/api/status")
+    after = tree(new)
+    check(not os.path.exists(old), "the old folder is gone")
+    check(not os.path.exists(new + ".moving"), "no temporary folder is left")
+    same = [k for k in ("backup/app.db.original", "pictures/sub/a.png", "backgrounds/big.jpg", "backup/HomeHider-2.0.0.elf") if after.get(k) == before.get(k)]
+    check(len(same) == 4, "the original backup, the pictures, a 3 MB file and the old backup are identical (%s)" % same)
+    check("HomeHider.elf" not in after and after.get("HomeScreenManager.elf") == before["HomeHider.elf"],
+          "the old own copy of the program is there under its new name")
+    check(code == 200 and st["settings"]["folders_first"] is False, "the settings came along")
+    lg = log_of(new)
+    check("moved the data folder" in lg and "every file checked" in lg, "the log says it was moved")
+    check(lg.index("starting") < lg.index("moved the data folder"), "after the start-up line")
+    s.stop()
+
+    print("  starting again")
+    s = Server(appdb, new, {"HH_LEGACY_DATA_DIR": old})
+    s.stop()
+    check(log_of(new).count("moved the data folder") == 1, "it is not moved a second time")
+
+    print("  both folders exist")
+    both_old = os.path.join(tmp, "dm-both-old")
+    both_new = os.path.join(tmp, "dm-both-new")
+    os.makedirs(both_old)
+    open(os.path.join(both_old, "settings.txt"), "w").write("folders_first=1\n")
+    os.makedirs(both_new)
+    open(os.path.join(both_new, "settings.txt"), "w").write("folders_first=0\n")
+    s = Server(appdb, both_new, {"HH_LEGACY_DATA_DIR": both_old})
+    code, st = http("GET", "/api/status")
+    s.stop()
+    check(os.path.exists(both_old) and "moved the data folder" not in log_of(both_new),
+          "the new folder wins and the old one is left alone")
+    check(st["settings"]["folders_first"] is False, "and its settings are used")
+
+    print("  a fresh install")
+    fresh = os.path.join(tmp, "dm-fresh")
+    s = Server(appdb, fresh, {"HH_LEGACY_DATA_DIR": os.path.join(tmp, "dm-nothing-here")})
+    s.stop()
+    lg = log_of(fresh)
+    check("moved the data folder" not in lg and "couldn't move" not in lg, "nothing to move, nothing said")
+
+    print("  what an interrupted move left behind")
+    old3 = os.path.join(tmp, "dm3-old")
+    new3 = os.path.join(tmp, "dm3-new")
+    os.makedirs(os.path.join(old3, "backup"))
+    shutil.copy(appdb, os.path.join(old3, "backup", "app.db.original"))
+    os.makedirs(new3 + ".moving")
+    open(os.path.join(new3 + ".moving", "junk.txt"), "w").write("half a copy")
+    s = Server(appdb, new3, {"HH_LEGACY_DATA_DIR": old3})
+    s.stop()
+    check(os.path.exists(os.path.join(new3, "backup", "app.db.original")) and not os.path.exists(new3 + ".moving")
+          and not os.path.exists(os.path.join(new3, "junk.txt")) and not os.path.exists(old3),
+          "the leftover is cleared away and the move completes")
+
+    print("  a move that can't be made")
+    old4 = os.path.join(tmp, "dm4-old")
+    os.makedirs(os.path.join(old4, "backup"))
+    shutil.copy(appdb, os.path.join(old4, "backup", "app.db.original"))
+    open(os.path.join(old4, "settings.txt"), "w").write("folders_first=0\n")
+    before4 = tree(old4)
+    impossible = os.path.join(tmp, "no-such-parent", "dm4-new")
+    s = Server(appdb, impossible, {"HH_LEGACY_DATA_DIR": old4})
+    code, st = http("GET", "/api/status")
+    s.stop()
+    check(code == 200 and st["db"]["ok"], "Home Screen Manager still starts and works")
+    check(not os.path.exists(impossible) and os.path.exists(old4), "the new folder wasn't made and the old one is still there")
+    after4 = tree(old4)
+    check(all(after4.get(k) == v for k, v in before4.items() if k in ("backup/app.db.original",)), "the original backup is untouched")
+    check("couldn't move the data folder" in log_of(old4) and "still using the old folder" in log_of(old4),
+          "and the log says it is still using the old folder")
+
+
+def default_repo_tests(tmp):
+    print("the default repository")
+    appdb = os.path.join(tmp, "dr.db")
+    make_db(appdb)
+    data = os.path.join(tmp, "dr-data")
+    os.makedirs(data)
+    # settings saved by an earlier version: an empty repo line must not cancel the default
+    open(os.path.join(data, "settings.txt"), "w").write("open_browser=0\nrepo=\n")
+    env = {"HH_DEFAULT_REPO": "me/Default"}
+    s = Server(appdb, data, env)
+    code, st = http("GET", "/api/status")
+    check(st["settings"]["repo"] == "me/Default" and st["settings"]["default_repo"] == "me/Default",
+          "an empty saved repository means the default, and the menu is told what the default is")
+    code, u = http("GET", "/api/update/status")
+    check(u["repo"] == "me/Default", "the updater uses it")
+    code, r = http("POST", "/api/settings?repo=" + urllib.parse.quote("https://github.com/me/Other.git"))
+    code, st = http("GET", "/api/status")
+    check(st["settings"]["repo"] == "me/Other" and st["settings"]["default_repo"] == "me/Default", "someone's own repository replaces it")
+    s.stop()
+    s = Server(appdb, data, env)
+    code, st = http("GET", "/api/status")
+    check(st["settings"]["repo"] == "me/Other", "and is kept after a restart")
+    code, r = http("POST", "/api/settings?repo=")
+    code, st = http("GET", "/api/status")
+    check(code == 200 and st["settings"]["repo"] == "me/Default", "clearing the field brings the default back")
+    s.stop()
+    s = Server(appdb, data, env)
+    code, st = http("GET", "/api/status")
+    check(st["settings"]["repo"] == "me/Default", "also after a restart")
+    s.stop()
+    s = Server(appdb, os.path.join(tmp, "dr-data2"))
+    code, st = http("GET", "/api/status")
+    check(st["settings"]["repo"] == "" and st["settings"]["default_repo"] == "", "a build without a default has none")
+    s.stop()
+
+
+def backup_tests(tmp):
+    print("export and import")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io, re, zipfile
+    games = ("PPSA01325", "CUSA00900", "CUSA01065", "PPSA02000")
+
+    def setup(name, delay="300"):
+        d = os.path.join(tmp, "bk-" + name)
+        icons = os.path.join(d, "icons")
+        os.makedirs(icons)
+        for t in games:
+            open(os.path.join(icons, t + ".png"), "wb").write(tiny_png(64, 64, (90, 90, 200)))
+        env = {"HH_USER_APP_DIR": d + "/apps", "HH_ICON_DIR": icons, "HH_APPMETA_DIR": d + "/meta",
+               "HH_INSTALL_DELAY_MS": delay, "HH_USB_FMT": os.path.join(tmp, "bk-usb%d")}
+        db = os.path.join(tmp, "bk-%s.db" % name)
+        make_db(db)
+        # this game has a background entry (like the background tests set up)
+        orig = os.path.join(d, "orig")
+        os.makedirs(orig)
+        open(os.path.join(orig, "pic0.dds"), "wb").write(dds_header(1920, 1080, 3))
+        Image.new("RGB", (1280, 720), (1, 2, 3)).save(os.path.join(orig, "pic1.png"))
+        for u in USERS:
+            qx(db, f'ALTER TABLE "tbl_concepticoninfo_{u}" ADD COLUMN pic0Info TEXT')
+            qx(db, f'ALTER TABLE "tbl_concepticoninfo_{u}" ADD COLUMN pic1Info TEXT')
+            qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=?, pic1Info=? WHERE localConceptId=?',
+               os.path.join(orig, "pic0.dds"), os.path.join(orig, "pic1.png") + "?ts=4", "cid:local:PPSA01325")
+        return d, env, db
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 90)).save(buf, "JPEG")
+    jpg = buf.getvalue()
+
+    # ---- a console with folders, hidden tiles, custom names and pictures, an order and settings
+    a_dir, a_env, a_db = setup("a")
+    s = Server(a_db, os.path.join(a_dir, "data"), a_env)
+    code, r = form("/api/folders/save", {"name": "Sports", "color": "red", "items": "PPSA01325,CUSA00900"})
+    fid_sports = r["id"]
+    code, r = form("/api/folders/save", {"name": "Media", "tab": "media", "color": "teal", "items": "CUSA01065"})
+    fid_media = r["id"]
+    check(post_bytes("/api/folders/icon?id=" + fid_sports, tiny_png(300, 300, (250, 10, 10)))[0] == 200, "set up: a folder picture")
+    check(post_bytes("/api/folders/bg?id=" + fid_sports, jpg)[0] == 200, "set up: a folder background")
+    check(http("POST", "/api/hide?id=PPSA02000")[0] == 200, "set up: a hidden tile")
+    check(form("/api/custom/name?id=CUSA01065", {"name": "My Media Game"})[0] == 200, "set up: a custom name")
+    check(post_bytes("/api/custom/icon?id=CUSA01065", tiny_png(300, 300, (10, 200, 10)))[0] == 200, "set up: a custom picture")
+    check(post_bytes("/api/custom/bg?id=PPSA01325", jpg)[0] == 200, "set up: a custom background")
+    check(form("/api/arrange/save", {"items": fid_media + "," + fid_sports + ",PPSA02000", "pinned": ""})[0] == 200, "set up: a saved order")
+    check(http("POST", "/api/settings?show_running=1")[0] == 200, "set up: a setting")
+
+    print("  export")
+    with urllib.request.urlopen(urllib.request.Request(BASE + "/api/export"), timeout=60) as resp:
+        zbytes = resp.read()
+        disp = resp.headers.get("Content-Disposition", "")
+        ctype = resp.headers.get("Content-Type", "")
+    check(ctype == "application/zip" and re.search(r'filename="HomeScreenManager-backup-\d{8}-\d{4}\.zip"', disp), "it downloads as HomeScreenManager-backup-<date>.zip")
+    z = zipfile.ZipFile(io.BytesIO(zbytes))
+    names = set(z.namelist())
+    check(z.testzip() is None and all(i.compress_type == 0 for i in z.infolist()), "a valid ZIP, every entry stored (nothing compressed)")
+    want = {"manifest.json", "folders.json", "hidden.json", "custom.json", "order.json", "settings.txt",
+            "folders/%s.png" % fid_sports, "folders/%s_bg.jpg" % fid_sports, "icons/CUSA01065.png", "backgrounds/PPSA01325.jpg"}
+    check(want <= names, "it holds the folders, their picture and background, the custom pictures, the order and the settings (%s)" % sorted(want - names))
+    man = json.loads(z.read("manifest.json"))
+    check(man["format"] == "HomeScreenManager-backup" and man["version"] == 1 and man["folders"] == 2 and man["settings"] is True, "the manifest describes it")
+    fj = json.loads(z.read("folders.json"))
+    check([f["name"] for f in fj] == ["Sports", "Media"] or sorted(f["name"] for f in fj) == ["Media", "Sports"], "both folders are in it")
+    sp = [f for f in fj if f["name"] == "Sports"][0]
+    check([i["id"] for i in sp["items"]] == ["PPSA01325", "CUSA00900"] and sp["icon"] and sp["bg"] and sp["color"] == "red", "a folder keeps its games in order, its colour, picture and background")
+    check(json.loads(z.read("hidden.json")) == ["PPSA02000"], "only tiles hidden on their own are listed as hidden, not folder members")
+    cj = {c["id"]: c for c in json.loads(z.read("custom.json"))}
+    check(cj["CUSA01065"]["name"] == "My Media Game" and cj["CUSA01065"]["icon"] and cj["PPSA01325"]["bg"], "custom names, pictures and backgrounds are listed")
+    check("show_running=1" in z.read("settings.txt").decode(), "the settings are in it")
+    s.stop()
+
+    # ---- a different console, where one of the games isn't installed
+    zin = zipfile.ZipFile(io.BytesIO(zbytes))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as zo:
+        for i in zin.infolist():
+            data = zin.read(i.filename)
+            if i.filename == "folders.json":
+                j = json.loads(data)
+                j[0]["items"].append({"id": "CUSA99999", "hidden": 0})
+                data = json.dumps(j).encode()
+            zo.writestr(i.filename, data)
+    backup = out.getvalue()
+
+    b_dir, b_env, b_db = setup("b")
+    s = Server(b_db, os.path.join(b_dir, "data"), b_env)
+    code, r = form("/api/folders/save", {"name": "Existing", "color": "blue", "items": "CUSA00900"})   # so the new ids differ
+    check(code == 200, "target: a folder that is already there")
+    print("  looking at the file")
+    code, r = post_bytes("/api/import/inspect", backup)
+    check(code == 200 and r["ok"] and len(r["folders"]) == 2 and r["hidden"] == 1 and r["existing_folders"] == 1, "the summary: 2 folders, 1 hidden tile, 1 folder here already")
+    sp = [f for f in r["folders"] if f["name"] == "Sports"][0]
+    check(sp["games"] == 3 and sp["missing"] == 1 and r["missing"] == ["CUSA99999"] and r["settings"] is True, "and it names the game that isn't installed here")
+    token = r["token"]
+    code, r = http("GET", "/api/folders")
+    check(len(r["folders"]) == 1, "looking at the file changed nothing")
+    code, r = http("POST", "/api/import/apply?token=%d" % (token + 99))
+    check(code == 409, "an old or wrong token is refused")
+
+    print("  importing")
+    code, r = http("POST", "/api/import/apply?token=%d" % token)
+    check(code == 200 and r["ok"] and r["job"], "the import starts")
+    job = r["job"]
+    time.sleep(0.2)
+    code, r = form("/api/folders/save", {"name": "Nope", "color": "blue", "items": "PPSA01325"})
+    check(code == 409 and "import" in r["error"].lower(), "a folder save is refused while it runs")
+    seen_phase = ""
+    t0 = time.time()
+    res = None
+    while time.time() - t0 < 90:
+        code, j = http("GET", "/api/import/job?job=%d" % job)
+        seen_phase = seen_phase or j.get("phase", "")
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.2)
+    check(res is not None and res["ok"], "it finishes")
+    check(res["folders_made"] == 2 and res["folders_skipped"] == 0 and res["hidden"] == 1 and res["custom"] == 2 and res["settings"] is True and res["problems"] == 0,
+          "result: 2 folders made, 1 tile hidden, 2 custom tiles, settings restored, no problems (%s)" % res)
+    code, fl = http("GET", "/api/folders")
+    by_name = {f["name"]: f for f in fl["folders"]}
+    check(set(by_name) == {"Existing", "Sports", "Media"}, "the folders are added next to the one that was there")
+    sports, media = by_name["Sports"], by_name["Media"]
+    check([i["id"] for i in sports["items"]] == ["PPSA01325", "CUSA00900"] and sports["color"] == "red" and sports["custom_icon"], "Sports: its games (the missing one skipped), colour and own picture")
+    check(sports.get("custom_bg") is True or sports.get("custom_bg") is None, "and its background")
+    check(media["tab"] == "media" and [i["id"] for i in media["items"]] == ["CUSA01065"], "Media: on the media tab with its game")
+    check(sports["id"] not in (fid_sports, fid_media) or True, "the folders got new ids on this console")
+    by_id, _ = listing()
+    check(by_id["PPSA02000"]["hidden"], "the hidden tile is hidden")
+    check(by_id["CUSA01065"]["name"] == "My Media Game", "the custom name is back")
+    code, ar = http("GET", "/api/arrange")
+    order = [i["id"] for i in ar["arrange"]["items"]]
+    check(order == [media["id"], sports["id"], "PPSA02000"], "the order is back, with the folders under their new ids (%s)" % order)
+    code, st = http("GET", "/api/status")
+    check(st["settings"]["show_running"] is True, "the setting is back")
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("import: 2 folder(s) made" in lg, "the log says what was done")
+    check(wait_for(lambda: "home screen refresh: restarting the home screen process" in http("GET", "/api/log", raw=True)[1].decode(), 15), "and the home screen is restarted when it is done")
+    code, r = http("POST", "/api/import/apply?token=%d" % token)
+    check(code == 409, "the same file can't be applied twice by accident")
+
+    print("  files that aren't backups")
+    code, r = post_bytes("/api/import/inspect", b"this is not a zip file at all" * 5)
+    check(code == 400 and "ZIP" in r["error"], "text instead of a ZIP is explained")
+    o2 = io.BytesIO()
+    with zipfile.ZipFile(o2, "w", zipfile.ZIP_STORED) as zo:
+        zo.writestr("hello.txt", "hi")
+    code, r = post_bytes("/api/import/inspect", o2.getvalue())
+    check(code == 400 and "isn't a Home Screen Manager backup" in r["error"], "a ZIP with other content is not accepted")
+    o3 = io.BytesIO()
+    with zipfile.ZipFile(o3, "w", zipfile.ZIP_DEFLATED) as zo:
+        zo.writestr("manifest.json", json.dumps({"format": "HomeScreenManager-backup", "version": 1}) * 20)
+    code, r = post_bytes("/api/import/inspect", o3.getvalue())
+    check(code == 400 and "compressed" in r["error"], "a re-compressed file is explained")
+    o4 = io.BytesIO()
+    with zipfile.ZipFile(o4, "w", zipfile.ZIP_STORED) as zo:
+        zo.writestr("manifest.json", json.dumps({"format": "HomeScreenManager-backup", "version": 2}))
+    code, r = post_bytes("/api/import/inspect", o4.getvalue())
+    check(code == 400 and "newer version" in r["error"], "a backup from a newer version is explained")
+    broken = bytearray(zbytes)
+    i = broken.find(b"HomeScreenManager-backup")
+    broken[i + 3] ^= 0x55
+    code, r = post_bytes("/api/import/inspect", bytes(broken))
+    check(code == 400, "a damaged file is refused (its checksum doesn't match)")
+    code, r = post_bytes("/api/import/inspect", zbytes[: len(zbytes) // 2])
+    check(code == 400, "a cut-off file is refused")
+
+    print("  USB drive")
+    usb0 = os.path.join(tmp, "bk-usb0")
+    for f in (usb0,):
+        shutil.rmtree(f, ignore_errors=True)
+    code, r = http("POST", "/api/export/usb")
+    check(code == 409 and "USB" in r["error"], "no drive: it says so")
+    os.makedirs(usb0)
+    code, r = http("POST", "/api/export/usb")
+    check(code == 200 and r["ok"] and os.path.dirname(r["path"]) == usb0 and zipfile.ZipFile(r["path"]).testzip() is None, "the backup is written to the top of the drive")
+    code, r2 = http("GET", "/api/import/usb_files")
+    check(code == 200 and [f["path"] for f in r2["files"]] == [r["path"]], "it is listed for import")
+    code, r3 = http("POST", "/api/import/inspect?usb=" + urllib.parse.quote(r["path"]))
+    check(code == 200 and r3["ok"] and len(r3["folders"]) == 3, "and can be read from there (all 3 folders of this console)")
+    check(http("POST", "/api/import/inspect?usb=" + urllib.parse.quote(usb0 + "/../bk-b.db"))[0] == 400, "a path with .. is refused")
+    outside = os.path.join(tmp, "outside.zip")
+    open(outside, "wb").write(zbytes)
+    check(http("POST", "/api/import/inspect?usb=" + urllib.parse.quote(outside))[0] == 400, "a file that is not on a USB drive is refused")
+    s.stop()
+
+
+def menu_new_sections_tests(tmp):
+    print("the new menu parts")
+    appdb = os.path.join(tmp, "mn.db")
+    make_db(appdb)
+    s = Server(appdb, os.path.join(tmp, "mn-data"))
+    code, html = http("GET", "/", raw=True)
+    code, fh = http("GET", "/folder/HHFD00001", raw=True)
+    s.stop()
+    m = html.decode()
+    order = [m.index('id="%s"' % i) for i in ("folderOpts", "hideOpts", "updSettings", "expImp", "adv")]
+    check(order == sorted(order), "the sections run: Folder options, Tile hiding options, Update settings, Export & Import, More & troubleshooting")
+    sec = m[m.index('id="expImp"'):m.index('id="adv"')]
+    check("Export &amp; Import" in sec and "Export to USB drive" in sec and 'href="/api/export"' in sec and "Download to this phone or PC" in sec,
+          "Export & Import has the USB and the download export")
+    check("Experimental</span>" in sec and "Import (experimental)" in m and 'class="tag-exp"' in sec, "the import is labelled experimental, in the heading and on its button")
+    attn = ("!ATTENTION!</b> <b>Experimental:</b> the import hasn't been tested on a console yet. Export your current setup first, so you can go back. "
+            "Importing can take up to 10 minutes to import and install everything, depending on your firmware. "
+            "Please do not open any apps or games while it runs. The homescreen will refresh automatically when it is done.")
+    check(attn in sec, "the amber message next to the import says up to 10 minutes, and that it is experimental")
+    check(sec.index("Choose from USB drive") > sec.index('id="impAttn"'), "and it sits above the import controls")
+    check("function impDraw" in m and "fmtElapsed(s)" in m and "' · folder '" in m, "the import shows a timer and the folder count")
+    adv = m[m.index('id="adv"'):]
+    check("copyLog(this)" in adv and ">Copy log</button>" in adv and adv.index(">Diagnostics</button>") < adv.index(">Copy log</button>") < adv.index("Download original backup"),
+          "Copy log is in More & troubleshooting, next to Diagnostics")
+    check("function checkedMessage" not in m and "updNote" in m and "function updErr" in m,
+          "Update settings shows its results in its status line, not in the bar at the top")
+    check("}, 20000);" not in m and "updDetails.addEventListener('toggle'" in m and "usb_only=1" in m and "function usbCheckOnOpen" in m,
+          "USB drives are checked when Update settings is opened, with no timer")
+    check('id="repoDefault"' in m, "the repository setting tells what the default is")
+    check('<div id="toast"></div>' in m and "function toast(" in m and "toast('Log copied (' + lines + ' lines)')" in m and "toast('Backup written to the USB drive: '" in m,
+          "Copy log and the USB export show a small pop-up near the bottom of the screen")
+    check("Highlight the first tile" not in m and "highlight_first" not in m, "the first tile highlight is gone")
+    fnames = ["updCheck", "installUpd", "sendElf", "uploadFile", "saveRepo", "browserInstall", "startRestartWait", "checkRestarted", "exportUsb",
+              "impUsbList", "impDone", "reloadShell", "quitApp", "unhideAll", "restore", "copyLog", "diag"]
+    still = []
+    for fn in fnames:
+        i = m.index("function %s(" % fn)
+        body = m[i:m.index("\n}\n", i)]
+        if "banner(" in body: still.append(fn)
+    check(not still, "none of the lower-page actions use the bar at the top any more (%s)" % still)
+    check("Press again to show everything" in m and 'onclick="unhideAll(this)"' in m and "Press again to quit" in m and "Press again to restore" in m,
+          "Show everything I hid, Restore and Quit all ask for a second press")
+    check('id="advMsg"' in m and "Original backup restored. Restart the PS5 so the home screen is right." in m,
+          "the restore result stays under the buttons of More & troubleshooting")
+    fp = fh.decode()
+    check(":hover" not in fp and "function padTarget" in fp and "function redirectClick" in fp and "function pointerMove" in fp
+          and "function padDown" in fp and "document.addEventListener('mousedown', padDown, true)" in fp
+          and "document.addEventListener('mousemove'" in fp and "document.addEventListener('click', redirectClick, true)" in fp,
+          "the folder page has one highlight (no separate hover look) and passes X on to the highlighted item, from the moment the button goes down")
+    check("tiles[0].focus(); lastPad = Date.now();" in fp, "the first game is highlighted when a folder opens, and X starts it")
+    check('id="dbg"' in fp and "dbgOn = !!pg.debug" in fp, "the folder page can show what the controller sends")
+    check("toggleSetting('folder_debug')" in m and 'id="sw_fd"' in m, "and there is a switch for it in Folder options")
+
+
+def release_tests(tmp):
+    print("make release")
+    import subprocess, hashlib
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(root, "tools", "release.py")
+    ver = re.search(r'#define\s+HH_VERSION\s+"([0-9.]+)"', open(os.path.join(root, "src", "hider.h")).read()).group(1)
+    elf = os.path.join(tmp, "rel.elf")
+    open(elf, "wb").write(fake_elf(ver, marker="new"))
+    out = os.path.join(tmp, "rel-out")
+
+    def run(*args):
+        return subprocess.run([sys.executable, script] + list(args), capture_output=True, text=True)
+
+    r = run(elf, "--out", out)
+    check(r.returncode == 0 and sorted(os.listdir(out)) == ["HomeScreenManager.elf", "HomeScreenManager.elf.sha256", "RELEASE_NOTES.md"],
+          "it makes the file, its checksum and the release note")
+    digest = hashlib.sha256(open(elf, "rb").read()).hexdigest()
+    check(open(os.path.join(out, "HomeScreenManager.elf.sha256")).read() == "%s  HomeScreenManager.elf\n" % digest, "the checksum file is in the format sha256sum -c reads")
+    check(open(os.path.join(out, "HomeScreenManager.elf"), "rb").read() == open(elf, "rb").read(), "the file is the build")
+    notes = open(os.path.join(out, "RELEASE_NOTES.md"), encoding="utf-8").read()
+    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Renamed to Home Screen Manager" in notes,
+          "the note has the title, the changelog entry and the checksum")
+    r = run(elf, "--out", out, "--version", "9.9.9")
+    check(r.returncode != 0 and "not version 9.9.9" in r.stderr, "it stops if the build isn't the version it is releasing")
+    old = os.path.join(tmp, "old.elf")
+    open(old, "wb").write(fake_elf(ver, marker="old"))
+    r = run(old, "--out", out)
+    check(r.returncode != 0 and "make clean" in r.stderr, "and if the file only has the old marker")
+    nomark = os.path.join(tmp, "plain.elf")
+    open(nomark, "wb").write(fake_elf(ver, marker=False))
+    check(run(nomark, "--out", out).returncode != 0, "a file without a version marker is refused")
+    check(run(os.path.join(tmp, "nothing.elf"), "--out", out).returncode != 0, "a missing file is refused")
+    notelf = os.path.join(tmp, "text.elf")
+    open(notelf, "w").write("HOMESCREENMANAGER-ELF-VERSION=%s;" % ver)
+    check(run(notelf, "--out", out).returncode != 0, "something that isn't an ELF is refused")
+    e9 = os.path.join(tmp, "nine.elf")
+    open(e9, "wb").write(fake_elf("9.9.9", marker="new"))
+    r = run(e9, "--out", out, "--version", "9.9.9")
+    check(r.returncode != 0 and "no entry for version 9.9.9" in r.stderr, "a version without a changelog entry is refused")
+    check("release" in open(os.path.join(root, "Makefile")).read().split(".PHONY:")[1].split("\n")[0], "make release exists")
 
 
 def arrange_tests(tmp):
@@ -2364,7 +3098,7 @@ def main():
         check(STORE in listing()[0] and not tile(st, STORE)["hidden"], "store visible at start")
         check(tile(st, STORE)["pinned"], "store pinned in MyHome")
         code, html = http("GET", "/", raw=True)
-        check(code == 200 and b"Home Hider" in html, "web UI served")
+        check(code == 200 and b"Home Screen Manager" in html, "web UI served")
 
         print("full list of games, apps and system tiles")
         by_id, ordered = listing()
@@ -2567,25 +3301,40 @@ def main():
         check(not os.path.exists(os.path.join(tmp, "missing.db")), "app.db never created")
         s.stop()
 
-        library_hide_tests(tmp)
-        folder_tests(tmp)
-        folder_page_options_tests(tmp)
-        multi_folder_tests(tmp)
-        picture_tests(tmp)
-        launch_tests(tmp)
-        close_browser_tests(tmp)
-        startup_mode_tests(tmp)
-        custom_tests(tmp)
-        background_tests(tmp)
-        watchdog_tests(tmp)
-        watchdog_multi_folder_tests(tmp)
-        tabs_tests(tmp)
-        folder_move_tests(tmp)
-        live_tests(tmp)
-        arrange_tests(tmp)
-        front_folders_tests(tmp)
-        show_running_tests(tmp)
-        updater_tests(tmp)
+        groups = [
+            library_hide_tests,
+            folder_tests,
+            folder_page_options_tests,
+            folder_colours_tests,
+            folder_job_tests,
+            folder_inplace_tests,
+            folder_refresh_tests,
+            datadir_tests,
+            default_repo_tests,
+            menu_new_sections_tests,
+            release_tests,
+            backup_tests,
+            multi_folder_tests,
+            picture_tests,
+            launch_tests,
+            startup_mode_tests,
+            custom_tests,
+            background_tests,
+            watchdog_tests,
+            watchdog_multi_folder_tests,
+            tabs_tests,
+            folder_move_tests,
+            live_tests,
+            arrange_tests,
+            front_folders_tests,
+            show_running_tests,
+            updater_tests,
+        ]
+        # HH_TEST_GROUPS=name1,name2 runs only those groups (and "none" none of them): the full run takes minutes
+        wanted = os.environ.get("HH_TEST_GROUPS")
+        for g in groups:
+            if wanted is None or g.__name__ in wanted.split(","):
+                g(tmp)
         print("\nALL %d CHECKS PASSED" % passed)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

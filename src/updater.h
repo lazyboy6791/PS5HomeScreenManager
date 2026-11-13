@@ -1,11 +1,11 @@
-/* Home Hider self-updater.
+/* Home Screen Manager self-updater.
  *
  * Sources: the latest GitHub release of a repository, a USB drive, or a file
  * uploaded from the menu. Every candidate must be an x86-64 ELF carrying the
- * Home Hider version marker; GitHub downloads are checked against the
+ * Home Screen Manager version marker; GitHub downloads are checked against the
  * release asset's SHA-256 digest when GitHub provides one.
  *
- * Installing replaces every Home Hider copy found in Payload Manager's
+ * Installing replaces every Home Screen Manager copy found in Payload Manager's
  * payload folder (old copy kept in the backup folder), then starts the new
  * version through the ELF loader; the new instance asks this one to exit.
  */
@@ -16,8 +16,8 @@
 #include "strbuf.h"
 
 typedef struct {
-  const char *data_dir;     /* /data/homehider */
-  const char *backup_dir;   /* /data/homehider/backup */
+  const char *data_dir;     /* /data/homescreenmanager */
+  const char *backup_dir;   /* /data/homescreenmanager/backup */
   const char *pldmgr_dir;   /* /data/pldmgr/payloads */
   const char *usb_fmt;      /* "/mnt/usb%d" */
   const char *github_api;   /* "https://api.github.com" */
@@ -26,7 +26,7 @@ typedef struct {
 
 #define UPD_MAX_ELF (32u * 1024 * 1024)
 
-/* The marker embedded in this build ("HOMEHIDER-ELF-VERSION=x.y.z;"). */
+/* The marker embedded in this build ("HOMESCREENMANAGER-ELF-VERSION=x.y.z;"; builds before the rename used HOMEHIDER-ELF-VERSION, and this build carries both). */
 const char *upd_marker(void);
 
 void upd_init(const upd_config_t *cfg);

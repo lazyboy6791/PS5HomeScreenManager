@@ -37,7 +37,18 @@ int  folders_get_json(hh_t *h, const char *tid, strbuf_t *sb);
  * out_tid receives the folder id. note gets a warning, if any. 0 on success. */
 int  folders_save(hh_t *h, const char *tid, const char *name, const char *tab,
                   const char *color, const char *items_csv, char *out_tid,
-                  char *note, size_t notesz);
+                  char *note, size_t notesz, int *changed);
+/* *changed (may be NULL) is set to 0 when tid is an existing folder that is
+ * already exactly like this (same name, tab, colour and games in the same order,
+ * tile in the home screen database): then nothing at all is done. */
+/* 1 while a folder is being saved (or its picture or background changed). The
+ * console's installer can take about 90 seconds, and the background repair of
+ * folder tiles waits for it. */
+int  folders_busy(void);
+/* Marks a long job (an import) as running, so the background repair waits like it does for a save. */
+void folders_hold(int on);
+
+
 int  folders_delete(hh_t *h, const char *tid);
 /* Moves a folder's tile to the Games or Media tab. */
 int  folders_set_tab(hh_t *h, const char *tid, const char *tab);

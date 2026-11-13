@@ -1,5 +1,9 @@
 #include "platform.h"
 
+#include <time.h>
+
+#include "log.h"
+
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <netdb.h>
@@ -94,7 +98,7 @@ void plat_notify(const char *fmt, ...) {
   vsnprintf(req.message, sizeof(req.message), fmt, ap);
   va_end(ap);
   sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
-  printf("[HomeHider] %s\n", req.message);
+  printf("[HomeScreenManager] %s\n", req.message);
 }
 
 int plat_launch_browser(const char *url) {
@@ -124,149 +128,6 @@ int plat_app_id(const char *title_id, uint32_t *app_id) {
   if (!valid_app_id(id)) return -1;
   *app_id = (uint32_t)id;
   return 0;
-}
-
-int plat_browser_app(uint32_t *app_id, char *title, size_t n) {
-  title[0] = '\0';
-  /* 1. by title id */
-  uint32_t id = 0;
-  if (plat_app_id("NPXS40169", &id) == 0) {
-    snprintf(title, n, "NPXS40169");
-    *app_id = id;
-    return 0;
-  }
-  /* 2. the small ("mini") app that is running: with the folder page open in the
-   *    PS5's browser, that is the browser */
-  int (*mini)(void) = sysfn("sceLncUtilGetAppIdOfMiniApp");
-  if (!mini) mini = sysfn("sceSystemServiceGetAppIdOfMiniApp");
-  if (!mini) return -1;
-  int v = mini();
-  if (!valid_app_id(v)) return -1;
-  int (*ttl)(uint32_t, char *) = sysfn("sceLncUtilGetAppTitleId");
-  char t[64];
-  memset(t, 0, sizeof(t));
-  if (ttl && ttl((uint32_t)v, t) != 0) t[0] = '\0';
-  t[sizeof(t) - 1] = '\0';
-  snprintf(title, n, "%s", t);
-  *app_id = (uint32_t)v;
-  return 0;
-}
-
-/* One system function that takes nothing and returns an app id: is it there,
- * and what does it say (with that app's title id)? */
-static void diag_idfn(char *out, size_t n, const char *name) {
-  size_t l = strlen(out);
-  if (l >= n) return;
-  int (*f)(void) = sysfn(name);
-  if (!f) {
-    snprintf(out + l, n - l, "%s: missing; ", name);
-    return;
-  }
-  int v = f();
-  char t[64];
-  memset(t, 0, sizeof(t));
-  int (*ttl)(uint32_t, char *) = sysfn("sceLncUtilGetAppTitleId");
-  if (valid_app_id(v) && ttl && ttl((uint32_t)v, t) != 0) t[0] = '\0';
-  t[sizeof(t) - 1] = '\0';
-  snprintf(out + l, n - l, "%s: 0x%08x%s%s%s; ", name, (unsigned)v, t[0] ? " (title " : "", t, t[0] ? ")" : "");
-}
-
-void plat_browser_diag(char *out, size_t n) {
-  out[0] = '\0';
-  uint32_t id = 0;
-  int rc = plat_app_id("NPXS40169", &id);
-  snprintf(out, n, "by title NPXS40169: %s%08x; ", rc == 0 ? "app " : "not found ", rc == 0 ? id : 0);
-  diag_idfn(out, n, "sceLncUtilGetAppIdOfMiniApp");
-  diag_idfn(out, n, "sceSystemServiceGetAppIdOfMiniApp");
-  diag_idfn(out, n, "sceLncUtilGetAppIdOfBigApp");
-  diag_idfn(out, n, "sceSystemServiceGetAppIdOfBigApp");
-  diag_idfn(out, n, "sceLncUtilGetAppIdOfRunningBigApp");
-}
-
-/* The browser app runs as a UI process (SceNKUIProcess) with its page and
- * network helpers; ending the UI process closes the browser. Ask politely first
- * (SIGTERM), and end it if it is still there after a moment. */
-int plat_close_browser(char *report, size_t n) {
-  report[0] = '\0';
-  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0};
-  size_t size = 0;
-  if (sysctl(mib, 4, NULL, &size, NULL, 0) || !size) {
-    snprintf(report, n, "couldn't read the process list");
-    return -1;
-  }
-  size += size / 4;
-  char *buf = malloc(size);
-  if (!buf) return -1;
-  if (sysctl(mib, 4, buf, &size, NULL, 0)) {
-    free(buf);
-    snprintf(report, n, "couldn't read the process list");
-    return -1;
-  }
-  pid_t pids[8];
-  int np = 0;
-  for (char *p = buf; p + sizeof(int) <= buf + size;) {
-    struct kinfo_proc *ki = (struct kinfo_proc *)p;
-    if (ki->ki_structsize <= 0) break;
-    if (strcmp(ki->ki_comm, "SceNKUIProcess") == 0 && np < 8) pids[np++] = ki->ki_pid;
-    p += ki->ki_structsize;
-  }
-  free(buf);
-  if (np == 0) {
-    snprintf(report, n, "no SceNKUIProcess is running");
-    return -1;
-  }
-  size_t l = 0;
-  for (int i = 0; i < np; i++) {
-    int rc = kill(pids[i], SIGTERM);
-    l += (size_t)snprintf(report + l, n - l, "SceNKUIProcess pid %d: SIGTERM %s; ", (int)pids[i],
-                          rc == 0 ? "sent" : "failed");
-  }
-  int alive = 1;
-  for (int w = 0; w < 6 && alive; w++) { /* up to 0.6 s */
-    usleep(100000);
-    alive = 0;
-    for (int i = 0; i < np; i++)
-      if (kill(pids[i], 0) == 0) alive = 1;
-  }
-  for (int i = 0; i < np && alive; i++) {
-    if (kill(pids[i], 0) != 0) continue;
-    int rc = kill(pids[i], SIGKILL);
-    l += (size_t)snprintf(report + l, n - l, "still there, SIGKILL %s; ", rc == 0 ? "sent" : "failed");
-  }
-  if (!alive) snprintf(report + l, n - l, "gone after SIGTERM");
-  return 0;
-}
-
-/* The names of the running processes, once each, comma separated. */
-void plat_process_names(char *out, size_t n) {
-  out[0] = '\0';
-  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PROC, 0};
-  size_t size = 0;
-  if (sysctl(mib, 4, NULL, &size, NULL, 0) || !size) return;
-  size += size / 4;
-  char *buf = malloc(size);
-  if (!buf) return;
-  if (sysctl(mib, 4, buf, &size, NULL, 0)) {
-    free(buf);
-    return;
-  }
-  size_t len = 0;
-  for (char *p = buf; p + sizeof(int) <= buf + size;) {
-    struct kinfo_proc *ki = (struct kinfo_proc *)p;
-    if (ki->ki_structsize <= 0) break;
-    char name[24];
-    snprintf(name, sizeof(name), "%.19s", ki->ki_comm);
-    /* once each */
-    char needle[28];
-    snprintf(needle, sizeof(needle), ", %s,", name);
-    char hay[4096 + 8];
-    snprintf(hay, sizeof(hay), ", %s,", out);
-    if (name[0] && !strstr(hay, needle) && len + strlen(name) + 3 < n) {
-      len += (size_t)snprintf(out + len, n - len, "%s%s", len ? ", " : "", name);
-    }
-    p += ki->ki_structsize;
-  }
-  free(buf);
 }
 
 int plat_running_game(char *title_id, size_t n, uint32_t *app_id) {
@@ -353,17 +214,24 @@ int plat_reload_shellui(void) {
 /* ------------------------------------------------------------------------- */
 
 static int g_http_tmpl = -1;
+static const char *g_http_step = ""; /* where a failed request stopped, for the log */
+
+const char *plat_http_last_step(void) { return g_http_step; }
 
 static int http_setup(void) {
   if (g_http_tmpl >= 0) return 0;
+  g_http_step = "network setup";
   sceNetInit(); /* fine if the loader already did this */
-  int pool = sceNetPoolCreate("homehider", 64 * 1024, 0);
+  int pool = sceNetPoolCreate("homescreenmanager", 64 * 1024, 0);
   if (pool < 0) return pool;
+  g_http_step = "secure connection (SSL) setup";
   int ssl = sceSslInit(256 * 1024);
   if (ssl < 0) return ssl;
+  g_http_step = "HTTP setup";
   int ctx = sceHttp2Init(pool, ssl, 256 * 1024, 2);
   if (ctx < 0) return ctx;
-  int tmpl = sceHttp2CreateTemplate(ctx, "HomeHider-PS5", 3, 1);
+  g_http_step = "HTTP template";
+  int tmpl = sceHttp2CreateTemplate(ctx, "HomeScreenManager-PS5", 3, 1);
   if (tmpl < 0) return tmpl;
   sceHttp2SetAutoRedirect(tmpl, 1);
   g_http_tmpl = tmpl;
@@ -394,18 +262,22 @@ int plat_http_get(const char *url, unsigned char **out, size_t *out_len,
                   size_t max, volatile long long *progress) {
   *out = NULL;
   *out_len = 0;
+  g_http_step = "";
   int rc = http_setup();
   if (rc) return rc < 0 ? rc : -1;
 
   char cur[1024];
   snprintf(cur, sizeof(cur), "%s", url);
   for (int hop = 0; hop < 6; hop++) {
+    g_http_step = "creating the request";
     int req = sceHttp2CreateRequestWithURL(g_http_tmpl, "GET", cur, 0);
     if (req < 0) return req;
+    g_http_step = "connecting and sending the request (secure handshake)";
     if ((rc = sceHttp2SendRequest(req, NULL, 0)) != 0) {
       sceHttp2DeleteRequest(req);
       return rc < 0 ? rc : -1;
     }
+    g_http_step = "reading the answer";
     int status = 0;
     if (sceHttp2GetStatusCode(req, &status) != 0) {
       sceHttp2DeleteRequest(req);
@@ -466,19 +338,64 @@ int plat_http_get(const char *url, unsigned char **out, size_t *out_len,
 /* tiles                                                                     */
 /* ------------------------------------------------------------------------- */
 
+static long ms_now(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (long)(t.tv_sec * 1000L + t.tv_nsec / 1000000L);
+}
+
 int plat_app_install(const char *title_id, const char *app_dir) {
+  long t0 = ms_now();
   int err = sceAppInstUtilInitialize();
-  if (err) return err;
+  if (err) {
+    hh_log("install %s: sceAppInstUtilInitialize failed 0x%08X", title_id, (unsigned)err);
+    return err;
+  }
+  long t1 = ms_now();
   /* resolved at run time, like Payload Manager, so a missing export on some
    * firmware can't stop the whole payload from loading */
   int (*install_dir)(const char *, const char *, void *) = NULL;
   uint32_t handle;
-  if (!kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle))
+  int hrc = kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle);
+  int by_code = 0, by_name = 0;
+  if (!hrc) {
+    /* 1. by its code (Wudg3Xe3heE is sceAppInstUtilAppInstallTitleDir) */
     install_dir = (void *)kernel_dynlib_resolve(-1, handle, "Wudg3Xe3heE");
+    by_code = install_dir != NULL;
+    /* 2. by its plain name, the way other console functions are found on newer firmware */
+    if (!install_dir) {
+      intptr_t p = kernel_dynlib_dlsym(-1, handle, "sceAppInstUtilAppInstallTitleDir");
+      if (p != 0 && p != -1) {
+        install_dir = (void *)p;
+        by_name = 1;
+      }
+    }
+  }
+  hh_log("install %s: looking for the fast install: by code Wudg3Xe3heE %s, by name sceAppInstUtilAppInstallTitleDir %s (library lookup returned %d)",
+         title_id, by_code ? "found" : "not found", by_name ? "found" : (by_code ? "not needed" : "not found"), hrc);
+  /* A control: the install-all function is known to exist (it is called below). If both of
+   * these lookups find it, the lookups work on this firmware and a "not found" above is real. */
+  int ctl_code = 0, ctl_name = 0;
+  if (!hrc) {
+    intptr_t c1 = (intptr_t)kernel_dynlib_resolve(-1, handle, "+scQA5stvjs");
+    intptr_t c2 = (intptr_t)kernel_dynlib_dlsym(-1, handle, "sceAppInstUtilAppInstallAll");
+    ctl_code = c1 != 0 && c1 != -1;
+    ctl_name = c2 != 0 && c2 != -1;
+  }
+  hh_log("install %s: control lookup of sceAppInstUtilAppInstallAll, which is known to exist: by code %s, by name %s",
+         title_id, ctl_code ? "found" : "not found", ctl_name ? "found" : "not found");
+  hh_log("install %s: %s", title_id,
+         install_dir ? "installing this title's folder only (fast way)"
+                     : "SLOW FALLBACK: the title-folder function wasn't found on this firmware, installing ALL apps");
   char dir[300];
   snprintf(dir, sizeof(dir), "%s/", app_dir);
+  long t2 = ms_now();
   err = install_dir ? install_dir(title_id, dir, 0) : sceAppInstUtilAppInstallAll(0);
+  long t3 = ms_now();
   sceAppInstUtilTerminate();
+  long t4 = ms_now();
+  hh_log("install %s: initialize %ld ms, install %ld ms (returned 0x%08X), terminate %ld ms", title_id,
+         t1 - t0, t3 - t2, (unsigned)err, t4 - t3);
   return err;
 }
 

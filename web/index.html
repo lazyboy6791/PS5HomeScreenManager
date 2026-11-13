@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Home Hider</title>
+<title>Home Screen Manager</title>
 <style>
 :root{
   --bg:#0a0c11;--surface:#141821;--surface2:#1b2030;--line:#2a3142;
@@ -23,6 +23,7 @@ header > .logo{margin-right:16px}
 .logo svg{width:30px;height:30px}
 h1{font-size:1.7em;margin:0;letter-spacing:.2px}
 .ver{color:var(--muted);font-size:.7em;font-weight:400;margin-left:6px}
+@media (max-width:420px){h1{font-size:1.4em}}  /* the name got longer */
 .sub{color:var(--muted);margin:2px 0 20px}
 h2{font-size:1em;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);
   margin:28px 0 12px;font-weight:600}
@@ -141,6 +142,12 @@ details.section > *:not(summary){margin-left:2px}
 .fm-msg{display:none;border-radius:12px;padding:12px 16px;margin:14px 0;background:#341818;border:1px solid #e5534b88}
 .fm-msg.show{display:block}
 .fm-msg.ok{background:#13203d;border-color:#2f6df566}
+.attn{border-radius:12px;padding:12px 16px;margin:14px 0;background:#3a2a0a;border:2px solid #e8a33a;color:#ffe2b0;line-height:1.45}
+.attn b{color:#ffc95c;letter-spacing:.5px}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);background:#1c2230;color:#fff;border:1px solid #ffffff33;border-radius:18px;padding:12px 22px;box-shadow:0 8px 30px #000a;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50;max-width:90%;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.sumh2{font-weight:600;margin:20px 0 8px}
+.tag-exp{display:inline-block;margin-left:8px;padding:1px 9px;border-radius:999px;background:#3a2a0a;border:1px solid #e8a33a;color:#ffc95c;font-size:.72em;font-weight:600;vertical-align:middle}
 .field{margin:16px 0}
 .field .lbl{color:var(--muted);font-size:.85em;margin-bottom:8px}
 .sw{width:48px;height:48px;min-height:48px;border-radius:50%;padding:0;border:3px solid transparent;margin-right:6px}
@@ -210,7 +217,7 @@ details.section > *:not(summary){margin-left:2px}
 <div class="wrap">
   <header>
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.1 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
-    <h1>Home Hider<span class="ver" id="ver"></span></h1>
+    <h1>Home Screen Manager<span class="ver" id="ver"></span></h1>
   </header>
   <p class="sub">Hide games, apps and system tiles from your home screen. Nothing is deleted, and you can show them again at any time.</p>
 
@@ -236,75 +243,104 @@ details.section > *:not(summary){margin-left:2px}
     <button class="switch" id="sw_live" aria-label="Live wallpaper" onclick="toggleLive(this)"></button></div>
   <div id="live"><div class="empty"><span class="spin"></span>&nbsp; Checking…</div></div>
 
-  <h2>When Home Hider starts</h2>
+  <h2>When Home Screen Manager starts</h2>
   <div class="row">
     <div class="txt"><div class="hint" id="openHint"></div>
       <div class="chips" id="openChips" style="margin-top:10px"></div></div>
   </div>
 
-  <details class="section" id="advAll">
-    <summary><span class="sumh">Updates &amp; advanced options</span></summary>
+  <details class="section" id="folderOpts">
+    <summary><span class="sumh">Folder options</span></summary>
     <div class="row">
-      <div class="txt"><div id="updMsg">Checking for updates…</div><div class="hint" id="updHint"></div></div>
-      <button class="ghost" id="updCheckBtn" onclick="updCheck(this)">Check for updates</button>
-    </div>
-    <div id="updOffers"></div>
-    <div class="row">
-      <div class="txt">Keep tiles hidden<div class="hint">If the PS5 brings a hidden tile back — after an update, or after you play a game that was inside a folder — Home Hider hides it again by itself, every few seconds while it's running. Turn off to leave the PS5's changes alone.</div></div>
-      <button class="switch" id="sw_reapply" aria-label="Keep tiles hidden" onclick="toggleSetting('reapply')"></button>
-    </div>
-    <div class="row">
-      <div class="txt">Show a running game<div class="hint">While a game that is hidden (for example one inside a folder) is running, its tile stays on the home screen, in front of the folders, so you can close it from the home row. It is hidden again after you close the game. Turn off to hide it straight away.</div></div>
-      <button class="switch" id="sw_run" aria-label="Show a running game" onclick="toggleSetting('show_running')"></button>
-    </div>
-    <div class="row">
-      <div class="txt">Close the browser when a game starts (experimental)<div class="hint">When you start a game from a folder page, the PS5 browser normally stays in front until you press circle. With this on, Home Hider closes the browser itself a moment after the game starts, by ending the browser's process, so the PS5 may react to that. If anything behaves oddly, turn it off. Only applies when the folder page is open in the PS5 browser.</div></div>
-      <button class="switch" id="sw_cb" aria-label="Close the browser when a game starts" onclick="toggleSetting('close_browser')"></button>
-    </div>
-    <div class="row">
-      <div class="txt">Folder page: show the name and picture<div class="hint">Shows the folder's picture and name at the top of its page. Off by default.</div></div>
+      <div class="txt">Folder page: show the name and picture<div class="hint">Shows the folder's picture and name at the top of its page.</div></div>
       <button class="switch" id="sw_fh" aria-label="Folder page: show the name and picture" onclick="toggleSetting('folder_header')"></button>
     </div>
     <div class="row">
       <div class="txt">Folder page: show the count and sort row<div class="hint">The line above the games with how many there are and the Sort by button. Turn off to show just the games; the sort order you chose last stays in use.</div></div>
       <button class="switch" id="sw_fb" aria-label="Folder page: show the count and sort row" onclick="toggleSetting('folder_bar')"></button>
     </div>
+    <div class="row">
+      <div class="txt">Folder page: show the edit link<div class="hint">The small "Edit this folder in Home Screen Manager" text under the games on the folder page. Turn off to hide it; you can still edit a folder from the Home screen list.</div></div>
+      <button class="switch" id="sw_fe" aria-label="Folder page: show the edit link" onclick="toggleSetting('folder_edit')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Folder page: show what the controller sends<div class="hint">For testing the d-pad on the folder page. A small box in the corner lists the buttons and clicks the browser receives. Leave it off normally.</div></div>
+      <button class="switch" id="sw_fd" aria-label="Folder page: show what the controller sends" onclick="toggleSetting('folder_debug')"></button>
+    </div>
+  </details>
 
-    <details class="sub" id="updSettings">
-      <summary>Update settings</summary>
-      <div class="row">
-        <div class="txt">GitHub repository<div class="hint">Where new versions are published, for example <b>yourname/HomeHider</b>. The latest release needs a HomeHider .elf attached.</div>
-          <div class="inline"><input class="search" id="repo" placeholder="owner/name" autocomplete="off" spellcheck="false"><button class="ghost" onclick="saveRepo(this)">Save</button></div>
-        </div>
-      </div>
-      <div class="row">
-        <div class="txt">Check for updates when Home Hider starts<div class="hint">Looks on GitHub and on USB drives. Nothing is installed until you press Install.</div></div>
-        <button class="switch" id="sw_auto" aria-label="Check for updates at start" onclick="toggleSetting('auto_check')"></button>
-      </div>
-      <div class="row">
-        <div class="txt">Install from a file<div class="hint">Pick a HomeHider .elf on this phone or PC. To update from a USB drive instead, copy the .elf to the drive's top folder (or a folder named homehider) and press Check for updates.</div>
-          <div class="inline"><input type="file" id="updFile" accept=".elf">
-            <label class="hint"><input type="checkbox" id="allowOlder"> Allow older versions</label>
-            <button class="ghost" onclick="uploadFile(this)">Install file</button></div>
-        </div>
-      </div>
-    </details>
+  <details class="section" id="hideOpts">
+    <summary><span class="sumh">Tile hiding options</span></summary>
+    <div class="row">
+      <div class="txt">Keep tiles hidden<div class="hint">If the PS5 brings a hidden tile back — after an update, or after you play a game that was inside a folder — Home Screen Manager hides it again by itself, every few seconds while it's running. Turn off to leave the PS5's changes alone.</div></div>
+      <button class="switch" id="sw_reapply" aria-label="Keep tiles hidden" onclick="toggleSetting('reapply')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Show a running game<div class="hint">While a game that is hidden (for example one inside a folder) is running, its tile stays on the home screen, in front of the folders, so you can close it from the home row. It is hidden again after you close the game. Turn off to hide it straight away.</div></div>
+      <button class="switch" id="sw_run" aria-label="Show a running game" onclick="toggleSetting('show_running')"></button>
+    </div>
+  </details>
 
-    <details id="adv">
-      <summary>More &amp; troubleshooting</summary>
-      <div class="actions">
-        <button class="ghost" onclick="reloadShell(this)">Refresh home screen now</button>
-        <button class="ghost" onclick="act('/api/unhide_all',this)">Show everything I hid</button>
-        <button class="ghost" onclick="diag(this)">Diagnostics</button>
-        <a class="btn ghost" href="/api/backup" id="dl">Download original backup</a>
+  <details class="section" id="updSettings">
+    <summary><span class="sumh">Update settings</span></summary>
+    <div class="row">
+      <div class="txt"><div id="updMsg">Checking for updates…</div><div class="hint" id="updHint"></div></div>
+      <button class="ghost" id="updCheckBtn" onclick="updCheck(this)">Check for updates</button>
+    </div>
+    <div id="updOffers"></div>
+    <div class="row">
+      <div class="txt">GitHub repository<div class="hint">Where new versions are published, for example <b>yourname/HomeScreenManager</b>. The latest release needs a HomeScreenManager .elf attached.<span id="repoDefault"></span></div>
+        <div class="inline"><input class="search" id="repo" placeholder="owner/name" autocomplete="off" spellcheck="false"><button class="ghost" onclick="saveRepo(this)">Save</button></div>
       </div>
-      <pre id="diag"></pre>
-      <div class="actions">
-        <button class="danger" onclick="restore(this)">Restore original backup</button>
-        <button class="danger" onclick="quitApp(this)">Quit Home Hider</button>
+    </div>
+    <div class="row">
+      <div class="txt">Check for updates when Home Screen Manager starts<div class="hint">Looks on GitHub and on USB drives. Nothing is installed until you press Install.</div></div>
+      <button class="switch" id="sw_auto" aria-label="Check for updates at start" onclick="toggleSetting('auto_check')"></button>
+    </div>
+    <div class="row">
+      <div class="txt">Install from a file<div class="hint">Pick a HomeScreenManager .elf on this phone or PC. To update from a USB drive instead, copy the .elf to the drive's top folder (or a folder named homescreenmanager) and press Check for updates.</div>
+        <div class="inline"><input type="file" id="updFile" accept=".elf">
+          <label class="hint"><input type="checkbox" id="allowOlder"> Allow older versions</label>
+          <button class="ghost" onclick="uploadFile(this)">Install file</button></div>
       </div>
-      <p class="hint">"Refresh home screen now" restarts the home screen process. If it stays black for more than a few seconds, press the PS button or restart the console. "Restore original backup" puts back the database copy taken the first time Home Hider ran; games installed after that may need Safe Mode &gt; Rebuild Database to reappear.</p>
-    </details>
+    </div>
+  </details>
+
+  <details class="section" id="expImp">
+    <summary><span class="sumh">Export &amp; Import</span></summary>
+    <p class="hint">Saves everything Home Screen Manager manages in one file: your folders with their pictures and backgrounds, the tiles you hid, custom names, pictures and backgrounds, the home screen order and the settings. Your games are not in it, and the original database backup stays a separate download.</p>
+    <div class="actions">
+      <button class="ghost" onclick="exportUsb(this)">Export to USB drive</button>
+      <a class="btn ghost" href="/api/export" id="expDl">Download to this phone or PC</a>
+    </div>
+    <div class="sumh2">Import <span class="tag-exp">Experimental</span></div>
+    <div class="attn" id="impAttn"><b>!ATTENTION!</b> <b>Experimental:</b> the import hasn't been tested on a console yet. Export your current setup first, so you can go back. Importing can take up to 10 minutes to import and install everything, depending on your firmware. Please do not open any apps or games while it runs. The homescreen will refresh automatically when it is done.</div>
+    <div class="actions">
+      <button class="ghost" onclick="impUsbList(this)">Choose from USB drive</button>
+      <span id="impFileRow"><input type="file" id="impFile" accept=".zip,application/zip" onchange="impUpload()"></span>
+    </div>
+    <div id="impUsb"></div>
+    <div id="impSummary"></div>
+    <div class="fm-msg" id="impMsg"></div>
+    <p class="hint">Import adds the backup's folders next to the ones you have, hides the tiles it lists and restores the custom names, pictures and backgrounds. It replaces your saved home screen order and your settings with the backup's. Games that aren't installed on this console are skipped.</p>
+  </details>
+
+  <details class="section" id="adv">
+    <summary><span class="sumh">More &amp; troubleshooting</span></summary>
+    <div class="actions">
+      <button class="ghost" onclick="reloadShell(this)">Refresh home screen now</button>
+      <button class="ghost" onclick="unhideAll(this)">Show everything I hid</button>
+      <button class="ghost" onclick="diag(this)">Diagnostics</button>
+      <button class="ghost" onclick="copyLog(this)">Copy log</button>
+      <a class="btn ghost" href="/api/backup" id="dl">Download original backup</a>
+    </div>
+    <pre id="diag"></pre>
+    <div class="actions">
+      <button class="danger" onclick="restore(this)">Restore original backup</button>
+      <button class="danger" onclick="quitApp(this)">Quit Home Screen Manager</button>
+    </div>
+    <div class="fm-msg" id="advMsg"></div>
+    <p class="hint">"Refresh home screen now" restarts the home screen process. If it stays black for more than a few seconds, press the PS button or restart the console. "Restore original backup" puts back the database copy taken the first time Home Screen Manager ran; games installed after that may need Safe Mode &gt; Rebuild Database to reappear.</p>
   </details>
 
   </div>
@@ -343,6 +379,7 @@ details.section > *:not(summary){margin-left:2px}
       <div class="toolbar"><input class="search" id="fmQ" type="search" placeholder="Search" oninput="renderPicker()" autocomplete="off">
         <div class="chips" id="fmChips"></div></div>
       <div class="pick" id="fmPick"></div></div>
+    <div class="attn" id="fmAttn"></div>
     <div class="fm-msg" id="fmMsg"></div>
     <div class="actions">
       <button onclick="saveFolder(this)">Save folder</button>
@@ -386,7 +423,7 @@ details.section > *:not(summary){margin-left:2px}
       <button onclick="saveTile(this)">Save</button>
       <button class="ghost" onclick="closeTile()">Cancel</button>
     </div>
-    <p class="hint">The game itself isn't changed. Home Hider only changes what the home screen shows, and puts your
+    <p class="hint">The game itself isn't changed. Home Screen Manager only changes what the home screen shows, and puts your
       name, picture and background back if the PS5 resets them. The home screen shows changes after it restarts.</p>
   </div>
 
@@ -434,7 +471,7 @@ function req(method, url, cb) {
     try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: x.responseText || ('HTTP ' + x.status) }; }
     cb(j, x);
   };
-  x.onerror = x.ontimeout = function () { cb({ ok: false, error: 'Home Hider is not responding. Is it still running?' }, x); };
+  x.onerror = x.ontimeout = function () { cb({ ok: false, error: 'Home Screen Manager is not responding. Is it still running?' }, x); };
   x.send(method === 'POST' ? '' : null);
 }
 
@@ -488,23 +525,26 @@ function renderStatus() {
   setSwitch('sw_ff', s.settings.folders_first);
   setSwitch('sw_run', s.settings.show_running);
   setSwitch('sw_fh', s.settings.folder_header);
-  setSwitch('sw_cb', s.settings.close_browser);
   setSwitch('sw_fb', s.settings.folder_bar);
+  setSwitch('sw_fe', s.settings.folder_edit);
+  setSwitch('sw_fd', s.settings.folder_debug);
   setSwitch('sw_auto', s.settings.auto_check);
   var repoEl = document.getElementById('repo');
   if (document.activeElement !== repoEl) repoEl.value = s.settings.repo || '';
+  document.getElementById('repoDefault').innerHTML = s.settings.default_repo
+    ? ' Leave the field empty to use the default, <b>' + esc(s.settings.default_repo) + '</b>.' : '';
   document.getElementById('dl').style.display = s.backup ? '' : 'none';
   document.getElementById('foot').innerHTML = s.ip
     ? 'Also open this menu from a phone or PC: <b>http://' + esc(s.ip) + ':' + s.port + '</b>' : '';
   if (!s.db.ok) {
     banner('err', '<b>Can\'t read the home screen database.</b> ' + esc(s.db.error) +
-      ' Open <b>Advanced &gt; Diagnostics</b> and share the output.');
+      ' Open <b>More &amp; troubleshooting &gt; Diagnostics</b> and share the output.');
   } else if (!state._told) {
     state._told = true;
     var notes = [];
-    if (s.updated_to) notes.push('Home Hider was updated to <b>v' + esc(s.updated_to) + '</b>.');
+    if (s.updated_to) notes.push('Home Screen Manager was updated to <b>v' + esc(s.updated_to) + '</b>.');
     if (s.reapplied_at_launch > 0) notes.push('The system had brought back ' + s.reapplied_at_launch +
-      ' hidden tile(s). Home Hider hid them again.');
+      ' hidden tile(s). Home Screen Manager hid them again.');
 
     if (notes.length) banner('info', notes.join(' '));
   }
@@ -512,8 +552,8 @@ function renderStatus() {
 
 var OPEN_MODES = [
   [1, 'Open the menu', 'The menu opens in the PS5 browser every time.'],
-  [2, 'Quiet when started by Autoload', 'The first start after the PS5 turns on (Autoload) runs quietly in the background. Starting Home Hider again from Payload Manager opens the menu.'],
-  [0, 'Never open the menu', 'Home Hider always runs quietly. Open the menu from a phone or PC, or at http://127.0.0.1:8090 in the PS5 browser.']
+  [2, 'Quiet when started by Autoload', 'The first start after the PS5 turns on (Autoload) runs quietly in the background. Starting Home Screen Manager again from Payload Manager opens the menu.'],
+  [0, 'Never open the menu', 'Home Screen Manager always runs quietly. Open the menu from a phone or PC, or at http://127.0.0.1:8090 in the PS5 browser.']
 ];
 
 function renderOpenChips(mode) {
@@ -706,7 +746,7 @@ function ordSave(btn) {
     banner('info', esc(j.note), '<button class="ghost" onclick="reloadShell(this)">Refresh home screen now</button>');
     loadArrange(); loadFolders(function () { loadList(); });
   };
-  x.onerror = x.ontimeout = function () { busy(btn, false); banner('err', 'Home Hider stopped responding.'); };
+  x.onerror = x.ontimeout = function () { busy(btn, false); banner('err', 'Home Screen Manager stopped responding.'); };
   x.send('items=' + encodeURIComponent(items.join(',')) + '&pinned=');
 }
 
@@ -899,22 +939,222 @@ function toggleSetting(key) {
   });
 }
 
-function act(url, btn) {
-  busy(btn, true);
-  req('POST', url, function (j) {
-    busy(btn, false);
-    if (!j.ok) { banner('err', esc(j.error)); return; }
-    loadStatus(function () { loadList(function () { banner('info', esc(j.note) + '. ' + APPLY_NOTE); }); });
+/* Show everything I hid: press twice, then a small pop-up. */
+function unhideAll(btn) {
+  confirmTwice(btn, 'Press again to show everything', function () {
+    busy(btn, true);
+    req('POST', '/api/unhide_all', function (j) {
+      busy(btn, false);
+      if (!j.ok) { toast(j.error, 5000); return; }
+      loadStatus(function () {
+        loadList(function () { toast(j.note + '. They appear after you open and close an app, or after a home screen refresh.', 8000); });
+      });
+    });
   });
+}
+
+function advMsg(html, ok) {
+  var el = document.getElementById('advMsg');
+  el.innerHTML = html;
+  el.className = 'fm-msg' + (html ? ' show' : '') + (ok ? ' ok' : '');
 }
 
 function reloadShell(btn) {
   busy(btn, true);
   req('POST', '/api/reload_shell', function (j) {
     busy(btn, false);
-    if (!j.ok) banner('err', esc(j.error));
-    else banner('info', 'Home screen is restarting&hellip;');
+    if (!j.ok) toast(j.error, 5000);
   });
+}
+
+/* Copies text to the clipboard. The modern way only works on secure pages, and the menu is
+ * usually opened over plain http from a phone or PC, so the older way is the fallback. */
+/* A small message near the bottom of the screen for about 3 seconds (the blue bar at the top may be out of sight). */
+var toastTimer = null;
+function toast(msg, ms) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { el.className = ''; toastTimer = null; }, ms || 3000);
+}
+
+function copyText(t, cb) {
+  var fallback = function () {
+    var ta = document.createElement('textarea');
+    ta.value = t;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ta.setSelectionRange(0, t.length); } catch (e) {}
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    cb(ok);
+  };
+  if (navigator.clipboard && window.isSecureContext && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(t).then(function () { cb(true); }, fallback);
+  else fallback();
+}
+
+function copyLog(btn) {
+  busy(btn, true);
+  var x = new XMLHttpRequest();
+  x.open('GET', '/api/log', true);
+  x.onload = function () {
+    busy(btn, false);
+    var text = x.responseText || '';
+    if (x.status !== 200 || !text) { toast('The log is empty or could not be read.', 5000); return; }
+    var lines = text.split('\n').length - (text.charAt(text.length - 1) === '\n' ? 1 : 0);
+    copyText(text, function (ok) {
+      if (ok) { toast('Log copied (' + lines + ' lines)'); return; }
+      var p = document.getElementById('diag');
+      p.textContent = text;
+      p.className = 'show';
+      toast('Couldn\'t copy automatically. The log is shown below the buttons: select it and copy it by hand.', 8000);
+    });
+  };
+  x.onerror = function () { busy(btn, false); toast('Could not load the log.', 5000); };
+  x.send(null);
+}
+
+/* ---- Export & Import ---- */
+var impToken = 0, impJob = 0, impT0 = 0, impTimer = null, impUsbFiles = [];
+
+function impMsg(html, ok, quiet) {
+  var el = document.getElementById('impMsg');
+  el.innerHTML = html;
+  el.className = 'fm-msg' + (html ? ' show' : '') + (ok ? ' ok' : '');
+  if (html && !quiet && el.scrollIntoView) el.scrollIntoView(false);
+}
+
+function exportUsb(btn) {
+  busy(btn, true);
+  req('POST', '/api/export/usb', function (j) {
+    busy(btn, false);
+    if (!j.ok) { toast(j.error, 5000); return; }
+    toast('Backup written to the USB drive: ' + j.path.split('/').pop() + ' (' + mb(j.size) + ')', 5000);
+  });
+}
+
+function impUsbList(btn) {
+  busy(btn, true);
+  req('GET', '/api/import/usb_files', function (j) {
+    busy(btn, false);
+    var el = document.getElementById('impUsb');
+    if (!j.ok) { el.innerHTML = ''; toast(j.error, 5000); return; }
+    impUsbFiles = j.files;
+    if (!j.files.length) {
+      el.innerHTML = '<div class="hint">No backup file found on a USB drive. Put <b>HomeScreenManager-backup-….zip</b> at the top of the drive and try again.</div>';
+      return;
+    }
+    var h = '';
+    for (var i = 0; i < j.files.length; i++)
+      h += '<div class="inline"><button class="ghost small" onclick="impInspectUsb(' + i + ',this)">' + esc(j.files[i].name) +
+        '</button> <span class="hint">' + mb(j.files[i].size) + '</span></div>';
+    el.innerHTML = h;
+  });
+}
+
+function impInspectUsb(i, btn) { impInspect('/api/import/inspect?usb=' + encodeURIComponent(impUsbFiles[i].path), null, btn); }
+
+function impUpload() {
+  var f = document.getElementById('impFile').files[0];
+  if (f) impInspect('/api/import/inspect', f, null);
+}
+
+function impInspect(url, file, btn) {
+  busy(btn, true);
+  document.getElementById('impSummary').innerHTML = '';
+  impMsg('<span class="spin"></span>&nbsp; Reading the backup file…', true);
+  var x = new XMLHttpRequest();
+  x.open('POST', url, true);
+  x.timeout = 300000;
+  x.onload = function () {
+    busy(btn, false);
+    var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; }
+    if (!j.ok) { impMsg(esc(j.error)); return; }
+    impMsg('');
+    impToken = j.token;
+    document.getElementById('impSummary').innerHTML = impSummaryHtml(j);
+  };
+  x.onerror = x.ontimeout = function () { busy(btn, false); impMsg('The file didn\'t reach Home Screen Manager.'); };
+  x.send(file);
+}
+
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+/* what the file holds, before anything is changed */
+function impSummaryHtml(j) {
+  var fl = [], i;
+  for (i = 0; i < j.folders.length; i++) {
+    var f = j.folders[i];
+    fl.push(esc(f.name) + ' (' + plural(f.games, 'game', 'games') + (f.missing ? ', ' + f.missing + ' not installed' : '') + ')');
+  }
+  var h = '<div class="offer"><div class="t">This backup holds</div><div class="notes">';
+  h += plural(j.folders.length, 'folder', 'folders') + (fl.length ? ': ' + fl.join(', ') : '') + '<br>';
+  h += plural(j.hidden, 'hidden tile', 'hidden tiles') + '<br>';
+  h += plural(j.custom, 'tile with a custom name, picture or background', 'tiles with a custom name, picture or background') + '<br>';
+  h += (j.order ? 'a saved home screen order (' + plural(j.order, 'tile', 'tiles') + ')' : 'no saved home screen order') + '<br>';
+  h += (j.settings ? 'your settings' : 'no settings');
+  if (j.created) h += '<br><span class="hint">Made ' + esc(j.created) + (j.app_version ? ' with version ' + esc(j.app_version) : '') + '</span>';
+  h += '</div>';
+  if (j.missing && j.missing.length)
+    h += '<div class="hint" style="margin:8px 0">Not installed on this console, so skipped: ' + esc(j.missing.join(', ')) + '</div>';
+  h += '<div class="hint" style="margin:8px 0">The folders are added next to the ' + plural(j.existing_folders, 'folder', 'folders') +
+    ' you have now. Nothing is deleted. Your saved home screen order and your settings are replaced by the backup\'s.</div>';
+  h += '<div class="inline"><button onclick="impStart(this)">Import (experimental)</button> ' +
+    '<button class="ghost" onclick="impCancel()">Cancel</button></div></div>';
+  return h;
+}
+
+function impCancel() { impToken = 0; document.getElementById('impSummary').innerHTML = ''; impMsg(''); }
+
+function impStart(btn) {
+  busy(btn, true);
+  req('POST', '/api/import/apply?token=' + impToken, function (j) {
+    busy(btn, false);
+    if (!j.ok) { impMsg(esc(j.error)); return; }
+    document.getElementById('impSummary').innerHTML = '';
+    impJob = j.job;
+    impT0 = Date.now();
+    impPoll(true);
+  });
+}
+
+function impDraw(r, first) {
+  var s = Math.floor((Date.now() - impT0) / 1000);
+  impMsg('<span class="spin"></span>&nbsp; Importing… ' + fmtElapsed(s) +
+    (r.folder_n ? ' · folder ' + Math.min(r.folder_i, r.folder_n) + ' of ' + r.folder_n : '') +
+    '<br><span class="hint">' + esc(r.phase || '') + '</span><br><span class="hint">This can take up to 10 minutes depending on your firmware. ' +
+    'Please do not open any apps or games.</span>', true, !first);
+}
+
+function impPoll(first) {
+  req('GET', '/api/import/job?job=' + impJob, function (r) {
+    if (!r.ok) { impMsg(esc(r.error || 'Lost track of the import.')); return; }
+    if (r.done) { impDone(r.result); return; }
+    impDraw(r, first);
+    impTimer = setTimeout(function () { impPoll(false); }, 1000);
+  });
+}
+
+function impDone(res) {
+  if (!res.ok) { impMsg('The import didn\'t run: ' + esc(res.error)); return; }
+  impMsg('');
+  var h = 'Import done: ' + plural(res.folders_made, 'folder', 'folders') + ' created';
+  if (res.folders_skipped) h += ' (' + res.folders_skipped + ' skipped)';
+  h += ', ' + plural(res.hidden, 'tile', 'tiles') + ' hidden, ' + plural(res.custom, 'custom tile', 'custom tiles') + ' restored';
+  if (res.order) h += ', the home screen order restored';
+  if (res.settings) h += ', the settings restored';
+  h += '. ';
+  if (res.problems) h += '<br>' + plural(res.problems, 'problem', 'problems') + ': ' + esc(res.notes) + '<br>';
+  h += 'The home screen is refreshing to show the result…';
+  if (res.problems) impMsg(h, true); /* problems stay readable under the Import controls */
+  else toast(h.replace(/<br>/g, ' '), 8000);
+  loadFolders(function () { loadList(); });
+  loadStatus();
 }
 
 function diag(btn) {
@@ -927,7 +1167,7 @@ function diag(btn) {
     p.textContent = x.responseText;
     p.className = 'show';
   };
-  x.onerror = function () { busy(btn, false); banner('err', 'Could not load diagnostics.'); };
+  x.onerror = function () { busy(btn, false); toast('Could not load diagnostics.', 5000); };
   x.send(null);
 }
 
@@ -943,13 +1183,21 @@ function confirmTwice(btn, label, go) {
 }
 
 function restore(btn) {
-  confirmTwice(btn, 'Press again to restore', function () { act('/api/restore', btn); });
+  confirmTwice(btn, 'Press again to restore', function () {
+    busy(btn, true);
+    req('POST', '/api/restore', function (j) {
+      busy(btn, false);
+      if (!j.ok) { advMsg(esc(j.error)); return; }
+      advMsg('Original backup restored. Restart the PS5 so the home screen is right.', true);
+      loadStatus(function () { loadList(); });
+    });
+  });
 }
 
 function quitApp(btn) {
   confirmTwice(btn, 'Press again to quit', function () {
     req('POST', '/api/quit', function () {
-      banner('info', 'Home Hider has stopped. Launch it again from Payload Manager when you need it.');
+      toast('Home Screen Manager has stopped. Launch it again from Payload Manager when you need it.', 8000);
     });
   });
 }
@@ -957,6 +1205,7 @@ function quitApp(btn) {
 /* ---------- updates ---------- */
 
 var upd = null, updTimer = null, waitingRestart = 0, browserOffer = null, browserTried = false;
+var browserBusy = false, browserRes = null, updNote = ''; /* updNote: the last message of an update action, shown in the status line */
 
 function verCmp(a, b) {
   var x = String(a || '').replace(/^[vV]/, '').split('.'), y = String(b || '').replace(/^[vV]/, '').split('.');
@@ -997,7 +1246,17 @@ function renderUpd() {
   else if (u.phase === 'restarting' || u.phase === 'done') msg = esc(u.message);
   else msg = 'You\'re running <b>v' + esc(u.current) + '</b>.' + (u.message && u.phase === 'idle' ? ' ' + esc(u.message.replace(/^You have the latest version.*$/, 'It\'s the latest version.')) : '');
   if (!u.repo) hint = 'Set your GitHub repository in Update settings to get updates from GitHub. USB drives are always checked.';
-  else hint = 'GitHub: ' + esc(u.repo) + (u.github.checked && u.github.error ? ' — ' + esc(u.github.error) : '');
+  else {
+    var ghErr = u.github.checked && u.github.error ? u.github.error : '', tail = esc(ghErr);
+    if (ghErr && /reach|error/i.test(ghErr)) { /* the console itself can't connect securely: this browser asks GitHub instead */
+      if (browserBusy) tail = 'checking with this browser…';
+      else if (browserRes && browserRes.state === 'ok')
+        tail = browserRes.newer ? 'a newer version was found by this browser' : 'no newer version (checked by this browser, because the console itself can\'t connect to GitHub)';
+      else if (browserRes && browserRes.state === 'none') tail = 'No published release found in ' + esc(u.repo) + ' (checked by this browser)';
+    }
+    hint = 'GitHub: ' + esc(u.repo) + (tail ? ' — ' + tail : '');
+  }
+  if (updNote) msg = updNote;
   document.getElementById('updMsg').innerHTML = msg;
   document.getElementById('updHint').innerHTML = hint;
 
@@ -1011,7 +1270,7 @@ function renderUpd() {
   document.getElementById('updOffers').innerHTML = html;
   var topVer = u.github.newer ? u.github.version : (browserOffer ? browserOffer.version : (u.usb.newer ? u.usb.version : ''));
   document.getElementById('updTop').className = 'banner info' + (topVer && !waitingRestart ? ' show' : '');
-  document.getElementById('updTopMsg').innerHTML = topVer ? 'Home Hider <b>v' + esc(topVer) + '</b> is available.' : '';
+  document.getElementById('updTopMsg').innerHTML = topVer ? 'Home Screen Manager <b>v' + esc(topVer) + '</b> is available.' : '';
   document.getElementById('updCheckBtn').disabled = !!u.busy || !!waitingRestart;
 }
 
@@ -1023,7 +1282,7 @@ function offer(title, notes, page, buttons, small) {
 }
 
 function goUpdates() {
-  var adv = document.getElementById('advAll');
+  var adv = document.getElementById('updSettings');
   if (adv) adv.open = true;
   var el = document.getElementById('updOffers');
   if (el.scrollIntoView) el.scrollIntoView();
@@ -1031,21 +1290,26 @@ function goUpdates() {
   if (b) b.focus();
 }
 
+/* The result of an update action goes in the status line of Update settings (red for an error). */
+function updNoteSet(html) { updNote = html; if (upd) renderUpd(); }
+function updErr(html) { updNoteSet('<span class="err-text">' + html + '</span>'); }
+
 function updCheck(btn) {
-  browserOffer = null; browserTried = false;
+  browserOffer = null; browserTried = false; browserRes = null; updNote = '';
   busy(btn, true);
   req('POST', '/api/update/check', function (j) {
     busy(btn, false);
-    if (!j.ok) { banner('err', esc(j.error)); return; }
+    if (!j.ok) { updErr(esc(j.error)); return; }
     pollUpd(400);
   });
 }
 
 function installUpd(src, btn) {
+  updNote = '';
   busy(btn, true);
   req('POST', '/api/update/install?source=' + src, function (j) {
     busy(btn, false);
-    if (!j.ok) { banner('err', esc(j.error)); return; }
+    if (!j.ok) { updErr(esc(j.error)); return; }
     pollUpd(500);
   });
 }
@@ -1053,7 +1317,7 @@ function installUpd(src, btn) {
 function startRestartWait() {
   if (waitingRestart) return;
   waitingRestart = Date.now();
-  banner('info', '<span class="spin"></span>&nbsp; Installing the update and restarting Home Hider…');
+  updNoteSet('<span class="spin"></span>&nbsp; Installing the update and restarting Home Screen Manager…');
   pollUpd(1500);
 }
 
@@ -1063,7 +1327,7 @@ function checkRestarted() {
     if (Date.now() - waitingRestart > 45000) {
       waitingRestart = 0;
       loadUpd();
-      banner('info', 'The update is installed. If Home Hider didn\'t restart by itself, start it again from Payload Manager.');
+      updNoteSet('The update is installed. If Home Screen Manager didn\'t restart by itself, start it again from Payload Manager.');
       return;
     }
     pollUpd(1500);
@@ -1077,17 +1341,18 @@ function sendElf(body, allowOlder, btn) {
   x.onload = function () {
     busy(btn, false);
     var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; }
-    if (!j.ok) { banner('err', esc(j.error)); return; }
-    banner('info', esc(j.note));
+    if (!j.ok) { updErr(esc(j.error)); return; }
+    updNoteSet(esc(j.note));
     startRestartWait();
   };
-  x.onerror = x.ontimeout = function () { busy(btn, false); banner('err', 'The upload didn\'t reach Home Hider.'); };
+  x.onerror = x.ontimeout = function () { busy(btn, false); updErr('The upload didn\'t reach Home Screen Manager.'); };
   x.send(body);
 }
 
 function uploadFile(btn) {
   var f = document.getElementById('updFile').files[0];
-  if (!f) { banner('err', 'Choose a HomeHider .elf file first.'); return; }
+  if (!f) { updErr('Choose a HomeScreenManager .elf file first.'); return; }
+  updNote = '';
   busy(btn, true);
   sendElf(f, document.getElementById('allowOlder').checked, btn);
 }
@@ -1097,7 +1362,7 @@ function saveRepo(btn) {
   busy(btn, true);
   req('POST', '/api/settings?repo=' + encodeURIComponent(v), function (j) {
     busy(btn, false);
-    if (!j.ok) { banner('err', esc(j.error)); return; }
+    if (!j.ok) { updErr(esc(j.error)); return; }
     loadStatus(function () { if (v) updCheck(document.getElementById('updCheckBtn')); else loadUpd(); });
   });
 }
@@ -1105,20 +1370,25 @@ function saveRepo(btn) {
 /* Fallback when the console itself can't reach GitHub: ask from this browser. */
 function browserCheck() {
   if (!upd || !upd.repo) return;
+  browserBusy = true;
+  browserRes = null;
+  var finish = function (res) { browserRes = res; browserBusy = false; renderUpd(); };
   var x = new XMLHttpRequest();
   x.open('GET', 'https://api.github.com/repos/' + upd.repo + '/releases/latest', true);
   x.timeout = 15000;
   x.onload = function () {
-    if (x.status !== 200) return;
-    var r; try { r = JSON.parse(x.responseText); } catch (e) { return; }
+    if (x.status === 404) { finish({ state: 'none' }); return; }
+    if (x.status !== 200) { finish({ state: 'fail' }); return; }
+    var r; try { r = JSON.parse(x.responseText); } catch (e) { finish({ state: 'fail' }); return; }
     var a = null, assets = r.assets || [];
     for (var i = 0; i < assets.length; i++) {
-      if (/\.elf$/i.test(assets[i].name) && (!a || /homehider/i.test(assets[i].name))) a = assets[i];
+      if (/\.elf$/i.test(assets[i].name) && (!a || /homescreenmanager|homehider/i.test(assets[i].name))) a = assets[i];
     }
-    if (!a || verCmp(r.tag_name, upd.current) <= 0) return;
-    browserOffer = { version: String(r.tag_name).replace(/^[vV]/, ''), api: a.url, page: r.html_url, notes: r.body || '' };
-    renderUpd();
+    var newer = !!a && verCmp(r.tag_name, upd.current) > 0;
+    if (newer) browserOffer = { version: String(r.tag_name).replace(/^[vV]/, ''), api: a.url, page: r.html_url, notes: r.body || '' };
+    finish({ state: 'ok', newer: newer });
   };
+  x.onerror = x.ontimeout = function () { finish({ state: 'fail' }); };
   x.send(null);
 }
 
@@ -1136,7 +1406,7 @@ function browserInstall(btn) {
   };
   function fail() {
     busy(btn, false);
-    banner('err', 'This browser couldn\'t download the file. Open the <a href="' + esc(browserOffer.page) +
+    updErr('This browser couldn\'t download the file. Open the <a href="' + esc(browserOffer.page) +
       '" target="_blank" rel="noopener" style="color:#fff">release page</a>, download the .elf, then use ' +
       '<b>Update settings &gt; Install from a file</b>, or copy it to a USB drive.');
   }
@@ -1144,18 +1414,23 @@ function browserInstall(btn) {
   x.send(null);
 }
 
-/* notice USB drives plugged in while the menu is open */
-setInterval(function () {
-  if (document.hidden || waitingRestart || !upd || upd.busy) return;
+/* Look for a newer version on a USB drive when Update settings is opened. Nothing runs on its own. */
+var lastUsbCheck = 0, updDetails = document.getElementById('updSettings');
+function usbCheckOnOpen() {
+  var now = Date.now();
+  if (now - lastUsbCheck < 5000 || !upd || upd.busy || waitingRestart) return;
+  lastUsbCheck = now;
   req('POST', '/api/update/check?usb_only=1', function (j) { if (j.ok) pollUpd(1500); });
-}, 20000);
+}
+updDetails.addEventListener('toggle', function () { if (updDetails.open) usbCheckOnOpen(); });
 
 /* ---------- folders ---------- */
 
 var folders = [], fm = null, fmFilter = 'all', fmPendingFile = null, fmPendingUsb = null;
 var IS_PS5 = /PlayStation/i.test(navigator.userAgent);
+document.getElementById('impFileRow').style.display = IS_PS5 ? 'none' : ''; /* the PS5 browser can't open files */
 var COLORS = [['none', ''], ['blue', '#2f6df5'], ['purple', '#864bf2'], ['red', '#e5484d'], ['orange', '#f08c2e'],
-  ['green', '#2fb36b'], ['teal', '#1fb5c4'], ['gray', '#5b6378']];
+  ['green', '#2fb36b'], ['teal', '#1fb5c4'], ['gray', '#5b6378'], ['darkgray', '#3c414f'], ['black', '#1f2127']];
 
 function folderName(id) {
   for (var i = 0; i < folders.length; i++) if (folders[i].id === id) return folders[i].name;
@@ -1176,6 +1451,16 @@ function renderFolders() {
   if (tiles.length) renderList();
 }
 
+/* shown above the buttons of the folder editor: saving can take long on newer firmware */
+var ATTN_NEW = '<b>!ATTENTION!</b> Creating a folder can take up to 90 seconds depending on your firmware. ' +
+  'Please do not open any apps or games during the folder creation process. ' +
+  'There will be tile movement on the homescreen until the process is finished. ' +
+  'Once the folder is created the homescreen will automatically refresh to show the results.';
+var ATTN_EDIT = '<b>!ATTENTION!</b> Depending on the changes you have made to this folder it can take between 1 and 90 seconds to take effect. ' +
+  'Please do not open any apps or games during this process. ' +
+  'Once the folder is edited successfully the homescreen will automatically refresh to show the results. ' +
+  'Deletion of a folder is instant and will not restart the homescreen.';
+
 function editFolder(id) {
   var f = null;
   for (var i = 0; i < folders.length; i++) if (folders[i].id === id) f = folders[i];
@@ -1193,6 +1478,7 @@ function editFolder(id) {
   document.getElementById('fmFile').value = '';
   document.getElementById('fmQ').value = '';
   document.getElementById('fmTitle').textContent = f ? 'Edit folder' : 'New folder';
+  document.getElementById('fmAttn').innerHTML = f ? ATTN_EDIT : ATTN_NEW;
   document.getElementById('fmName').value = fm.name;
   document.getElementById('fmDelete').style.display = f ? '' : 'none';
   fmMsg('');
@@ -1337,7 +1623,7 @@ function loadUsbPics() {
     document.getElementById('usbHint').textContent = usbPics.length
       ? usbPics.length + ' picture' + (usbPics.length === 1 ? '' : 's') + ' found. Pick one:'
       : 'No pictures found. Copy PNG, JPG, BMP or GIF files to a USB drive (any folder), plug it into the PS5 and press Refresh. ' +
-        'Over FTP, you can put them in /data/homehider/pictures instead.';
+        'Over FTP, you can put them in /data/homescreenmanager/pictures instead.';
     renderUsbPics();
   });
 }
@@ -1411,9 +1697,9 @@ function pickUsb(i) {
 function post(url, file, cb) {
   var x = new XMLHttpRequest();
   x.open('POST', url, true);
-  x.timeout = 180000;
+  x.timeout = 300000;
   x.onload = function () { var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; } cb(j); };
-  x.onerror = x.ontimeout = function () { cb({ ok: false, error: 'Home Hider is not responding.' }); };
+  x.onerror = x.ontimeout = function () { cb({ ok: false, error: 'Home Screen Manager is not responding.' }); };
   x.send(file || '');
 }
 
@@ -1432,12 +1718,12 @@ function fmPickBgFile() {
   renderFm();
 }
 
-function uploadPicture(id, file, cb) {
+function uploadPicture(id, file, cb, refresh) {
   var x = new XMLHttpRequest();
-  x.open('POST', '/api/folders/icon?id=' + id, true);
-  x.timeout = 120000;
+  x.open('POST', '/api/folders/icon?id=' + id + (refresh ? '&refresh=1' : ''), true);
+  x.timeout = 300000;
   x.onload = function () { var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; } cb(j); };
-  x.onerror = x.ontimeout = function () { cb({ ok: false, error: 'The picture didn\'t reach Home Hider.' }); };
+  x.onerror = x.ontimeout = function () { cb({ ok: false, error: 'The picture didn\'t reach Home Screen Manager.' }); };
   x.send(file);
 }
 
@@ -1452,12 +1738,54 @@ function useCollage(btn) {
   }
   if (!fm.id) { renderFm(); return; }
   busy(btn, true);
-  req('POST', '/api/folders/icon?id=' + fm.id + '&reset=1', function (j) {
+  startSaveTimer('Resetting the picture');
+  post('/api/folders/icon?id=' + fm.id + '&reset=1&refresh=1', null, function (j) {
+    stopSaveTimer();
     busy(btn, false);
     if (!j.ok) { fmMsg(esc(j.error)); return; }
     fm.custom = false;
+    fmMsg('Picture reset. The home screen is refreshing to show the result…', true);
     loadFolders(function () { if (fm) renderFm(); });
   });
+}
+
+/* A folder save runs in the background (the console's installer takes about 90
+ * seconds on newer firmware): ask now and then until it is done. */
+function folderJob(job, cb, tries) {
+  tries = tries || 0;
+  req('GET', '/api/folders/job?job=' + job, function (r) {
+    if (r.ok && r.done) { cb(r.result); return; }
+    if (!r.ok && /Unknown folder job/.test(r.error || '')) {
+      cb({ ok: false, error: 'Home Screen Manager was restarted while saving. Open the folder list to see whether the folder was made.' });
+      return;
+    }
+    if (tries >= 400) { /* about 10 minutes */
+      cb({ ok: false, error: 'Home Screen Manager is taking too long. Check the folder list in a minute. If the folder is missing, open More & troubleshooting > Diagnostics.' });
+      return;
+    }
+    setTimeout(function () { folderJob(job, cb, tries + 1); }, 1500);
+  });
+}
+
+/* The message while a folder is saved: the step, the time since you pressed Save, and a note
+ * that it can take long. One clock for the whole save, however many steps it has. */
+var saveStep = '', saveTimer = null, saveT0 = 0;
+function fmtElapsed(s) { return s < 60 ? s + ' s' : Math.floor(s / 60) + ' min ' + (s % 60) + ' s'; }
+function drawSaveTimer(first) {
+  var s = Math.floor((Date.now() - saveT0) / 1000);
+  var html = '<span class="spin"></span>&nbsp; ' + saveStep + '… ' + fmtElapsed(s) +
+    '. This can take about 90 seconds depending on your firmware' +
+    (s >= 150 ? '. Still working: the console\'s installer can be slow' : '');
+  if (first) fmMsg(html, true);
+  else document.getElementById('fmMsg').innerHTML = html;  /* no scrolling every second */
+}
+function stopSaveTimer() { if (saveTimer) { clearInterval(saveTimer); saveTimer = null; } }
+function startSaveTimer(step) {
+  stopSaveTimer();
+  saveStep = step;
+  saveT0 = Date.now();
+  drawSaveTimer(true);
+  saveTimer = setInterval(function () { drawSaveTimer(false); }, 1000);
 }
 
 function saveFolder(btn) {
@@ -1465,40 +1793,60 @@ function saveFolder(btn) {
   if (!fm.name) { fmMsg('Give the folder a name first.'); document.getElementById('fmName').focus(); return; }
   if (!fm.items.length) { fmMsg('Pick at least one game for the folder.'); return; }
   busy(btn, true);
-  fmMsg('<span class="spin"></span>&nbsp; Saving the folder and adding its tile to the home screen. This can take a few seconds…', true);
+  var creating = !fm.id;
+  startSaveTimer(creating ? 'Creating folder' : 'Saving folder');
+  /* The home screen is restarted once, by Home Screen Manager, after the last step that changes
+   * something: the folder itself, then a new picture, then a new background. */
+  var hasPic = !!(fmPendingUsb || fmPendingFile);
+  var hasBg = !!(fm.bgUsb || fm.bgFile || fm.bgReset);
   var body = 'id=' + encodeURIComponent(fm.id) + '&name=' + encodeURIComponent(fm.name) + '&tab=' + fm.tab +
     '&color=' + fm.color + '&items=' + encodeURIComponent(fm.items.join(','));
   var x = new XMLHttpRequest();
-  x.open('POST', '/api/folders/save', true);
+  x.open('POST', '/api/folders/save?async=1' + (hasPic || hasBg ? '' : '&refresh=1'), true);
   x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-  x.timeout = 60000;
-  x.onload = function () {
-    var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; }
-    if (!j.ok) { busy(btn, false); fmMsg('Couldn\'t save the folder: ' + esc(j.error)); return; }
+  x.timeout = 30000;
+  var afterSave = function (j) {
+    if (!j.ok) { stopSaveTimer(); busy(btn, false); fmMsg('Couldn\'t save the folder: ' + esc(j.error)); return; }
+    var nothing = j.changed === false && !hasPic && !hasBg;
     var done = function (extra) {
+      stopSaveTimer();
       busy(btn, false);
       closeFolder();
       loadFolders(function () { loadList(); });
-      banner('info', 'Folder saved. ' + (j.note ? esc(j.note) + ' ' : '') + (extra || '') +
-        'The home screen picks it up after you <b>open and close any game or app</b>, or restart the PS5.');
+      var what = (creating ? 'Folder created. ' : 'Folder saved. ') + (j.note ? esc(j.note) + ' ' : '');
+      if (extra) { /* a later step failed, so the home screen was not restarted */
+        banner('info', what + extra + 'The home screen picks it up after you <b>open and close any game or app</b>, or restart the PS5.',
+          '<button class="ghost" onclick="reloadShell(this)">Refresh home screen now</button>');
+      } else if (nothing) {
+        banner('info', 'Nothing was changed.');
+      } else {
+        banner('info', what + 'The home screen is refreshing to show the result…');
+      }
     };
     var bgStep = function (extra) {
       var after = function (r) { done(extra + (r.ok ? '' : esc(r.error) + ' ')); };
-      if (fm.bgUsb || fm.bgFile) fmMsg('<span class="spin"></span>&nbsp; Making the background. This can take up to 10 seconds…', true);
-      if (fm.bgUsb) post('/api/folders/bg?id=' + j.id + '&usb=' + encodeURIComponent(fm.bgUsb), null, after);
-      else if (fm.bgFile) post('/api/folders/bg?id=' + j.id, fm.bgFile, after);
-      else if (fm.bgReset) post('/api/folders/bg?id=' + j.id + '&reset=1', null, after);
+      if (hasBg) saveStep = 'Making the background';
+      if (fm.bgUsb) post('/api/folders/bg?id=' + j.id + '&refresh=1&usb=' + encodeURIComponent(fm.bgUsb), null, after);
+      else if (fm.bgFile) post('/api/folders/bg?id=' + j.id + '&refresh=1', fm.bgFile, after);
+      else if (fm.bgReset) post('/api/folders/bg?id=' + j.id + '&refresh=1&reset=1', null, after);
       else done(extra);
     };
-    if (fmPendingUsb) req('POST', '/api/folders/icon?id=' + j.id + '&usb=' + encodeURIComponent(fmPendingUsb),
+    if (hasPic) saveStep = 'Adding the picture';
+    if (fmPendingUsb) post('/api/folders/icon?id=' + j.id + (hasBg ? '' : '&refresh=1') + '&usb=' + encodeURIComponent(fmPendingUsb), null,
       function (r) { bgStep(r.ok ? '' : esc(r.error) + ' '); });
-    else if (fmPendingFile) uploadPicture(j.id, fmPendingFile, function (r) { bgStep(r.ok ? '' : esc(r.error) + ' '); });
+    else if (fmPendingFile) uploadPicture(j.id, fmPendingFile, function (r) { bgStep(r.ok ? '' : esc(r.error) + ' '); }, !hasBg);
     else bgStep('');
   };
+  x.onload = function () {
+    var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; }
+    if (j.ok && j.job) folderJob(j.job, afterSave, 0); /* saved in the background */
+    else afterSave(j);                                 /* (an older Home Screen Manager answers when it is done) */
+  };
   x.onerror = x.ontimeout = function () {
+    stopSaveTimer();
     busy(btn, false);
-    fmMsg('Home Hider stopped responding while saving. Start it again from Payload Manager, then open ' +
-      '<b>Advanced &gt; Diagnostics</b> and send the log at the bottom.');
+    fmMsg('Home Screen Manager stopped responding while saving. Start it again from Payload Manager, then open ' +
+      '<b>More &amp; troubleshooting &gt; Diagnostics</b> and send the log at the bottom.');
   };
   x.send(body);
 }
@@ -1527,7 +1875,7 @@ function editTile(id) {
     nm.disabled = !te.can_rename;
     document.getElementById('teOrig').textContent = te.can_rename
       ? (te.renamed ? 'Original name: ' + te.orig_name : '')
-      : 'This tile\'s name isn\'t stored where Home Hider can change it.';
+      : 'This tile\'s name isn\'t stored where Home Screen Manager can change it.';
     document.getElementById('teOrigName').style.display = te.renamed ? '' : 'none';
     document.getElementById('tePicField').style.display = te.can_icon ? '' : 'none';
     teMsg('');
@@ -1568,7 +1916,7 @@ function renderTeMove() {
     return;
   }
   if (te._locked) {
-    box.innerHTML = '<div class="hint">The PS5 controls where this tile sits, so Home Hider can\'t move or reorder it. ' +
+    box.innerHTML = '<div class="hint">The PS5 controls where this tile sits, so Home Screen Manager can\'t move or reorder it. ' +
       'You can still hide it.</div>';
     return;
   }
@@ -1684,7 +2032,7 @@ function saveTile(btn) {
       x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
       x.timeout = 30000;
       x.onload = function () { var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; } next(j); };
-      x.onerror = x.ontimeout = function () { next({ ok: false, error: 'Home Hider is not responding.' }); };
+      x.onerror = x.ontimeout = function () { next({ ok: false, error: 'Home Screen Manager is not responding.' }); };
       x.send('name=' + encodeURIComponent(name));
     });
   var clear = document.getElementById('teClear').checked ? '&clear=1' : '';
@@ -1694,7 +2042,7 @@ function saveTile(btn) {
     x.open('POST', '/api/custom/icon?id=' + te.id + clear, true);
     x.timeout = 120000;
     x.onload = function () { var j; try { j = JSON.parse(x.responseText); } catch (e) { j = { ok: false, error: 'HTTP ' + x.status }; } next(j); };
-    x.onerror = x.ontimeout = function () { next({ ok: false, error: 'The picture didn\'t reach Home Hider.' }); };
+    x.onerror = x.ontimeout = function () { next({ ok: false, error: 'The picture didn\'t reach Home Screen Manager.' }); };
     x.send(te.file);
   });
   else if (te.reset) steps.push(function (next) { req('POST', '/api/custom/icon?id=' + te.id + '&reset=1', next); });
@@ -1759,16 +2107,16 @@ function renderLive() {
   var j = live, h = '';
   setSwitch('sw_live', j.enabled);
   var credit = '<div class="credit">Live wallpapers by <b>LiveShell Engine ' + esc(j.version) +
-    '</b> by ZiZc3 (<a href="https://github.com/ZiZc3/LiveShell">github.com/ZiZc3/LiveShell</a>, GPL-3.0), built on OnionHEN. Built into Home Hider.</div>';
+    '</b> by ZiZc3 (<a href="https://github.com/ZiZc3/LiveShell">github.com/ZiZc3/LiveShell</a>, GPL-3.0), built on OnionHEN. Built into Home Screen Manager.</div>';
   if (!j.enabled) {
     h = '<div class="live-hero"><div class="live-ico">' + svg(FILM) + '</div>' +
       '<div><div class="live-title">Play a video behind your home screen</div>' +
-      '<div class="hint">Flip the switch at the top right to turn it on. LiveShell Engine is built into Home Hider, ' +
-      'and once on it starts automatically with Home Hider every time.</div></div></div>' + credit;
+      '<div class="hint">Flip the switch at the top right to turn it on. LiveShell Engine is built into Home Screen Manager, ' +
+      'and once on it starts automatically with Home Screen Manager every time.</div></div></div>' + credit;
   } else if (!j.running) {
     h = '<div class="live-hero"><div class="live-ico"><span class="spin"></span></div>' +
       '<div><div class="live-title">Starting live wallpaper…</div>' +
-      '<div class="hint">' + (livePolls >= 30 ? 'LiveShell hasn\'t started. Check that Payload Manager (and its ELF loader) is running, then switch Live wallpaper off and on again. Updates &amp; advanced options &gt; More &gt; Diagnostics shows the steps.'
+      '<div class="hint">' + (livePolls >= 30 ? 'LiveShell hasn\'t started. Check that Payload Manager (and its ELF loader) is running, then switch Live wallpaper off and on again. More &amp; troubleshooting &gt; Diagnostics shows the steps.'
       : 'Your wallpaper appears in a few seconds.') + '</div></div></div>' + credit;
   } else {
     var st = j.state || {}, vids = st.videos || [], cur = '';
@@ -1845,7 +2193,7 @@ function loadArrange() {
   });
 }
 
-/* ---------- which tiles Home Hider has moved (for "Back to original tab") ---------- */
+/* ---------- which tiles Home Screen Manager has moved (for "Back to original tab") ---------- */
 
 var tabMoved = {};   /* id -> dest */
 
@@ -1871,5 +2219,6 @@ loadTabs();
 loadUpd();
 setTimeout(loadUpd, 3000);
 </script>
+<div id="toast"></div>
 </body>
 </html>

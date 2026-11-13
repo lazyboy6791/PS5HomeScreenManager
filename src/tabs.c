@@ -115,7 +115,7 @@ static int tile_exists(hh_t *h, const char *tid) {
 
 int tabs_move(hh_t *h, const char *tid, const char *dest) {
   if (h->nusers == 0) {
-    terr(h, "This firmware's home screen database has a layout Home Hider doesn't know yet.");
+    terr(h, "This firmware's home screen database has a layout Home Screen Manager doesn't know yet.");
     return -1;
   }
   if (!tid || !hh_valid_tid(tid)) {
