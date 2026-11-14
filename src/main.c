@@ -22,6 +22,9 @@
 
 #include <dirent.h>
 #include "backup.h"
+#include <sys/statvfs.h>
+#include "texture.h"
+#include "icons.h"
 #include "datadir.h"
 #include "hider.h"
 #include "arrange.h"
@@ -66,6 +69,7 @@ typedef struct {
   int  folder_bar;    /* folder page: show the row with the count and the sort button */
   int  folder_edit;   /* folder page: show the "Edit this folder in Home Screen Manager" link under the games */
   int  folder_debug;  /* folder page: show what the controller sends (for testing) */
+  int  theme;         /* 0 dark, 1 light: for the menu and the folder page, on every device */
   char repo[128];     /* GitHub "owner/name" for updates */
 } settings_t;
 
@@ -74,13 +78,19 @@ typedef struct {
  * positions right), so two database passes never run at once. */
 static volatile int g_refresh_request;
 static volatile int g_import_running; /* an import is running: folder changes wait */
+static volatile int g_refresh_quick; /* the change is done (a bulk run): restart the home screen at once */
+static volatile int g_refresh_hold;  /* a refresh is under way: the repair of custom names waits until it is over */
 static void request_home_refresh(void) { g_refresh_request = 1; }
+static void request_home_refresh_quick(void) {
+  g_refresh_quick = 1;
+  g_refresh_request = 1;
+}
 
 /* The repository used when none is saved (set at build time; empty = none). An empty value
  * saved in the settings means "use this one". */
 static const char *g_default_repo = HH_DEFAULT_REPO;
 
-static settings_t g_cfg = {1, 1, 1, 0, 0, 1, 1, 1, 1, 0, HH_DEFAULT_REPO};
+static settings_t g_cfg = {1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, HH_DEFAULT_REPO};
 static char g_pldmgr_dir[256];
 static char g_usb_fmt[256];
 static char g_github_api[128];
@@ -167,6 +177,7 @@ static void load_settings(void) {
     if (sscanf(line, "folder_bar=%d", &v) == 1) g_cfg.folder_bar = v ? 1 : 0;
     if (sscanf(line, "folder_edit=%d", &v) == 1) g_cfg.folder_edit = v ? 1 : 0;
     if (sscanf(line, "folder_debug=%d", &v) == 1) g_cfg.folder_debug = v ? 1 : 0;
+    if (sscanf(line, "theme=%d", &v) == 1) g_cfg.theme = v ? 1 : 0;
     if (!strncmp(line, "repo=", 5) && line[5] && strlen(line + 5) < sizeof(g_cfg.repo) &&
         upd_valid_repo(line + 5)) /* an empty value means "the default" */
       memcpy(g_cfg.repo, line + 5, strlen(line + 5) + 1);
@@ -180,9 +191,9 @@ static int save_settings(void) {
   FILE *f = fopen(tmp, "w");
   if (!f) return -1;
   fprintf(f, "open_browser=%d\nreapply=%d\nauto_check=%d\nlive=%d\nfolders_first=%d\nshow_running=%d\n"
-             "folder_header=%d\nfolder_bar=%d\nfolder_edit=%d\nfolder_debug=%d\nrepo=%s\n",
+             "folder_header=%d\nfolder_bar=%d\nfolder_edit=%d\nfolder_debug=%d\ntheme=%d\nrepo=%s\n",
           g_cfg.open_browser, g_cfg.reapply, g_cfg.auto_check, g_cfg.live, g_cfg.folders_first,
-          g_cfg.show_running, g_cfg.folder_header, g_cfg.folder_bar, g_cfg.folder_edit, g_cfg.folder_debug, g_cfg.repo);
+          g_cfg.show_running, g_cfg.folder_header, g_cfg.folder_bar, g_cfg.folder_edit, g_cfg.folder_debug, g_cfg.theme, g_cfg.repo);
   fclose(f);
   return rename(tmp, g_settings);
 }
@@ -240,11 +251,12 @@ static void handle_status(int fd) {
   sb_json_str(&sb, ip);
   sb_printf(&sb, ",\"settings\":{\"open_browser\":%d,\"reapply\":%s,\"auto_check\":%s,"
                  "\"folders_first\":%s,\"show_running\":%s,\"folder_header\":%s,\"folder_bar\":%s,"
-                 "\"folder_edit\":%s,\"folder_debug\":%s,\"repo\":",
+                 "\"folder_edit\":%s,\"folder_debug\":%s,\"theme\":\"%s\",\"repo\":",
             g_cfg.open_browser, g_cfg.reapply ? "true" : "false",
             g_cfg.auto_check ? "true" : "false", g_cfg.folders_first ? "true" : "false",
             g_cfg.show_running ? "true" : "false", g_cfg.folder_header ? "true" : "false",
-            g_cfg.folder_bar ? "true" : "false", g_cfg.folder_edit ? "true" : "false", g_cfg.folder_debug ? "true" : "false");
+            g_cfg.folder_bar ? "true" : "false", g_cfg.folder_edit ? "true" : "false", g_cfg.folder_debug ? "true" : "false",
+            g_cfg.theme ? "light" : "dark");
   sb_json_str(&sb, g_cfg.repo);
   sb_puts(&sb, ",\"default_repo\":");
   sb_json_str(&sb, g_default_repo);
@@ -491,7 +503,7 @@ static void handle_tab_move(int fd, const char *query) {
 
 static void handle_folder_take_out(int fd, const char *query) {
   if (g_import_running) {
-    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
     return;
   }
   char tid[32];
@@ -716,6 +728,7 @@ static void handle_settings(int fd, const char *query) {
   if (!http_query_get(query, "folder_bar", v, sizeof(v))) g_cfg.folder_bar = atoi(v) ? 1 : 0;
   if (!http_query_get(query, "folder_edit", v, sizeof(v))) g_cfg.folder_edit = atoi(v) ? 1 : 0;
   if (!http_query_get(query, "folder_debug", v, sizeof(v))) g_cfg.folder_debug = atoi(v) ? 1 : 0;
+  if (!http_query_get(query, "theme", v, sizeof(v))) g_cfg.theme = (!strcmp(v, "light") || atoi(v) == 1) ? 1 : 0;
   if (!http_query_get(query, "folders_first", v, sizeof(v))) {
     int on = atoi(v) ? 1 : 0;
     if (on != g_cfg.folders_first) {
@@ -738,7 +751,7 @@ static void handle_settings(int fd, const char *query) {
 static void handle_log(int fd) {
   strbuf_t sb;
   sb_init(&sb);
-  hh_log_tail(&sb, 40000);
+  hh_log_tail(&sb, 600000);
   if (sb.oom) http_send_text(fd, 500, "text/plain", "out of memory");
   else http_send(fd, 200, "text/plain; charset=utf-8", sb.data, sb.len, "Cache-Control: no-store\r\n");
   sb_free(&sb);
@@ -1077,7 +1090,7 @@ static void handle_folder_job(int fd, const char *query) {
 static void handle_folder_save(int fd, http_req_t *r) {
   if (g_import_running) {
     http_drain(fd, r);
-    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
     return;
   }
   unsigned char *body = NULL;
@@ -1156,7 +1169,7 @@ static void handle_folder_save(int fd, http_req_t *r) {
 
 static void handle_folder_delete(int fd, const char *query) {
   if (g_import_running) {
-    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
     return;
   }
   char id[32] = "";
@@ -1174,7 +1187,7 @@ static void handle_folder_delete(int fd, const char *query) {
 static void handle_folder_icon_set(int fd, http_req_t *r) {
   if (g_import_running) {
     http_drain(fd, r);
-    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
     return;
   }
   char id[32] = "", v[8];
@@ -1335,7 +1348,7 @@ static void handle_custom_bg_get(int fd, const char *query) {
 static void handle_folder_bg_set(int fd, http_req_t *r) {
   if (g_import_running) {
     http_drain(fd, r);
-    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
     return;
   }
   char id[32] = "", v[8];
@@ -1564,7 +1577,7 @@ static void handle_import_inspect(int fd, http_req_t *r) {
   size_t len = 0;
   if (g_import_running) {
     http_drain(fd, r);
-    send_error(fd, 409, "An import is running. Please wait until it has finished.");
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
     return;
   }
   if (usb[0]) {
@@ -1733,6 +1746,722 @@ static void handle_import_job(int fd, const char *query) {
   sb_free(&sb);
 }
 
+/* ------------------------------------------------------------------------- */
+/* bulk changes: a background for many games, and tidy names                 */
+/* ------------------------------------------------------------------------- */
+
+/* The page, with the saved theme built in: <html lang="en"> becomes <html lang="en" data-theme="light">.
+ * The server decides, so every device (the PC, the phone, the TV) shows the same theme at once. */
+static void send_page(int fd, const char *html, size_t len) {
+  static const char mark[] = "<html lang=\"en\"";
+  size_t at = 0, ml = sizeof(mark) - 1;
+  int found = 0;
+  if (g_cfg.theme)
+    for (at = 0; at + ml < len && at < 400; at++)
+      if (!memcmp(html + at, mark, ml)) {
+        found = 1;
+        break;
+      }
+  if (!found) {
+    http_send(fd, 200, "text/html; charset=utf-8", html, len, "Cache-Control: no-cache\r\n");
+    return;
+  }
+  static const char add[] = " data-theme=\"light\"";
+  size_t n = len + sizeof(add) - 1, cut = at + ml;
+  char *buf = malloc(n);
+  if (!buf) {
+    http_send(fd, 200, "text/html; charset=utf-8", html, len, "Cache-Control: no-cache\r\n");
+    return;
+  }
+  memcpy(buf, html, cut);
+  memcpy(buf + cut, add, sizeof(add) - 1);
+  memcpy(buf + cut + sizeof(add) - 1, html + cut, len - cut);
+  http_send(fd, 200, "text/html; charset=utf-8", buf, n, "Cache-Control: no-cache\r\n");
+  free(buf);
+}
+
+#define BULK_MAX_TILES 1500
+
+/* Free space on the drive the backgrounds go to. (The tests can fake it with a file holding a number.) */
+static unsigned long long appmeta_free(void) {
+  const char *ff = getenv("HH_TEST_FREE_FILE");
+  if (ff) {
+    FILE *f = fopen(ff, "r");
+    if (f) {
+      unsigned long long v = 0;
+      int ok = fscanf(f, "%llu", &v) == 1;
+      fclose(f);
+      if (ok) return v;
+    }
+  }
+  struct statvfs sv;
+  if (statvfs(g_appmeta_dir, &sv) != 0) return ~0ULL; /* can't tell: don't block */
+  return (unsigned long long)sv.f_bavail * sv.f_frsize;
+}
+static struct {
+  int job;
+  volatile int done;
+  int i, n;
+  char phase[200];
+  char result[2000];
+  time_t t0;
+} g_bk;
+static int g_bulk_ow, g_bulk_oh;
+
+static void bulk_prep_path(char *out, size_t n) { snprintf(out, n, "%s/bulk_background.jpg", g_data_dir); }
+static void bulk_prefs_path(char *out, size_t n) { snprintf(out, n, "%s/bulk.json", g_data_dir); }
+
+static long bk_now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (long)(ts.tv_sec * 1000L + ts.tv_nsec / 1000000L);
+}
+
+/* Reads a JSON request body. On error the reply is sent and -1 returned. */
+static int read_json(int fd, http_req_t *r, size_t max, unsigned char **buf, size_t *len, json_tok_t **toks, int *nt) {
+  *buf = NULL;
+  *toks = NULL;
+  *len = 0;
+  if (http_read_body(fd, r, buf, len, max)) {
+    send_error(fd, 400, "Bad request.");
+    return -1;
+  }
+  int maxt = (int)(*len / 2) + 16;
+  if (maxt > 60000) maxt = 60000;
+  *toks = malloc(sizeof(json_tok_t) * (size_t)maxt);
+  if (!*toks) {
+    free(*buf);
+    send_error(fd, 500, "Out of memory.");
+    return -1;
+  }
+  *nt = json_parse((const char *)*buf, *len, *toks, maxt);
+  if (*nt < 1) {
+    free(*buf);
+    free(*toks);
+    send_error(fd, 400, "That isn't valid JSON.");
+    return -1;
+  }
+  return 0;
+}
+
+static int ids_from_json(const char *js, json_tok_t *t, int nt, int arr, char (*ids)[16], int max) {
+  int n = 0;
+  for (int i = 0, e; arr >= 0 && (e = json_at(t, nt, arr, i)) >= 0 && n < max; i++) {
+    char tid[32];
+    if (json_str(js, t, e, tid, sizeof(tid)) < 0 || !hh_valid_tid(tid)) continue;
+    snprintf(ids[n++], 16, "%.15s", tid);
+  }
+  return n;
+}
+
+static int json_flag(const char *js, json_tok_t *t, int nt, const char *key) {
+  int v = json_get(js, t, nt, 0, key);
+  return v >= 0 && t[v].type == JSON_PRIM && js[t[v].start] == 't';
+}
+
+/* a copy of the home screen database first, so a bulk change can always be undone */
+static void bulk_backup(void) {
+  char to[400], err[256] = "";
+  snprintf(to, sizeof(to), "%s/app.db.before-bulk", g_backup_dir);
+  if (hh_copy_db(g_app_db, to, err, sizeof(err))) hh_log("bulk: couldn't copy the database first: %s", err);
+}
+
+static void handle_bulk_info(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (read_json(fd, r, 256 * 1024, &buf, &len, &t, &nt)) return;
+  char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
+  int n = ids ? ids_from_json((const char *)buf, t, nt, json_get((const char *)buf, t, nt, 0, "ids"), ids, BULK_MAX_TILES) : 0;
+  free(buf);
+  free(t);
+  hh_t h;
+  if (!ids || hh_open(&h, g_app_db, g_state_db)) {
+    free(ids);
+    send_error(fd, 500, "Couldn't read the home screen database.");
+    return;
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"tiles\":");
+  custom_bulk_info_json(&h, ids, n, &sb);
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+  hh_close(&h);
+  free(ids);
+}
+
+static void handle_bulk_prefs_get(int fd) {
+  char path[420];
+  bulk_prefs_path(path, sizeof(path));
+  size_t len = 0;
+  unsigned char *b = NULL;
+  FILE *f = fopen(path, "rb");
+  if (f) {
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz > 0 && sz < 32 * 1024 && (b = malloc((size_t)sz + 1)) && fread(b, 1, (size_t)sz, f) == (size_t)sz) len = (size_t)sz;
+    else {
+      free(b);
+      b = NULL;
+    }
+    fclose(f);
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"prefs\":");
+  if (b && len) sb_putn(&sb, (const char *)b, len);
+  else sb_puts(&sb, "{}");
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+  free(b);
+}
+
+static void handle_bulk_prefs_set(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (read_json(fd, r, 16 * 1024, &buf, &len, &t, &nt)) return;
+  if (t[0].type != JSON_OBJ) {
+    free(buf);
+    free(t);
+    send_error(fd, 400, "The settings must be a JSON object.");
+    return;
+  }
+  char path[420], tmp[430];
+  bulk_prefs_path(path, sizeof(path));
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  FILE *f = fopen(tmp, "wb");
+  int ok = f && fwrite(buf, 1, len, f) == len;
+  if (f) ok = (fclose(f) == 0) && ok;
+  if (ok) ok = rename(tmp, path) == 0;
+  if (!ok) unlink(tmp);
+  free(buf);
+  free(t);
+  if (!ok) send_error(fd, 500, "Couldn't save the settings.");
+  else send_ok(fd, "Saved.");
+}
+
+static void handle_bulk_rename(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  if (read_json(fd, r, 512 * 1024, &buf, &len, &t, &nt)) return;
+  if (t[0].type != JSON_ARR) {
+    free(buf);
+    free(t);
+    send_error(fd, 400, "Send a list of {id, name}.");
+    return;
+  }
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    free(buf);
+    free(t);
+    send_error(fd, 500, h.err);
+    return;
+  }
+  bulk_backup();
+  strbuf_t sb, fails;
+  sb_init(&sb);
+  sb_init(&fails);
+  int changed = 0, failed = 0;
+  long t0 = bk_now_ms();
+  for (int i = 0, e; (e = json_at(t, nt, 0, i)) >= 0 && i < BULK_MAX_TILES; i++) {
+    char id[32], name[400];
+    int vi = json_get((const char *)buf, t, nt, e, "id"), vn = json_get((const char *)buf, t, nt, e, "name");
+    if (vi < 0 || vn < 0 || json_str((const char *)buf, t, vi, id, sizeof(id)) < 0 || json_str((const char *)buf, t, vn, name, sizeof(name)) < 0)
+      continue;
+    if (!name[0]) continue; /* never an empty name */
+    if (custom_set_name_tool(&h, id, name) == 0) {
+      changed++;
+    } else {
+      if (failed < 20) {
+        sb_printf(&fails, "%s{\"id\":", failed ? "," : "");
+        sb_json_str(&fails, id);
+        sb_puts(&fails, ",\"error\":");
+        sb_json_str(&fails, h.err);
+        sb_puts(&fails, "}");
+      }
+      failed++;
+    }
+  }
+  hh_log("bulk names: %d renamed, %d failed, %ld ms", changed, failed, bk_now_ms() - t0);
+  sb_printf(&sb, "{\"ok\":true,\"changed\":%d,\"failed_count\":%d,\"failed\":[%s]}", changed, failed, fails.data ? fails.data : "");
+  send_json(fd, 200, &sb);
+  if (changed) request_home_refresh_quick();
+  sb_free(&sb);
+  sb_free(&fails);
+  hh_close(&h);
+  free(buf);
+  free(t);
+}
+
+static void handle_bulk_rename_undo(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  if (read_json(fd, r, 256 * 1024, &buf, &len, &t, &nt)) return;
+  char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
+  hh_t h;
+  if (!ids || hh_open(&h, g_app_db, g_state_db)) {
+    free(buf);
+    free(t);
+    free(ids);
+    send_error(fd, 500, "Couldn't read the home screen database.");
+    return;
+  }
+  /* all: every name the cleanup changed (and with hand: the ones you gave by hand too). ids: those games, to the original. */
+  int all = json_flag((const char *)buf, t, nt, "all"), hand = json_flag((const char *)buf, t, nt, "hand");
+  int n = all ? custom_renamed_ids(&h, ids, BULK_MAX_TILES)
+              : ids_from_json((const char *)buf, t, nt, json_get((const char *)buf, t, nt, 0, "ids"), ids, BULK_MAX_TILES);
+  bulk_backup();
+  int back = 0;
+  for (int i = 0; i < n; i++) {
+    if (all) {
+      if (custom_undo_names(&h, ids[i], hand) > 0) back++;
+    } else if (custom_set_name(&h, ids[i], NULL) == 0) {
+      back++;
+    }
+  }
+  hh_log("bulk names: %d name(s) put back%s", back, all ? (hand ? " (the cleanup's and the ones by hand)" : " (the cleanup's only)") : "");
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"changed\":%d}", back);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+  if (back) request_home_refresh_quick();
+  hh_close(&h);
+  free(ids);
+  free(buf);
+  free(t);
+}
+
+/* the chosen picture, cropped to 16:9 and kept as a 4K JPEG for the bulk run */
+static void handle_bulk_bg_prepare(int fd, http_req_t *r) {
+  unsigned char *body;
+  size_t len;
+  if (g_import_running) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  if (read_picture(fd, r, 0, &body, &len)) return;
+  long t0 = bk_now_ms();
+  int ow = 0, oh = 0;
+  if (icon_dims(body, len, &ow, &oh) != 0) {
+    free(body);
+    send_error(fd, 400, "That picture couldn't be read. Use a PNG, JPG, BMP, GIF or TGA picture (HEIC and WebP aren't supported).");
+    return;
+  }
+  uint8_t *rgba = icon_load_cover(body, len, TEX_BG_W, TEX_BG_H);
+  unsigned char *jpg = NULL;
+  size_t jl = 0;
+  free(body);
+  if (!rgba || img_encode_jpg(rgba, TEX_BG_W, TEX_BG_H, 90, &jpg, &jl) != 0) {
+    free(rgba);
+    free(jpg);
+    send_error(fd, 400, "That picture couldn't be read. Use a PNG, JPG, BMP, GIF or TGA picture (HEIC and WebP aren't supported).");
+    return;
+  }
+  free(rgba);
+  char path[420], tmp[430];
+  bulk_prep_path(path, sizeof(path));
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  FILE *f = fopen(tmp, "wb");
+  int ok = f && fwrite(jpg, 1, jl, f) == jl;
+  if (f) ok = (fclose(f) == 0) && ok;
+  if (ok) ok = rename(tmp, path) == 0;
+  if (!ok) unlink(tmp);
+  free(jpg);
+  if (!ok) {
+    send_error(fd, 500, "Couldn't save the prepared picture on the console.");
+    return;
+  }
+  g_bulk_ow = ow;
+  g_bulk_oh = oh;
+  hh_log("bulk background: picture %dx%d prepared in %ld ms (%zu bytes)", ow, oh, bk_now_ms() - t0, jl);
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"width\":%d,\"height\":%d,\"bytes\":%zu,\"ms\":%ld}", ow, oh, jl, bk_now_ms() - t0);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_bulk_bg_preview(int fd) {
+  char path[420];
+  bulk_prep_path(path, sizeof(path));
+  if (send_file(fd, path, "image/jpeg", "Cache-Control: no-cache\r\n")) http_send_text(fd, 404, "text/plain", "no picture prepared");
+}
+
+typedef struct {
+  char (*ids)[16];
+  int n, overwrite, share;
+} bkjob_t;
+
+/* A job thread with a roomy stack: the background code keeps large layout tables on it, and the
+ * console's default thread stack is small. */
+static int create_big_thread(pthread_t *th, void *(*fn)(void *), void *arg) {
+  pthread_attr_t at;
+  pthread_attr_init(&at);
+  pthread_attr_setstacksize(&at, 4u * 1024 * 1024);
+  int rc = pthread_create(th, &at, fn, arg);
+  pthread_attr_destroy(&at);
+  return rc;
+}
+
+static void *bulk_bg_worker(void *arg) {
+  bkjob_t *j = arg;
+  hh_t h;
+  int applied = 0, no_entry = 0, already = 0, failed = 0, folders = 0, stopped = 0;
+  char first_err[300] = "";
+  long t0 = bk_now_ms(), enc_ms = 0, reused = 0, linked = 0, copied = 0, shared = 0;
+  char path[420];
+  bulk_prep_path(path, sizeof(path));
+  unsigned char *jpg = NULL;
+  size_t jl = 0;
+  FILE *f = fopen(path, "rb");
+  if (f) {
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz > 0 && (jpg = malloc((size_t)sz)) && fread(jpg, 1, (size_t)sz, f) == (size_t)sz) jl = (size_t)sz;
+    else {
+      free(jpg);
+      jpg = NULL;
+    }
+    fclose(f);
+  }
+  if (jpg && hh_open(&h, g_app_db, g_state_db) == 0) {
+    folders_hold(1);
+    custom_bulk_begin(j->share);
+    for (int i = 0; i < j->n; i++) {
+      g_bk.i = i + 1;
+      snprintf(g_bk.phase, sizeof(g_bk.phase), "Applying the background… %d of %d", i + 1, j->n);
+      const char *id = j->ids[i];
+      if (getenv("HH_BULK_DELAY_MS")) usleep((useconds_t)atoi(getenv("HH_BULK_DELAY_MS")) * 1000); /* tests only */
+      if (appmeta_free() < 96ULL * 1024 * 1024) {
+        stopped = 1; /* the drive is almost full: stop here, what is done stays and can be undone */
+        snprintf(first_err, sizeof(first_err), "The console's drive is almost full, so the job stopped.");
+        break;
+      }
+      if (!strncmp(id, "HHFD", 4)) {
+        folders++;
+        continue;
+      }
+      if (!custom_can_bg(&h, id)) {
+        no_entry++;
+        continue;
+      }
+      if (!j->overwrite && custom_has_bg(&h, id)) {
+        already++;
+        continue;
+      }
+      if (custom_set_bg_prepared(&h, id, jpg, jl, path) == 0) applied++;
+      else {
+        if (!failed) snprintf(first_err, sizeof(first_err), "%s: %.200s", id, h.err);
+        failed++;
+      }
+    }
+    custom_bulk_end(&enc_ms, &reused, &linked, &copied, &shared);
+    folders_hold(0);
+    hh_close(&h);
+  } else {
+    snprintf(first_err, sizeof(first_err), "The prepared picture or the database couldn't be opened.");
+    failed = j->n;
+  }
+  free(jpg);
+  long total = bk_now_ms() - t0;
+  hh_log("bulk background: %d applied, %d without a background entry, %d already set by you, %d failed, %d folder(s) left out; "
+         "%ld ms in all, %ld ms converting, %ld converted file(s) reused (%ld linked, %ld copied)%s%s",
+         applied, no_entry, already, failed, folders, total, enc_ms, reused, linked, copied, j->share ? "; sharing one file between games" : "",
+         stopped ? "; STOPPED: the drive is almost full" : "");
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"applied\":%d,\"no_entry\":%d,\"already_set\":%d,\"failed\":%d,\"folders\":%d,\"ms\":%ld,\"converting_ms\":%ld,\"reused\":%ld,\"linked\":%ld,\"copied\":%ld,\"shared\":%ld,\"stopped\":%s,\"error\":",
+            applied, no_entry, already, failed, folders, total, enc_ms, reused, linked, copied, shared, stopped ? "true" : "false");
+  sb_json_str(&sb, first_err);
+  sb_puts(&sb, "}");
+  snprintf(g_bk.result, sizeof(g_bk.result), "%s", sb.data ? sb.data : "{\"ok\":false}");
+  sb_free(&sb);
+  if (applied) request_home_refresh_quick();
+  free(j->ids);
+  free(j);
+  g_bk.done = 1;
+  g_import_running = 0;
+  return NULL;
+}
+
+static void handle_bulk_bg_apply(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (g_import_running || folders_busy()) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  if (read_json(fd, r, 256 * 1024, &buf, &len, &t, &nt)) return;
+  char path[420];
+  bulk_prep_path(path, sizeof(path));
+  struct stat pst;
+  if (stat(path, &pst) != 0) {
+    free(buf);
+    free(t);
+    send_error(fd, 409, "Choose a picture first.");
+    return;
+  }
+  char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
+  int n = ids ? ids_from_json((const char *)buf, t, nt, json_get((const char *)buf, t, nt, 0, "ids"), ids, BULK_MAX_TILES) : 0;
+  int overwrite = json_flag((const char *)buf, t, nt, "overwrite"), share = json_flag((const char *)buf, t, nt, "share");
+  free(buf);
+  free(t);
+  if (!ids || n == 0) {
+    free(ids);
+    send_error(fd, 400, "No games were chosen.");
+    return;
+  }
+  /* the drive must not be nearly full (this is checked again before every game while it runs) */
+  if (appmeta_free() < 200ULL * 1024 * 1024) {
+    free(ids);
+    send_error(fd, 409, "The console's drive is almost full. Free some space first.");
+    return;
+  }
+  bkjob_t *j = calloc(1, sizeof(*j));
+  if (!j) {
+    free(ids);
+    send_error(fd, 500, "Out of memory.");
+    return;
+  }
+  j->ids = ids;
+  j->n = n;
+  j->overwrite = overwrite;
+  j->share = share;
+  bulk_backup();
+  g_bk.job++;
+  g_bk.done = 0;
+  g_bk.i = 0;
+  g_bk.n = n;
+  g_bk.result[0] = '\0';
+  g_bk.t0 = time(NULL);
+  snprintf(g_bk.phase, sizeof(g_bk.phase), "Starting…");
+  g_import_running = 1;
+  hh_log("bulk background: %d game(s) chosen, overwrite=%d, share=%d", n, overwrite, share);
+  pthread_t th;
+  if (create_big_thread(&th, bulk_bg_worker, j) != 0) {
+    g_import_running = 0;
+    free(ids);
+    free(j);
+    send_error(fd, 500, "Couldn't start the job.");
+    return;
+  }
+  pthread_detach(th);
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"job\":%d}", g_bk.job);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+typedef struct {
+  char (*ids)[16];
+  int n;
+} bkundo_t;
+
+static void *bulk_undo_worker(void *arg) {
+  bkundo_t *j = arg;
+  hh_t h;
+  int back = 0;
+  long t0 = bk_now_ms();
+  if (hh_open(&h, g_app_db, g_state_db) == 0) {
+    folders_hold(1);
+    custom_gc_defer(1);
+    for (int i = 0; i < j->n; i++) {
+      g_bk.i = i + 1;
+      snprintf(g_bk.phase, sizeof(g_bk.phase), "Putting the original backgrounds back… %d of %d", i + 1, j->n);
+      if (custom_has_bg(&h, j->ids[i]) && custom_set_bg(&h, j->ids[i], NULL, 0) == 0) back++;
+    }
+    custom_gc_defer(0);
+    hh_log("bulk background: tiles done, cleaning up shared files");
+    custom_shared_gc(&h);
+    folders_hold(0);
+    hh_close(&h);
+  }
+  hh_log("bulk background: %d original background(s) put back, %ld ms", back, bk_now_ms() - t0);
+  snprintf(g_bk.result, sizeof(g_bk.result), "{\"ok\":true,\"undo\":true,\"changed\":%d,\"ms\":%ld}", back, bk_now_ms() - t0);
+  if (back) request_home_refresh_quick();
+  free(j->ids);
+  free(j);
+  g_bk.done = 1;
+  g_import_running = 0;
+  return NULL;
+}
+
+static void handle_bulk_bg_undo(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (g_import_running || folders_busy()) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  if (read_json(fd, r, 256 * 1024, &buf, &len, &t, &nt)) return;
+  char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
+  hh_t h;
+  if (!ids || hh_open(&h, g_app_db, g_state_db)) {
+    free(buf);
+    free(t);
+    free(ids);
+    send_error(fd, 500, "Couldn't read the home screen database.");
+    return;
+  }
+  int n = json_flag((const char *)buf, t, nt, "all")
+              ? custom_bg_ids(&h, ids, BULK_MAX_TILES)
+              : ids_from_json((const char *)buf, t, nt, json_get((const char *)buf, t, nt, 0, "ids"), ids, BULK_MAX_TILES);
+  hh_close(&h);
+  free(buf);
+  free(t);
+  strbuf_t sb;
+  sb_init(&sb);
+  bkundo_t *j = n ? calloc(1, sizeof(*j)) : NULL;
+  if (!n || !j) {
+    free(ids);
+    free(j);
+    sb_puts(&sb, "{\"ok\":true,\"job\":0,\"n\":0,\"changed\":0}");
+    send_json(fd, 200, &sb);
+    sb_free(&sb);
+    return;
+  }
+  j->ids = ids;
+  j->n = n;
+  bulk_backup();
+  g_bk.job++;
+  g_bk.done = 0;
+  g_bk.i = 0;
+  g_bk.n = n;
+  g_bk.result[0] = '\0';
+  g_bk.t0 = time(NULL);
+  snprintf(g_bk.phase, sizeof(g_bk.phase), "Starting…");
+  g_import_running = 1;
+  hh_log("bulk background: putting %d original background(s) back", n);
+  pthread_t th;
+  if (create_big_thread(&th, bulk_undo_worker, j) != 0) {
+    g_import_running = 0;
+    free(ids);
+    free(j);
+    sb_free(&sb);
+    send_error(fd, 500, "Couldn't start the job.");
+    return;
+  }
+  pthread_detach(th);
+  sb_printf(&sb, "{\"ok\":true,\"job\":%d,\"n\":%d}", g_bk.job, n);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_bulk_bg_try(int fd, http_req_t *r) {
+  unsigned char *buf;
+  size_t len;
+  json_tok_t *t;
+  int nt;
+  if (g_import_running || folders_busy()) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  if (read_json(fd, r, 4096, &buf, &len, &t, &nt)) return;
+  char id[32] = "", path[420];
+  int vi = json_get((const char *)buf, t, nt, 0, "id");
+  if (vi < 0 || json_str((const char *)buf, t, vi, id, sizeof(id)) < 0 || !hh_valid_tid(id)) {
+    free(buf);
+    free(t);
+    send_error(fd, 400, "Send the title id of the tile.");
+    return;
+  }
+  free(buf);
+  free(t);
+  bulk_prep_path(path, sizeof(path));
+  unsigned char *jpg = NULL;
+  size_t jl = 0;
+  FILE *f = fopen(path, "rb");
+  if (f) {
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz > 0 && (jpg = malloc((size_t)sz)) && fread(jpg, 1, (size_t)sz, f) == (size_t)sz) jl = (size_t)sz;
+    else {
+      free(jpg);
+      jpg = NULL;
+    }
+    fclose(f);
+  }
+  if (!jpg) {
+    send_error(fd, 409, "Choose a picture first.");
+    return;
+  }
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    free(jpg);
+    send_error(fd, 500, h.err);
+    return;
+  }
+  bulk_backup();
+  int write = strncmp(id, "NPXS", 4) != 0; /* system tiles: a report only */
+  int rc = custom_try_bg(&h, id, jpg, jl, path, write);
+  strbuf_t sb;
+  sb_init(&sb);
+  if (rc < 0) {
+    send_error(fd, 409, h.err);
+  } else {
+    sb_printf(&sb, "{\"ok\":true,\"wrote\":%s,\"message\":", rc == 0 ? "true" : "false");
+    sb_json_str(&sb, rc == 0 ? "" : h.err);
+    sb_puts(&sb, "}");
+    send_json(fd, 200, &sb);
+    if (rc == 0) request_home_refresh_quick();
+  }
+  sb_free(&sb);
+  hh_close(&h);
+  free(jpg);
+}
+
+static void handle_bulk_job(int fd, const char *query) {
+  char v[16];
+  int job = http_query_get(query, "job", v, sizeof(v)) ? 0 : atoi(v);
+  if (job == 0 || job != g_bk.job) {
+    send_error(fd, 404, "Unknown job.");
+    return;
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  int done = g_bk.done;
+  sb_printf(&sb, "{\"ok\":true,\"done\":%s,\"elapsed\":%ld,\"i\":%d,\"n\":%d,\"phase\":", done ? "true" : "false",
+            (long)(time(NULL) - g_bk.t0), g_bk.i, g_bk.n);
+  sb_json_str(&sb, g_bk.phase);
+  if (done) sb_printf(&sb, ",\"result\":%s", g_bk.result[0] ? g_bk.result : "{\"ok\":false}");
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
 static void handle_client(int fd) {
   struct timeval tv = {5, 0};
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -1752,15 +2481,16 @@ static void handle_client(int fd) {
   int fbg = post && !strcmp(p, "/api/folders/bg");
   int asave = post && !strcmp(p, "/api/arrange/save");
   int iinspect = post && !strcmp(p, "/api/import/inspect"); /* reads the backup file itself */
-  if (!upload && !fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave && !iinspect) http_drain(fd, &r);
+  int bulk = post && !strncmp(p, "/api/bulk/", 10);      /* reads its own body */
+  if (!upload && !fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave && !iinspect && !bulk) http_drain(fd, &r);
 
   if (!strcmp(p, "/") || !strcmp(p, "/index.html")) {
-    http_send(fd, 200, "text/html; charset=utf-8", WEBUI_HTML, WEBUI_HTML_LEN, NULL);
+    send_page(fd, WEBUI_HTML, WEBUI_HTML_LEN);
   } else if (!strcmp(p, "/api/status")) {
     handle_status(fd);
   } else if (!strncmp(p, "/folder/", 8)) {
     front_now(); /* the PS5 has just opened this folder */
-    http_send(fd, 200, "text/html; charset=utf-8", FOLDER_HTML, FOLDER_HTML_LEN, NULL);
+    send_page(fd, FOLDER_HTML, FOLDER_HTML_LEN);
   } else if (!strcmp(p, "/api/folders")) {
     handle_folders(fd);
   } else if (!strcmp(p, "/api/folder")) {
@@ -1799,6 +2529,12 @@ static void handle_client(int fd) {
     handle_folder_job(fd, r.query);
   } else if (!strcmp(p, "/api/import/job")) {
     handle_import_job(fd, r.query);
+  } else if (!strcmp(p, "/api/bulk/job")) {
+    handle_bulk_job(fd, r.query);
+  } else if (!post && !strcmp(p, "/api/bulk/prefs")) {
+    handle_bulk_prefs_get(fd);
+  } else if (!strcmp(p, "/api/bulk/bg/preview")) {
+    handle_bulk_bg_preview(fd);
   } else if (!strcmp(p, "/api/import/usb_files")) {
     handle_import_usb_files(fd);
   } else if (!strcmp(p, "/api/export")) {
@@ -1811,6 +2547,22 @@ static void handle_client(int fd) {
     send_error(fd, 405, "Use POST for this action.");
   } else if (http_is_cross_origin(&r)) {
     send_error(fd, 403, "Requests from other web sites are not allowed.");
+  } else if (!strcmp(p, "/api/bulk/info")) {
+    handle_bulk_info(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/prefs")) {
+    handle_bulk_prefs_set(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/rename")) {
+    handle_bulk_rename(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/rename_undo")) {
+    handle_bulk_rename_undo(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/bg/prepare")) {
+    handle_bulk_bg_prepare(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/bg/apply")) {
+    handle_bulk_bg_apply(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/bg/try")) {
+    handle_bulk_bg_try(fd, &r);
+  } else if (!strcmp(p, "/api/bulk/bg/undo")) {
+    handle_bulk_bg_undo(fd, &r);
   } else if (!strcmp(p, "/api/export/usb")) {
     handle_export_usb(fd);
   } else if (!strcmp(p, "/api/import/inspect")) {
@@ -1973,6 +2725,29 @@ static long ms_since(const struct timespec *t0) {
 
 /* One round of keeping the home screen right: hide again what the PS5 brought
  * back, put folders, the folder block, the chosen order and tab moves back. */
+/* The PS5 writes a game's own name back when you start it. Custom names, pictures and backgrounds are
+ * checked when the home screen database has changed, and right after a game closes. */
+static volatile int g_force_custom;
+static long long g_custom_stamp = -1;
+static long long db_stamp(void) {
+  struct stat st;
+  if (stat(g_app_db, &st) != 0) return -1;
+  return (long long)st.st_mtim.tv_sec * 1000000007LL + (long long)st.st_mtim.tv_nsec + (long long)st.st_size;
+}
+static void custom_repair(hh_t *h) {
+  if (g_import_running || g_refresh_hold) return; /* a bulk run, an import or a refresh is under way: later */
+  int force = g_force_custom;
+  g_force_custom = 0;
+  long long stamp = db_stamp();
+  if (!force && stamp == g_custom_stamp) return;
+  if (custom_rows(h) > 0) {
+    int fixed = 0;
+    custom_reapply(h, &fixed);
+    if (fixed) hh_log("custom names, pictures and backgrounds: put back %d value(s) the system changed", fixed);
+  }
+  g_custom_stamp = db_stamp();
+}
+
 static void watchdog_pass(hh_t *h) {
   if (h->nusers == 0) return;
   int rehidden = 0, folders = 0, arranged = 0;
@@ -1983,6 +2758,7 @@ static void watchdog_pass(hh_t *h) {
   arrange_apply(h, &arranged);
   int tabbed = 0;
   tabs_apply(h, &tabbed);
+  custom_repair(h);
   if (rehidden || folders || arranged || tabbed || fronted)
     hh_log("auto re-hide: %d tile(s), %d folder(s), %d arranged, %d tab-moved, %d kept first — the home screen heals itself",
            rehidden, folders, arranged, tabbed, fronted);
@@ -2016,16 +2792,29 @@ static void *rehide_watchdog(void *arg) {
       game_now(now, sizeof(now));
       if (prev[0] && !now[0]) {
         hh_log("%s is closed: checking the home screen right away", prev);
+        g_force_custom = 1;
         snprintf(closed_tid, sizeof(closed_tid), "%s", prev);
         closed = 1;
       }
       snprintf(prev, sizeof(prev), "%s", now);
       if (g_refresh_request) refresh = 1; /* a folder was created or changed */
+      static time_t quick_last;
+      if (!g_import_running && !g_refresh_request && time(NULL) != quick_last && db_stamp() != g_custom_stamp) {
+        quick_last = time(NULL); /* at most once a second, so a busy database never costs a game any speed */
+        /* the PS5 wrote to the database (for example a game's own name when it starts): put custom
+         * names, pictures and backgrounds back now, not at the next 6 second pass */
+        hh_t hq;
+        if (hh_open(&hq, g_app_db, g_state_db) == 0) {
+          custom_repair(&hq);
+          hh_close(&hq);
+        }
+      }
       if (closed || refresh) break;
     }
     if (!g_running) break;
     hh_t h;
     if (hh_open(&h, g_app_db, g_state_db) != 0) continue;
+    g_refresh_hold = refresh; /* a refresh comes first: the repair of custom names waits for it */
     watchdog_pass(&h);
     if (closed) {
       hh_state_t st;
@@ -2050,15 +2839,23 @@ static void *rehide_watchdog(void *arg) {
       /* A folder was created or really changed. The console shuffles tiles while it works and
        * may write a little after it is done, so: put the tile positions right, wait, put them
        * right again, and only then restart the home screen, so that it reads the right layout. */
+      int quick = g_refresh_quick;
+      g_refresh_quick = 0;
       g_refresh_request = 0;
-      hh_log("home screen refresh: the folder change is done, putting the tile positions right first");
-      for (int i = 0; i < 8 && g_running; i++) usleep(250000);
-      watchdog_pass(&h);
+      if (quick) {
+        hh_log("home screen refresh: the change is done, restarting right away");
+      } else {
+        hh_log("home screen refresh: the folder change is done, putting the tile positions right first");
+        for (int i = 0; i < 8 && g_running; i++) usleep(250000);
+        watchdog_pass(&h);
+      }
       hh_close(&h);
       int rc = plat_reload_shellui();
       hh_log("home screen refresh: restarting the home screen process%s", rc ? " (the process wasn't found)" : "");
+      g_refresh_hold = 0;
       continue;
     }
+    g_refresh_hold = 0;
     hh_close(&h);
   }
   return NULL;

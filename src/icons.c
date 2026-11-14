@@ -433,3 +433,8 @@ int icon_flatten(const unsigned char *png, size_t len, const char *bg, unsigned 
   stbi_image_free(img);
   return rc;
 }
+
+int icon_dims(const unsigned char *data, size_t len, int *w, int *h) {
+  int comp = 0;
+  return stbi_info_from_memory(data, (int)len, w, h, &comp) ? 0 : -1;
+}

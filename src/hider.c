@@ -228,6 +228,8 @@ int hh_open(hh_t *h, const char *app_db, const char *state_db) {
   char *msg = NULL;
   if (sqlite3_open_v2(state_db, &sdb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                       NULL) != SQLITE_OK ||
+      /* wait for a writer on another thread (a bulk run, an import) instead of failing at once */
+      sqlite3_busy_timeout(sdb, BUSY_TIMEOUT_MS) != SQLITE_OK ||
       sqlite3_exec(sdb,
                    "CREATE TABLE IF NOT EXISTS hidden("
                    " title_id TEXT NOT NULL, user TEXT NOT NULL,"
@@ -275,6 +277,8 @@ int hh_open(hh_t *h, const char *app_db, const char *state_db) {
   }
   /* columns added in later versions (fails harmlessly when present) */
   sqlite3_exec(sdb, "ALTER TABLE custom ADD COLUMN bg_file TEXT", NULL, NULL, NULL);
+  sqlite3_exec(sdb, "ALTER TABLE custom ADD COLUMN name_src TEXT", NULL, NULL, NULL);    /* 'tool' = Clean Up Game Names */
+  sqlite3_exec(sdb, "ALTER TABLE custom ADD COLUMN name_before TEXT", NULL, NULL, NULL); /* a name by hand that the tool replaced */
   sqlite3_exec(sdb, "ALTER TABLE arrange_orig ADD COLUMN orig_idx INTEGER", NULL, NULL, NULL);
   /* older versions keyed folder_items by title_id alone (one folder per game).
    * Rebuild it with the (title_id, folder) key; every existing row carries over. */

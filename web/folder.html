@@ -58,6 +58,20 @@ body.nobar .bar{display:none}
 body.noedit .foot{display:none}
 .foot a{color:var(--muted);font-size:.8em;text-decoration:none;border:2px solid transparent;border-radius:8px;padding:6px 10px}
 .foot a:focus{border-color:#ffffff55;outline:none;color:#fff}
+[data-theme="light"]{--bg:#f2f4f9;--text:#161b26;--muted:#566077;--focus:#1f55d0;--accent:#2f6df5}
+[data-theme="light"] body{background:radial-gradient(120% 90% at 85% 10%,#ffffff 0%,#eef1f8 45%,var(--bg) 100%) fixed;background-color:var(--bg)}
+[data-theme="light"] .ficon{background:#dfe5f2}
+[data-theme="light"] .sort:focus{border-color:#1f55d088}
+[data-theme="light"] .tile{background:#e3e8f3}
+[data-theme="light"] .tile .art{background:linear-gradient(160deg,#eef1f8,#dbe2f0)}
+[data-theme="light"] .tile .ph{color:#3a4458}
+[data-theme="light"] .tile:focus .art{box-shadow:0 0 0 4px var(--focus),0 12px 30px #0003}
+[data-theme="light"] .toast{background:#ffffff;border-color:#2f6df566;color:#161b26;box-shadow:0 8px 30px #0003}
+[data-theme="light"] .ask{background:#ffffffcc}
+[data-theme="light"] .ask .box{background:#ffffff;border-color:#2f6df566;box-shadow:0 20px 60px #0003;color:var(--text)}
+[data-theme="light"] .ask button.ghost{background:#e3e8f3;color:var(--text)}
+[data-theme="light"] .ask button:focus{outline-color:#1f55d0}
+[data-theme="light"] .foot a:focus{border-color:#1f55d088;color:#161b26}
 </style>
 </head>
 <body>

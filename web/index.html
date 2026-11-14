@@ -144,6 +144,40 @@ details.section > *:not(summary){margin-left:2px}
 .fm-msg.ok{background:#13203d;border-color:#2f6df566}
 .attn{border-radius:12px;padding:12px 16px;margin:14px 0;background:#3a2a0a;border:2px solid #e8a33a;color:#ffe2b0;line-height:1.45}
 .attn b{color:#ffc95c;letter-spacing:.5px}
+/* the light theme: the same page with other colours */
+[data-theme="light"]{--bg:#f2f4f9;--surface:#ffffff;--surface2:#e9edf6;--line:#cfd6e5;--text:#161b26;--muted:#566077;--accent:#2f6df5;--accent2:#1f55d0;--ok:#17875a;--warn:#a96a00;--bad:#c3362f}
+[data-theme="light"] .banner.info,[data-theme="light"] .ordbar.dirty,[data-theme="light"] .offer,[data-theme="light"] .fm-msg.ok{background:#e1ebff;border-color:#2f6df566}
+[data-theme="light"] .banner.err,[data-theme="light"] .fm-msg{background:#fde8e6;border-color:#e5534b88}
+[data-theme="light"] .chip.on,[data-theme="light"] .pickc.sel,[data-theme="light"] .card.cur{background:#dbe6ff;color:var(--text)}
+[data-theme="light"] .b-vis{color:#0e6b45;background:#d9f3e6;border-color:#7bc9a2}
+[data-theme="light"] .b-hid{color:#7a4a00;background:#fff0d1;border-color:#e0b66a}
+[data-theme="light"] .b-fold{color:#4a2fa8;background:#ece6ff;border-color:#b3a2ee}
+[data-theme="light"] .ghost:hover{background:#dde3f1}
+[data-theme="light"] .ghost{color:var(--text)}
+[data-theme="light"] .attn,[data-theme="light"] .tag-exp{background:#fff3d6;border-color:#e0a43a;color:#5a3b00}
+[data-theme="light"] .attn b,[data-theme="light"] .tag-exp{color:#8a5300}
+[data-theme="light"] pre{background:#f4f6fb;color:var(--text)}
+[data-theme="light"] .err-text,[data-theme="light"] .why{color:#b3261e}
+[data-theme="light"] .pickc .other{color:#5a3fc0}
+[data-theme="light"] button:focus,[data-theme="light"] .btn:focus,[data-theme="light"] .chip:focus,[data-theme="light"] summary:focus{outline-color:#1f55d0}
+[data-theme="light"] .spin{border-color:#00000022;border-top-color:#2f6df5}
+[data-theme="light"] .switch{background:#aab3c7}
+header .themebtn{margin-left:auto}
+summary .n{margin-left:10px;color:var(--muted);font-weight:500;font-size:.85em}
+.section .section{margin:12px 0 14px}
+/* bulk changes */
+.bgframe{aspect-ratio:16/9;max-width:420px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#000;margin:10px 0}
+.bgframe img{width:100%;height:100%;object-fit:cover;display:block}
+.bgpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin:10px 0}
+.trow{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line);font-size:.9em;flex-wrap:wrap}
+.trow.off{opacity:.55}
+.trow input{width:22px;height:22px;flex:none}
+.trow .was{color:var(--muted);text-decoration:line-through}
+.trow .warnt{color:var(--warn);font-size:.85em;flex-basis:100%;margin-left:32px}
+.wchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface2);border-radius:999px;padding:4px 6px 4px 12px;margin:3px 6px 3px 0;font-size:.85em}
+.wchip button{min-height:26px;padding:0 8px;font-size:.8em;background:transparent;border:none;color:var(--muted)}
+.sugg{margin:6px 0}
+.sugg button{min-height:34px;padding:0 12px;font-size:.8em;margin:3px 6px 3px 0}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(20px);background:#1c2230;color:#fff;border:1px solid #ffffff33;border-radius:18px;padding:12px 22px;box-shadow:0 8px 30px #000a;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50;max-width:90%;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .sumh2{font-weight:600;margin:20px 0 8px}
@@ -218,39 +252,25 @@ details.section > *:not(summary){margin-left:2px}
   <header>
     <div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.1 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></div>
     <h1>Home Screen Manager<span class="ver" id="ver"></span></h1>
+    <button class="ghost small themebtn" id="themeBtn" onclick="toggleTheme()">Light mode</button>
   </header>
-  <p class="sub">Hide games, apps and system tiles from your home screen. Nothing is deleted, and you can show them again at any time.</p>
+  <p class="sub">Take control of your PlayStation 5's home screen</p>
 
   <div class="banner" id="banner"><div class="msg" id="bannerMsg"></div><span id="bannerAct"></span></div>
   <div class="banner info" id="updTop"><div class="msg" id="updTopMsg"></div><button onclick="goUpdates()">See update</button></div>
 
   <div id="mainView">
-  <div class="sec-head"><h2>Home screen<span class="n" id="tcount"></span></h2>
-    <button class="ghost small" onclick="editFolder(null)">+ New folder</button></div>
+  <details class="section" id="mainSec">
+    <summary><span class="sumh">Home Screen Folders and Tiles</span><span class="n" id="tcount"></span></summary>
+    <div class="actions" style="margin:4px 0 8px"><button class="ghost small" onclick="editFolder(null)">+ New folder</button></div>
   <p class="hint" style="margin:-4px 0 10px">Your games, apps and folders, grouped by the tab they sit on. Press <b>Edit</b> on any one
     to rename it, change its picture or background, or move it to the other tab. <b>New folder</b> groups games under one tile.</p>
-  <div class="row" style="margin-bottom:10px">
+  <details class="section" id="folderOpts">
+    <summary><span class="sumh">Folder options</span></summary>
+  <div class="row">
     <div class="txt">Keep folders first<div class="hint">Your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. The folder you open still moves to the front of the folders. Turn off to let the PS5 order everything by recent play.</div></div>
     <button class="switch" id="sw_ff" aria-label="Keep folders first" onclick="toggleSetting('folders_first')"></button>
   </div>
-  <div class="toolbar">
-    <input class="search" id="q" type="search" placeholder="Search by name or title ID" oninput="renderList()" autocomplete="off">
-    <div class="chips" id="chips"></div>
-  </div>
-  <div id="list"><div class="empty"><span class="spin"></span>&nbsp; Loading your games and apps…</div></div>
-
-  <div class="sec-head"><h2>Live wallpaper</h2>
-    <button class="switch" id="sw_live" aria-label="Live wallpaper" onclick="toggleLive(this)"></button></div>
-  <div id="live"><div class="empty"><span class="spin"></span>&nbsp; Checking…</div></div>
-
-  <h2>When Home Screen Manager starts</h2>
-  <div class="row">
-    <div class="txt"><div class="hint" id="openHint"></div>
-      <div class="chips" id="openChips" style="margin-top:10px"></div></div>
-  </div>
-
-  <details class="section" id="folderOpts">
-    <summary><span class="sumh">Folder options</span></summary>
     <div class="row">
       <div class="txt">Folder page: show the name and picture<div class="hint">Shows the folder's picture and name at the top of its page.</div></div>
       <button class="switch" id="sw_fh" aria-label="Folder page: show the name and picture" onclick="toggleSetting('folder_header')"></button>
@@ -263,10 +283,14 @@ details.section > *:not(summary){margin-left:2px}
       <div class="txt">Folder page: show the edit link<div class="hint">The small "Edit this folder in Home Screen Manager" text under the games on the folder page. Turn off to hide it; you can still edit a folder from the Home screen list.</div></div>
       <button class="switch" id="sw_fe" aria-label="Folder page: show the edit link" onclick="toggleSetting('folder_edit')"></button>
     </div>
-    <div class="row">
-      <div class="txt">Folder page: show what the controller sends<div class="hint">For testing the d-pad on the folder page. A small box in the corner lists the buttons and clicks the browser receives. Leave it off normally.</div></div>
-      <button class="switch" id="sw_fd" aria-label="Folder page: show what the controller sends" onclick="toggleSetting('folder_debug')"></button>
-    </div>
+  </details>
+
+  <div class="toolbar">
+    <input class="search" id="q" type="search" placeholder="Search by name or title ID" oninput="renderList()" autocomplete="off">
+    <div class="chips" id="chips"></div>
+  </div>
+  <div id="list"><div class="empty"><span class="spin"></span>&nbsp; Loading your games and apps…</div></div>
+
   </details>
 
   <details class="section" id="hideOpts">
@@ -279,6 +303,81 @@ details.section > *:not(summary){margin-left:2px}
       <div class="txt">Show a running game<div class="hint">While a game that is hidden (for example one inside a folder) is running, its tile stays on the home screen, in front of the folders, so you can close it from the home row. It is hidden again after you close the game. Turn off to hide it straight away.</div></div>
       <button class="switch" id="sw_run" aria-label="Show a running game" onclick="toggleSetting('show_running')"></button>
     </div>
+  </details>
+
+  <details class="section" id="bgSec">
+    <summary><span class="sumh">Change and Edit Wallpapers</span></summary>
+    <p class="hint">Use one still picture as the background of many games at once. The home screen shows it behind the games while a game is highlighted. Home Screen Manager converts the picture once and shares the result between the games. Folders and games without a background entry are left out.</p>
+    <div class="actions">
+      <button class="ghost" onclick="bgUsbLoad(this)">Choose from USB drive</button>
+      <span id="bgFileRow"><input type="file" id="bgFile" accept="image/*" onchange="bgUpload()"></span>
+    </div>
+    <div class="hint" id="bgUsbHint"></div>
+    <div class="bgpick" id="bgUsbGrid"></div>
+    <div id="bgPrev"></div>
+    <div id="bgTiles"></div>
+    <label class="check" id="bgOvRow" style="display:none"><input type="checkbox" id="bgOverwrite" onchange="bgCount()">&nbsp; Overwrite backgrounds I've already set</label>
+    <label class="check" id="bgShareRow" style="display:none"><input type="checkbox" id="bgShare">&nbsp; Share one file between games (faster, uses less space)<span class="tag-exp">Experimental</span></label>
+    <div class="hint" id="bgShareHint" style="display:none;margin:2px 0 0 32px">One converted file for all the games, kept in a folder of its own. Try it on a few games first, restart the console once, and check that the backgrounds are still there.</div>
+    <div class="hint" id="bgSummary"></div>
+    <div class="attn" id="bgAttn"><b>!ATTENTION!</b> Applying or undoing a background for many games can take a while. Please do not open any apps or games while it runs. When it has finished, the homescreen will refresh automatically to show the results.</div>
+    <div class="actions">
+      <button id="bgApplyBtn" onclick="bgApply(this)" disabled>Apply</button>
+      <button class="ghost" onclick="bgUndo(this)">Use the original for all</button>
+    </div>
+    <div class="fm-msg" id="bgMsg"></div>
+
+    <div style="margin-top:30px">
+  <div class="sec-head"><h2>Live wallpaper</h2>
+    <button class="switch" id="sw_live" aria-label="Live wallpaper" onclick="toggleLive(this)"></button></div>
+  <div id="live"><div class="empty"><span class="spin"></span>&nbsp; Checking…</div></div>
+    </div>
+  </details>
+
+  <details class="section" id="nmSec">
+    <summary><span class="sumh">Clean Up Game Names</span></summary>
+    <p class="hint">Clean up game names in one go. You see every change before anything is saved, and <b>Use the original names</b> undoes it.</p>
+    <label class="check"><input type="checkbox" id="nmMarks" checked onchange="nmChanged()">&nbsp; Remove &trade;, &reg; and &copy;</label>
+    <label class="check"><input type="checkbox" id="nmPlat" checked onchange="nmChanged()">&nbsp; Remove platform tags such as (PS4) and (PS5)</label>
+    <label class="check"><input type="checkbox" id="nmSpaces" checked onchange="nmChanged()">&nbsp; Clean up spaces</label>
+    <label class="check"><input type="checkbox" id="nmCase" onchange="nmChanged()">&nbsp; Fix capital letters</label>
+    <div class="hint" style="margin:2px 0 0 32px">Only for names that are all upper case or all lower case, such as GOD OF WAR. Small words like of, the and and stay small. Roman numerals and words with digits are left alone.</div>
+    <div class="hint" style="margin-top:16px">Your own words and phrases to remove from names, in any language:</div>
+    <div id="nmWords"></div>
+    <div class="sugg" id="nmSugg"></div>
+    <div class="actions">
+      <input type="text" id="nmWordIn" placeholder="Type a word or phrase" maxlength="60">
+      <button class="ghost" onclick="nmAdd()">Add</button>
+    </div>
+    <div class="hint" style="margin-top:18px"><b>Keep name as intended.</b> Words that must keep the capitals you write here when letters are fixed, for example FIFA or inFAMOUS:</div>
+    <div id="nmKeep"></div>
+    <div class="sugg" id="nmKeepSugg"></div>
+    <div class="actions">
+      <input type="text" id="nmKeepIn" placeholder="Type a word, written the way it should look" maxlength="60">
+      <button class="ghost" onclick="nmKeepAdd()">Add</button>
+    </div>
+    <div id="nmSel"></div>
+    <div id="nmList"></div>
+    <div class="hint" id="nmSummary"></div>
+    <div class="attn" id="nmAttn" style="display:none"><b>!ATTENTION!</b> When the new names are saved, the homescreen will refresh automatically to show the results. Please do not open any apps or games while it runs.</div>
+    <div class="actions">
+      <button id="nmApplyBtn" onclick="nmApply(this)" disabled>Apply</button>
+    </div>
+    <div class="fm-msg" id="nmMsg"></div>
+    <div class="actions" style="margin-top:22px">
+      <button class="ghost" onclick="nmUndo(this)">Use the original names</button>
+      <label class="check" style="margin-top:0"><input type="checkbox" id="nmHand" onchange="nmUndoInfo()">&nbsp; Also names I changed by hand</label>
+    </div>
+    <div class="hint" id="nmUndoInfo"></div>
+    <div id="nmDone"></div>
+  </details>
+
+  <details class="section" id="startOpts">
+    <summary><span class="sumh">Home Screen Manager Start-Up Options</span></summary>
+  <div class="row">
+    <div class="txt"><div class="hint" id="openHint"></div>
+      <div class="chips" id="openChips" style="margin-top:10px"></div></div>
+  </div>
   </details>
 
   <details class="section" id="updSettings">
@@ -341,6 +440,10 @@ details.section > *:not(summary){margin-left:2px}
     </div>
     <div class="fm-msg" id="advMsg"></div>
     <p class="hint">"Refresh home screen now" restarts the home screen process. If it stays black for more than a few seconds, press the PS button or restart the console. "Restore original backup" puts back the database copy taken the first time Home Screen Manager ran; games installed after that may need Safe Mode &gt; Rebuild Database to reappear.</p>
+      <div class="row">
+      <div class="txt">Folder page: show what the controller sends<div class="hint">For testing the d-pad on the folder page. A small box in the corner lists the buttons and clicks the browser receives. Leave it off normally.</div></div>
+      <button class="switch" id="sw_fd" aria-label="Folder page: show what the controller sends" onclick="toggleSetting('folder_debug')"></button>
+    </div>
   </details>
 
   </div>
@@ -513,6 +616,9 @@ function loadList(after) {
     }
     tiles = j.tiles;
     renderList();
+    /* the two tools keep their own copy of the tiles: bring it up to date, so a game renamed or
+       changed here shows in them without reloading the page */
+    if (bulk.loaded) bulkLoad(function () { nmRebuild(); if (bgState) bgRenderTiles(); });
     if (after) after();
   });
 }
@@ -777,7 +883,7 @@ function orderBar() {
 function renderList() {
   renderChips();
   var all = listEntries();
-  document.getElementById('tcount').textContent = all.length ? all.length : '';
+  document.getElementById('tcount').textContent = all.length ? '(' + all.length + ')' : '';
   var q = document.getElementById('q').value.toLowerCase().replace(/^\s+|\s+$/g, '');
   var grouped = filter === 'all' && !q;
 
@@ -1157,6 +1263,504 @@ function impDone(res) {
   loadStatus();
 }
 
+/* ---------- theme (kept in HSM, so the PC, the phone and the TV all show the same) ---------- */
+function applyTheme(t) {
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  var b = document.getElementById('themeBtn');
+  if (b) b.textContent = t === 'light' ? 'Dark mode' : 'Light mode';
+}
+function toggleTheme() {
+  var t = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  applyTheme(t);
+  req('POST', '/api/settings?theme=' + t, function (j) { if (!j.ok) toast(j.error, 5000); });
+}
+
+/* ---------- bulk changes ---------- */
+var bulk = { loaded: false, tiles: [], prefs: { words: [], keep: [], rules: { marks: true, platform: true, spaces: true, fixcase: false } } };
+var bgState = null, bgSel = {}, bgPics = [], bgJobT = 0, nmSel = {}, nmRows = [], bulkPrefTimer = null;
+var NM_KEEP_SUGGEST = ['FIFA', 'NBA', 'NFL', 'NHL', 'MLB', 'UFC', 'WWE', 'GTA', 'LEGO', 'HD', 'VR', 'DC', 'F1'];
+var NM_SUGGEST = ['Remastered', 'Definitive Edition', 'Deluxe Edition', 'Game of the Year Edition', 'Complete Edition', 'Director\'s Cut'];
+
+function el(id) { return document.getElementById(id); }
+function setMsg(id, html, ok) {
+  var m = el(id);
+  m.innerHTML = html;
+  m.className = 'fm-msg' + (html ? ' show' : '') + (ok ? ' ok' : '');
+}
+
+/* the tiles, with what each can take, for both tools */
+function bulkLoad(cb) {
+  req('GET', '/api/list', function (j) {
+    if (!j.ok) { toast(j.error, 5000); return; }
+    var ids = [], i;
+    for (i = 0; i < j.tiles.length; i++) ids.push(j.tiles[i].id);
+    post('/api/bulk/info', JSON.stringify({ ids: ids }), function (r) {
+      if (!r.ok) { toast(r.error, 5000); return; }
+      var info = {}, k;
+      for (k = 0; k < r.tiles.length; k++) info[r.tiles[k].id] = r.tiles[k];
+      bulk.tiles = [];
+      for (i = 0; i < j.tiles.length; i++) {
+        var t = j.tiles[i], x = info[t.id] || {};
+        bulk.tiles.push({ id: t.id, name: t.name, kind: t.kind, tab: t.tab, renamed: t.renamed, custom_bg: t.custom_bg,
+          can_bg: !!x.can_bg, can_rename: !!x.can_rename, orig_name: x.orig_name || t.name, by: x.by || '' });
+      }
+      bulk.loaded = true;
+      cb();
+    });
+  });
+}
+
+function bulkOpen() {
+  req('GET', '/api/bulk/prefs', function (j) {
+    if (j.ok && j.prefs && j.prefs.words) bulk.prefs = { words: j.prefs.words, keep: j.prefs.keep || [], rules: j.prefs.rules || bulk.prefs.rules };
+    el('nmMarks').checked = bulk.prefs.rules.marks !== false;
+    el('nmPlat').checked = bulk.prefs.rules.platform !== false;
+    el('nmSpaces').checked = bulk.prefs.rules.spaces !== false;
+    el('nmCase').checked = bulk.prefs.rules.fixcase === true;
+    nmWordsDraw();
+    nmKeepDraw();
+    bulkLoad(function () { nmRebuild(); if (bgState) bgRenderTiles(); });
+  });
+}
+
+/* ----- the background tool ----- */
+function bgUsbLoad(btn) {
+  busy(btn, true);
+  el('bgUsbHint').innerHTML = '<span class="spin"></span>&nbsp; Looking for pictures on USB drives…';
+  req('GET', '/api/usb_images', function (j) {
+    busy(btn, false);
+    if (!j.ok) { el('bgUsbHint').textContent = ''; toast(j.error, 5000); return; }
+    bgPics = j.images;
+    el('bgUsbHint').textContent = bgPics.length ? bgPics.length + ' picture' + (bgPics.length === 1 ? '' : 's') + ' found. Pick one:'
+      : 'No pictures found. Copy PNG, JPG, BMP or GIF files to a USB drive (any folder), plug it in and try again. Over FTP, use /data/homescreenmanager/pictures.';
+    var h = '', i;
+    for (i = 0; i < bgPics.length; i++)
+      h += '<button class="pickc" onclick="bgUsbPick(' + i + ')"><span class="pin"><span class="icon"><img alt="" data-thumb="' + esc(bgPics[i].path) +
+        '"></span><span class="pn">' + esc(bgPics[i].name) + '</span></span></button>';
+    el('bgUsbGrid').innerHTML = h;
+    thumbQueue = [];
+    var imgs = document.querySelectorAll('#bgUsbGrid img[data-thumb]');
+    for (i = 0; i < imgs.length; i++) thumbQueue.push(imgs[i]);
+    pumpThumbs();
+  });
+}
+function bgUsbPick(i) { bgPrepare('/api/bulk/bg/prepare?usb=' + encodeURIComponent(bgPics[i].path), null); }
+function bgUpload() {
+  var f = el('bgFile').files[0];
+  if (f) bgPrepare('/api/bulk/bg/prepare', f);
+}
+function bgPrepare(url, file) {
+  setMsg('bgMsg', '<span class="spin"></span>&nbsp; Preparing the picture…', true);
+  post(url, file, function (j) {
+    if (!j.ok) { setMsg('bgMsg', esc(j.error)); return; }
+    setMsg('bgMsg', '');
+    bgState = j;
+    var w = [];
+    if (j.width < 3840 || j.height < 2160) w.push('Smaller than 3840&times;2160: it will be enlarged and may look soft.');
+    if (Math.abs(j.width / j.height - 16 / 9) > 0.02) w.push('Not 16:9: the top and bottom (or the sides) are cut away, from the middle.');
+    el('bgPrev').innerHTML = '<div class="bgframe"><img alt="" src="/api/bulk/bg/preview?t=' + Date.now() + '"></div>' +
+      '<div class="hint">' + j.width + '&times;' + j.height + ' &middot; prepared as 3840&times;2160 (' + mb(j.bytes) + ')</div>' +
+      (w.length ? '<div class="hint" style="color:var(--warn)">' + w.join('<br>') + '</div>' : '');
+    bulkLoad(function () { bgRenderTiles(); });
+  });
+}
+function bgGroups() {
+  var g = { games: [], others: [], none: [], folders: 0 }, i;
+  for (i = 0; i < bulk.tiles.length; i++) {
+    var t = bulk.tiles[i];
+    if (/^HHFD/.test(t.id)) { g.folders++; continue; }
+    if (!t.can_bg) { g.none.push(t); continue; }
+    (t.kind === 'game' ? g.games : g.others).push(t);
+  }
+  return g;
+}
+function bgRenderTiles() {
+  var g = bgGroups(), h = '', i, t;
+  for (i = 0; i < g.games.length; i++) if (bgSel[g.games[i].id] === undefined) bgSel[g.games[i].id] = true;
+  for (i = 0; i < g.others.length; i++) if (bgSel[g.others[i].id] === undefined) bgSel[g.others[i].id] = false;
+  h += '<div class="actions" style="margin:14px 0 6px"><button class="ghost small" onclick="bgSetAll(true)">Select all</button>' +
+    '<button class="ghost small" onclick="bgSetAll(false)">Select none</button>' +
+    '<button class="ghost small" onclick="bgSetTab(\'games\')">Games tab only</button>' +
+    '<button class="ghost small" onclick="bgSetTab(\'media\')">Media tab only</button></div>';
+  function rows(list) {
+    var out = '', k;
+    for (k = 0; k < list.length; k++) {
+      t = list[k];
+      out += '<label class="trow"><input type="checkbox" ' + (bgSel[t.id] ? 'checked ' : '') + 'onchange="bgToggle(\'' + t.id + '\',this.checked)">' +
+        '<span>' + esc(t.name) + '</span> <span class="badge">' + esc(t.tab) + '</span>' +
+        (t.custom_bg ? ' <span class="badge b-vis">your background</span>' : '') + '</label>';
+    }
+    return out;
+  }
+  h += '<div class="hint" style="margin-top:10px"><b>Games</b> (' + g.games.length + ')</div>' + rows(g.games);
+  if (g.others.length) h += '<div class="hint" style="margin-top:10px"><b>Apps and system tiles</b> that can take a background (' + g.others.length + '), not ticked</div>' + rows(g.others);
+  if (g.none.length) {
+    h += '<div class="hint" style="margin-top:10px"><b>No background entry</b> (' + g.none.length + '): the normal way can\'t give these a background, so they are skipped. <b>Experimental:</b> try filling the empty slot in the database for one tile at a time. System tiles are only checked, nothing is written.</div>';
+    for (i = 0; i < g.none.length; i++) {
+      t = g.none[i];
+      h += '<div class="trow"><span>' + esc(t.name) + '</span> <span class="badge">' + esc(t.tab) + '</span>' +
+        '<button class="ghost small" style="margin-left:auto" onclick="bgTry(\'' + t.id + '\', this)">' + (/^NPXS/.test(t.id) ? 'Check (report only)' : 'Try a background (experimental)') + '</button></div>';
+    }
+  }
+  if (g.folders) h += '<div class="hint" style="margin-top:10px">Folders (' + g.folders + ') are not included. Set a folder\'s background in its own editor.</div>';
+  el('bgTiles').innerHTML = h;
+  el('bgOvRow').style.display = '';
+  el('bgShareRow').style.display = '';
+  el('bgShareHint').style.display = '';
+  el('bgAttn').style.display = '';
+  bgCount();
+}
+function bgToggle(id, on) { bgSel[id] = on; bgCount(); }
+function bgSetAll(on) {
+  var g = bgGroups(), l = g.games.concat(g.others), i;
+  for (i = 0; i < l.length; i++) bgSel[l[i].id] = on;
+  bgRenderTiles();
+}
+function bgSetTab(tab) {
+  var g = bgGroups(), l = g.games.concat(g.others), i;
+  for (i = 0; i < l.length; i++) bgSel[l[i].id] = l[i].tab === tab;
+  bgRenderTiles();
+}
+/* what a press of Apply would do */
+function bgPlan() {
+  var ow = el('bgOverwrite').checked, plan = { ids: [], already: 0 }, i, t;
+  for (i = 0; i < bulk.tiles.length; i++) {
+    t = bulk.tiles[i];
+    if (!bgSel[t.id] || !t.can_bg || /^HHFD/.test(t.id)) continue;
+    if (t.custom_bg && !ow) { plan.already++; continue; }
+    plan.ids.push(t.id);
+  }
+  return plan;
+}
+function bgCount() {
+  var p = bgPlan(), g = bgGroups(), s = 'Applies to ' + p.ids.length + ' game' + (p.ids.length === 1 ? '' : 's') + '.';
+  if (g.none.length) s += ' ' + g.none.length + ' skipped: no background entry.';
+  if (p.already) s += ' ' + p.already + ' skipped: already set by you.';
+  el('bgSummary').textContent = s;
+  el('bgApplyBtn').disabled = !bgState || !p.ids.length;
+}
+function bgApply(btn) {
+  var p = bgPlan();
+  if (!p.ids.length) return;
+  busy(btn, true);
+  post('/api/bulk/bg/apply', JSON.stringify({ ids: p.ids, overwrite: el('bgOverwrite').checked, share: el('bgShare').checked }), function (j) {
+    if (!j.ok) { busy(btn, false); setMsg('bgMsg', esc(j.error)); return; }
+    bgJobT = Date.now();
+    bgPoll(j.job, btn);
+  });
+}
+function bgPoll(job, btn, undo) {
+  req('GET', '/api/bulk/job?job=' + job, function (r) {
+    if (!r.ok) { busy(btn, false); setMsg('bgMsg', esc(r.error || 'Lost track of the job.')); return; }
+    if (!r.done) {
+      setMsg('bgMsg', '<span class="spin"></span>&nbsp; ' + (undo ? 'Putting the original backgrounds back… ' : 'Applying the background… ') + fmtElapsed(Math.floor((Date.now() - bgJobT) / 1000)) +
+        ' &middot; game ' + r.i + ' of ' + r.n + '<br><span class="hint">Please do not open any apps or games. The home screen refreshes by itself when it is done.</span>', true);
+      setTimeout(function () { bgPoll(job, btn, undo); }, 800);
+      return;
+    }
+    busy(btn, false);
+    var x = r.result;
+    if (undo) {
+      setMsg('bgMsg', '');
+      toast('Original backgrounds put back on ' + x.changed + ' game' + (x.changed === 1 ? '' : 's') + '. The home screen is refreshing…', 8000);
+      bulkLoad(function () { if (bgState) bgRenderTiles(); });
+      return;
+    }
+    if (x.stopped) setMsg('bgMsg', 'Stopped after ' + x.applied + ' games: ' + esc(x.error) + ' Use the original for all takes them away again.', false);
+    else if (x.failed) setMsg('bgMsg', 'Applied to ' + x.applied + ' games. ' + x.failed + ' failed: ' + esc(x.error) + ' The home screen is refreshing…', true);
+    else {
+      setMsg('bgMsg', '');
+      toast('Background applied to ' + x.applied + ' game' + (x.applied === 1 ? '' : 's') + '. The home screen is refreshing…', 8000);
+    }
+    bulkLoad(function () { bgRenderTiles(); });
+  });
+}
+/* the experiment: fill the empty background slot of one tile */
+function bgTry(id, btn) {
+  if (!bgState) { toast('Choose a picture first.', 5000); return; }
+  busy(btn, true);
+  setMsg('bgMsg', '<span class="spin"></span>&nbsp; Trying it on this tile…', true);
+  post('/api/bulk/bg/try', JSON.stringify({ id: id }), function (j) {
+    busy(btn, false);
+    if (!j.ok) { setMsg('bgMsg', esc(j.error)); return; }
+    if (!j.wrote) { setMsg('bgMsg', esc(j.message), true); return; }
+    setMsg('bgMsg', '');
+    toast('A background was written for ' + id + '. The home screen is refreshing…', 8000);
+    bulkLoad(function () { bgRenderTiles(); });
+  });
+}
+function bgUndo(btn) {
+  confirmTwice(btn, 'Press again to put the originals back', function () {
+    busy(btn, true);
+    post('/api/bulk/bg/undo', JSON.stringify({ all: true }), function (j) {
+      if (!j.ok) { busy(btn, false); toast(j.error, 5000); return; }
+      if (!j.job) { busy(btn, false); toast('No custom backgrounds to take away.', 5000); return; }
+      bgJobT = Date.now();
+      bgPoll(j.job, btn, true);
+    });
+  });
+}
+
+/* ----- tidy names: the rules (pure functions) ----- */
+function escRe(w) { return w.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&'); }
+function isWordChar(c) { return !!c && /[A-Za-z0-9\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF]/.test(c); }
+function removePhrase(s, w) {
+  w = w.replace(/^\s+|\s+$/g, '');
+  if (!w) return s;
+  var re = new RegExp(escRe(w), 'gi');
+  return s.replace(re, function (m, off) {
+    if (isWordChar(m.charAt(0)) && isWordChar(s.charAt(off - 1))) return m;
+    if (isWordChar(m.charAt(m.length - 1)) && isWordChar(s.charAt(off + m.length))) return m;
+    return '';
+  });
+}
+/* a name without the separators and empty brackets that taking words out can leave behind */
+function leftovers(s) {
+  s = s.replace(/\(\s*\)|\[\s*\]/g, ' ');
+  s = s.replace(/([\-\u2013\u2014:\u00B7,\/|])(\s*[\-\u2013\u2014:\u00B7,\/|])+/g, '$1');
+  s = s.replace(/^[\s\-\u2013\u2014:\u00B7,\/|]+|[\s\-\u2013\u2014:\u00B7,\/|]+$/g, '');
+  return s;
+}
+function tidyName(name, o) {
+  var s = name, i, words = (o.words || []).slice().sort(function (a, b) { return b.length - a.length; });
+  if (o.marks) s = s.replace(/[\u2122\u00AE\u00A9]/g, '');
+  if (o.platform) {
+    s = s.replace(/\s*[\(\[]\s*PS[45](?:\s*(?:&|\/|and|,)\s*PS[45])?\s*[\)\]]/ig, '');
+    s = s.replace(/\s+PS[45]\s*$/i, '');
+  }
+  for (i = 0; i < words.length; i++) s = removePhrase(s, words[i]);
+  if (words.length || o.platform) s = leftovers(s);
+  if (o.spaces) s = s.replace(/\s{2,}/g, ' ').replace(/^\s+|\s+$/g, '');
+  if (o.fixcase) s = smartCase(s, o.keep);
+  return s;
+}
+/* ----- fix capital letters ----- */
+var NM_SMALL = { a: 1, an: 1, and: 1, as: 1, at: 1, but: 1, by: 1, for: 1, 'in': 1, nor: 1, of: 1, on: 1, or: 1, the: 1, to: 1, up: 1, vs: 1 };
+function hasCase(s) { return s.toLowerCase() !== s.toUpperCase(); }
+function capWord(w) {
+  var i = 0;
+  while (i < w.length && !hasCase(w.charAt(i))) i++;
+  return w.slice(0, i) + w.charAt(i).toUpperCase() + w.slice(i + 1).toLowerCase();
+}
+/* GOD OF WAR -> God of War. Only a name that is all upper case or all lower case is changed. */
+function smartCase(name, keep) {
+  if (!hasCase(name) || (name !== name.toUpperCase() && name !== name.toLowerCase())) return name;
+  var re = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF0-9'\u2019]+/g, out = '', last = 0, m, words = [];
+  while ((m = re.exec(name))) words.push({ w: m[0], at: m.index });
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i].w, sep = name.slice(i ? words[i - 1].at + words[i - 1].w.length : 0, words[i].at), res;
+    var startsPart = i === 0 || i === words.length - 1 || /[:\u2013\u2014]|\s-\s|^-$/.test(sep) || /-$/.test(sep);
+    if (/[0-9]/.test(w)) res = w;                                              /* 2K24, F1: as written */
+    else if (/^(x{0,3})(ix|iv|v?i{0,3})$/i.test(w) && /^[ivx]+$/i.test(w)) res = w.toUpperCase(); /* II, IV */
+    else if (!startsPart && NM_SMALL[w.toLowerCase()]) res = w.toLowerCase();
+    else res = capWord(w);
+    out += sep + res;
+    last = words[i].at + w.length;
+  }
+  out += name.slice(last);
+  var k = (keep || []).slice().sort(function (a, b) { return b.length - a.length; }), j;
+  for (j = 0; j < k.length; j++) {
+    var phrase = k[j].replace(/^\s+|\s+$/g, '');
+    if (!phrase) continue;
+    var rx = new RegExp(escRe(phrase), 'gi'), cur = out;
+    out = cur.replace(rx, function (mm, off) {
+      if (isWordChar(mm.charAt(0)) && isWordChar(cur.charAt(off - 1))) return mm;
+      if (isWordChar(mm.charAt(mm.length - 1)) && isWordChar(cur.charAt(off + mm.length))) return mm;
+      return phrase;
+    });
+  }
+  return out;
+}
+function nameLen(s) { return s.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '_').length; }
+
+function nmOpts() {
+  return { marks: el('nmMarks').checked, platform: el('nmPlat').checked, spaces: el('nmSpaces').checked, fixcase: el('nmCase').checked, words: bulk.prefs.words, keep: bulk.prefs.keep };
+}
+function nmChanged() {
+  bulk.prefs.rules = { marks: el('nmMarks').checked, platform: el('nmPlat').checked, spaces: el('nmSpaces').checked, fixcase: el('nmCase').checked };
+  nmRebuild();
+  if (bulkPrefTimer) clearTimeout(bulkPrefTimer);
+  bulkPrefTimer = setTimeout(function () { post('/api/bulk/prefs', JSON.stringify(bulk.prefs), function () {}); }, 700);
+}
+function nmWordsDraw() {
+  var h = '', i, have = {};
+  for (i = 0; i < bulk.prefs.words.length; i++) {
+    have[bulk.prefs.words[i].toLowerCase()] = true;
+    h += '<span class="wchip">' + esc(bulk.prefs.words[i]) + '<button onclick="nmDel(' + i + ')" aria-label="Remove">&#10005;</button></span>';
+  }
+  el('nmWords').innerHTML = h || '<span class="hint">None yet. Nothing is removed until you add something.</span>';
+  var sg = '';
+  for (i = 0; i < NM_SUGGEST.length; i++)
+    if (!have[NM_SUGGEST[i].toLowerCase()]) sg += '<button class="ghost" onclick="nmAddWord(' + i + ')">+ ' + esc(NM_SUGGEST[i]) + '</button>';
+  el('nmSugg').innerHTML = sg ? '<div class="hint">Suggestions, one tap adds one:</div>' + sg : '';
+}
+function nmAddText(t) {
+  t = t.replace(/^\s+|\s+$/g, '');
+  if (!t) return;
+  var i;
+  for (i = 0; i < bulk.prefs.words.length; i++) if (bulk.prefs.words[i].toLowerCase() === t.toLowerCase()) return;
+  bulk.prefs.words.push(t);
+  nmWordsDraw();
+  nmChanged();
+}
+function nmKeepDraw() {
+  var h = '', i, have = {};
+  for (i = 0; i < bulk.prefs.keep.length; i++) {
+    have[bulk.prefs.keep[i].toLowerCase()] = true;
+    h += '<span class="wchip">' + esc(bulk.prefs.keep[i]) + '<button onclick="nmKeepDel(' + i + ')" aria-label="Remove">&#10005;</button></span>';
+  }
+  el('nmKeep').innerHTML = h || '<span class="hint">None yet. Nothing is kept until you add something.</span>';
+  var sg = '';
+  for (i = 0; i < NM_KEEP_SUGGEST.length; i++)
+    if (!have[NM_KEEP_SUGGEST[i].toLowerCase()]) sg += '<button class="ghost" onclick="nmKeepAddSug(' + i + ')">+ ' + esc(NM_KEEP_SUGGEST[i]) + '</button>';
+  el('nmKeepSugg').innerHTML = sg ? '<div class="hint">Suggestions, one tap adds one:</div>' + sg : '';
+}
+function nmKeepAddText(t) {
+  t = t.replace(/^\s+|\s+$/g, '');
+  if (!t) return;
+  var i;
+  for (i = 0; i < bulk.prefs.keep.length; i++) if (bulk.prefs.keep[i].toLowerCase() === t.toLowerCase()) { bulk.prefs.keep[i] = t; nmKeepDraw(); nmChanged(); return; }
+  bulk.prefs.keep.push(t);
+  nmKeepDraw();
+  nmChanged();
+}
+function nmKeepAdd() { nmKeepAddText(el('nmKeepIn').value); el('nmKeepIn').value = ''; }
+function nmKeepAddSug(i) { nmKeepAddText(NM_KEEP_SUGGEST[i]); }
+function nmKeepDel(i) { bulk.prefs.keep.splice(i, 1); nmKeepDraw(); nmChanged(); }
+function nmAdd() { nmAddText(el('nmWordIn').value); el('nmWordIn').value = ''; }
+function nmAddWord(i) { nmAddText(NM_SUGGEST[i]); }
+function nmDel(i) { bulk.prefs.words.splice(i, 1); nmWordsDraw(); nmChanged(); }
+
+/* what would change, with a warning when two games would end up with the same name */
+function nmRebuild() {
+  var o = nmOpts(), i, t, rows = [], finalNames = {}, empty = 0, long = 0;
+  for (i = 0; i < bulk.tiles.length; i++) {
+    t = bulk.tiles[i];
+    if (!t.can_rename || /^HHFD/.test(t.id)) continue;
+    var nw = tidyName(t.name, o), changed = nw !== t.name;
+    if (changed && !nw) { empty++; changed = false; }
+    if (changed && nameLen(nw) > 64) { long++; changed = false; }
+    var fin = changed ? nw : t.name;
+    (finalNames[fin.toLowerCase()] = finalNames[fin.toLowerCase()] || []).push(t.id);
+    if (changed) rows.push({ id: t.id, old: t.name, nw: nw, by: t.by });
+  }
+  for (i = 0; i < rows.length; i++) {
+    var same = finalNames[rows[i].nw.toLowerCase()];
+    rows[i].warn = same.length > 1 ? same.length + ' games would be called ' + rows[i].nw : '';
+    if (nmSel[rows[i].id] === undefined) nmSel[rows[i].id] = !rows[i].warn;
+  }
+  nmRows = rows;
+  nmDoneDraw();
+  var h = '';
+  for (i = 0; i < rows.length; i++)
+    h += '<label class="trow"><input type="checkbox" ' + (nmSel[rows[i].id] ? 'checked ' : '') + 'onchange="nmToggle(\'' + rows[i].id + '\',this.checked)">' +
+      '<span class="was">' + esc(rows[i].old) + '</span><span>&rarr;</span><b>' + esc(rows[i].nw) + '</b>' +
+      (rows[i].by === 'hand' ? '<span class="warnt" style="color:var(--muted)">Renamed by hand before</span>' : '') +
+      (rows[i].warn ? '<span class="warnt">&#9888; ' + esc(rows[i].warn) + '. Not ticked: you decide.</span>' : '') + '</label>';
+  el('nmSel').innerHTML = rows.length ? '<div class="actions" style="margin:14px 0 6px"><button class="ghost small" onclick="nmSetAll(true)">Select all</button>' +
+    '<button class="ghost small" onclick="nmSetAll(false)">Select none</button></div>' : '';
+  el('nmList').innerHTML = h || '<div class="hint" style="margin:10px 0">' + (bulk.loaded ? 'No name would change with these rules.' : 'Loading the games…') + '</div>';
+  el('nmAttn').style.display = rows.length ? '' : 'none';
+  el('nmSummary').textContent = rows.length
+    ? rows.length + ' name' + (rows.length === 1 ? '' : 's') + ' would change.' + (empty ? ' ' + empty + ' skipped: the name would be empty.' : '') + (long ? ' ' + long + ' skipped: too long.' : '')
+    : '';
+  nmCount();
+}
+function nmToggle(id, on) { nmSel[id] = on; nmCount(); }
+function nmSetAll(on) {
+  var i;
+  for (i = 0; i < nmRows.length; i++) nmSel[nmRows[i].id] = on;
+  nmRebuild();
+}
+/* the games whose name has been changed, with the original, and a button to put it back */
+function nmDoneDraw() {
+  var h = '', n = 0, i, t;
+  for (i = 0; i < bulk.tiles.length; i++) {
+    t = bulk.tiles[i];
+    if (!t.renamed || /^HHFD/.test(t.id)) continue;
+    n++;
+    h += '<div class="trow"><b>' + esc(t.name) + '</b><span class="was">' + esc(t.orig_name) + '</span><span class="badge' + (t.by === 'tool' ? '' : ' b-vis') + '">' + (t.by === 'tool' ? 'by the cleanup' : 'by hand') + '</span>' +
+      '<button class="ghost small" style="margin-left:auto" onclick="nmUndoOne(\'' + t.id + '\', this)">Use the original</button></div>';
+  }
+  el('nmDone').innerHTML = n ? '<div class="hint" style="margin-top:24px"><b>Names you\'ve changed</b> (' + n + ')</div>' + h : '';
+  nmUndoInfo();
+}
+/* how many names Use the original names would put back */
+function nmCounts() {
+  var tool = 0, hand = 0, i, t;
+  for (i = 0; i < bulk.tiles.length; i++) {
+    t = bulk.tiles[i];
+    if (!t.renamed || /^HHFD/.test(t.id)) continue;
+    if (t.by === 'tool') tool++; else hand++;
+  }
+  return { tool: tool, hand: hand };
+}
+function nmUndoInfo() {
+  var c = nmCounts(), box = el('nmHand').checked, n = box ? c.tool + c.hand : c.tool;
+  el('nmUndoInfo').textContent = !c.tool && !c.hand ? 'No names are changed.' :
+    box ? 'Puts back ' + n + ' name' + (n === 1 ? '' : 's') + ' (' + c.tool + ' by the cleanup, ' + c.hand + ' by hand).' :
+    c.tool ? 'Puts back ' + c.tool + ' name' + (c.tool === 1 ? '' : 's') + ' changed by the cleanup.' + (c.hand ? ' The ' + c.hand + ' you changed by hand stay.' : '') :
+    'No names were changed by the cleanup. The ' + c.hand + ' you changed by hand stay.';
+}
+function nmUndoOne(id, btn) {
+  busy(btn, true);
+  post('/api/bulk/rename_undo', JSON.stringify({ ids: [id] }), function (j) {
+    busy(btn, false);
+    if (!j.ok) { toast(j.error, 5000); return; }
+    toast('The original name is back. The home screen is refreshing…', 8000);
+    nmSel = {};
+    bulkLoad(function () { nmRebuild(); });
+  });
+}
+function nmCount() {
+  var n = 0, i;
+  for (i = 0; i < nmRows.length; i++) if (nmSel[nmRows[i].id]) n++;
+  el('nmApplyBtn').disabled = n === 0;
+  el('nmApplyBtn').textContent = n ? 'Apply to ' + n + ' name' + (n === 1 ? '' : 's') : 'Apply';
+}
+function nmApply(btn) {
+  var items = [], i;
+  for (i = 0; i < nmRows.length; i++) if (nmSel[nmRows[i].id]) items.push({ id: nmRows[i].id, name: nmRows[i].nw });
+  if (!items.length) return;
+  busy(btn, true);
+  setMsg('nmMsg', '<span class="spin"></span>&nbsp; Saving the names…', true);
+  post('/api/bulk/rename', JSON.stringify(items), function (j) {
+    busy(btn, false);
+    if (!j.ok) { setMsg('nmMsg', esc(j.error)); return; }
+    if (j.failed_count) {
+      var f = [], k;
+      for (k = 0; k < j.failed.length && k < 5; k++) f.push(esc(j.failed[k].id) + ': ' + esc(j.failed[k].error));
+      setMsg('nmMsg', j.changed + ' renamed, ' + j.failed_count + ' failed: ' + f.join('; ') + '. The home screen is refreshing…', true);
+    } else {
+      setMsg('nmMsg', '');
+      toast(j.changed + ' name' + (j.changed === 1 ? '' : 's') + ' saved. The home screen is refreshing…', 8000);
+    }
+    nmSel = {};
+    bulkLoad(function () { nmRebuild(); });
+  });
+}
+function nmUndo(btn) {
+  var c = nmCounts(), box = el('nmHand').checked, n = box ? c.tool + c.hand : c.tool;
+  if (!n) { toast(box ? 'No names are changed.' : 'No names were changed by the cleanup.', 5000); return; }
+  confirmTwice(btn, 'Press again to put back ' + n + ' name' + (n === 1 ? '' : 's'), function () {
+    busy(btn, true);
+    post('/api/bulk/rename_undo', JSON.stringify({ all: true, hand: box }), function (j) {
+      busy(btn, false);
+      if (!j.ok) { toast(j.error, 5000); return; }
+      toast(j.changed ? 'Original names put back on ' + j.changed + ' game' + (j.changed === 1 ? '' : 's') + '. The home screen is refreshing…' : 'No names to take away.', 8000);
+      nmSel = {};
+      bulkLoad(function () { nmRebuild(); });
+    });
+  });
+}
+
+(function () {
+  var ids = ['bgSec', 'nmSec'], i;
+  for (i = 0; i < ids.length; i++) (function (d) { d.addEventListener('toggle', function () { if (d.open) bulkOpen(); }); })(el(ids[i]));
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+})();
+
 function diag(btn) {
   busy(btn, true);
   var x = new XMLHttpRequest();
@@ -1429,6 +2033,7 @@ updDetails.addEventListener('toggle', function () { if (updDetails.open) usbChec
 var folders = [], fm = null, fmFilter = 'all', fmPendingFile = null, fmPendingUsb = null;
 var IS_PS5 = /PlayStation/i.test(navigator.userAgent);
 document.getElementById('impFileRow').style.display = IS_PS5 ? 'none' : ''; /* the PS5 browser can't open files */
+document.getElementById('bgFileRow').style.display = IS_PS5 ? 'none' : '';
 var COLORS = [['none', ''], ['blue', '#2f6df5'], ['purple', '#864bf2'], ['red', '#e5484d'], ['orange', '#f08c2e'],
   ['green', '#2fb36b'], ['teal', '#1fb5c4'], ['gray', '#5b6378'], ['darkgray', '#3c414f'], ['black', '#1f2127']];
 
@@ -1498,6 +2103,7 @@ function fmMsg(html, ok) {
 }
 
 function closeFolder() {
+  document.getElementById('mainSec').open = true; /* back to the list */
   document.getElementById('editorView').style.display = 'none';
   document.getElementById('mainView').style.display = '';
   window.scrollTo(0, 0);
@@ -2016,6 +2622,7 @@ function tePickFile() {
 }
 
 function closeTile() {
+  document.getElementById('mainSec').open = true; /* back to the list */
   document.getElementById('tileView').style.display = 'none';
   document.getElementById('mainView').style.display = '';
   te = null;

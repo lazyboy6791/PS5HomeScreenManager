@@ -68,6 +68,21 @@ The menu opens in the PS5 browser. A notification shows the address for your pho
 | Start a game or app | Press **Open**. It works for hidden ones too. |
 | See your changes | Hiding and folders show after you open and close any game, or restart. Names, pictures and backgrounds show after **Refresh home screen now**. |
 
+## The menu
+
+The menu is one page of sections. Every section is closed when the page opens, so you open only the one you need:
+
+1. **Home Screen Folders and Tiles**: your folders and tiles, with the **Folder options** inside it.
+2. **Tile hiding options**
+3. **Change and Edit Wallpapers**, with Live wallpaper at the bottom.
+4. **Clean Up Game Names**
+5. **Home Screen Manager Start-Up Options**
+6. **Update settings**
+7. **Export & Import**
+8. **More & troubleshooting**
+
+The **Light mode / Dark mode** button at the top switches the colours. The choice is kept in Home Screen Manager, so your phone, your PC and the folder page on the TV all follow it. A page that is already open changes the next time you open it.
+
 ## Folders
 
 A folder is one tile on the **Games** or **Media** tab. Selecting it opens a page that looks like the Game Library: pick a game and it starts.
@@ -84,6 +99,30 @@ A folder is one tile on the **Games** or **Media** tab. Selecting it opens a pag
 
 > [!NOTE]
 > Home Screen Manager serves the folder page, so it needs to be running for folders to open. Add it to Autoload (see [Run it automatically](#run-it-automatically)).
+
+## Change and Edit Wallpapers
+
+Open **Change and Edit Wallpapers** to give many games the same background in one go. It shows what it will do first, makes a copy of the home screen database (`app.db.before-bulk`) before it writes anything, and restarts the home screen by itself when it is done, with a message and a counter while it runs.
+
+Choose one picture (from a USB drive, your phone or PC, or the pictures folder). Home Screen Manager crops it to 16:9 from the middle, shows the result with warnings if it is small or not 16:9, and lists every game with a tick box and **Select all** / **Select none** buttons. Games are ticked. Apps and system tiles that can take a background are listed and not ticked. Games that have no background entry in the database can't take one and are skipped, and folders are not included. **Overwrite backgrounds I've already set** is off by default, so your own work is never undone by accident.
+
+The picture is converted once for each file format and the result is shared between the games (linked when the drive allows it, copied when not), so a big library takes seconds to minutes, not hours. The log says how many files were linked and how many were copied. If the console's drive gets almost full, the job stops by itself and what is done stays. **Use the original for all** puts every original background back, with the same message and counter. **Live wallpaper** is at the bottom of this section.
+
+**Games without a background entry (experimental).** The list ends with the games that have no background entry in the home screen database. Each has a **Try a background** button that fills that game's empty slots with your picture, in the format the other tiles use in the same place; the log reports what it found and what it chose. **Use the original** puts the empty slots back. System tiles (Game Library, Media Gallery and so on) are only checked, nothing is written.
+
+**Share one file between games (experimental).** Instead of one converted file per game, one file per format is kept in a folder of its own (`hsm_shared` in `appmeta`) and every game points at it. It is much smaller and faster. It is off by default: try it on a few games first, restart the console once, and check that the backgrounds are still there. The shared files are removed when no game uses them any more.
+
+## Clean Up Game Names
+
+Open **Clean Up Game Names** to tidy many names in one go. Tick the rules you want: remove &trade;, &reg; and &copy;, remove platform tags such as (PS4) and (PS5), clean up spaces, and **Fix capital letters**. Add your own words and phrases to remove, such as "Remastered", in any language, or add one of the suggestions with a tap.
+
+**Fix capital letters** only touches names that are all upper case or all lower case, so GOD OF WAR becomes God of War. Small words (a, an, and, as, at, but, by, for, in, nor, of, on, or, the, to, up, vs) stay small, except as the first or last word or right after a colon or dash. Roman numerals stay capitals, and words with digits are left as written. It is off until you tick it. Under **Keep name as intended** you list words that must keep the capitals you write, such as FIFA, NBA or inFAMOUS (suggestions are one tap away, and you can type your own); the spelling in your list wins. The list shows every name that would change, old next to new, with **Select all** and **Select none**. If two games would end up with the same name, you get a warning and they are not ticked. Names that would end up empty or longer than 64 characters are skipped.
+
+**Names you've changed** lists every game whose name is changed, with the original, a label that says whether the cleanup or you (by hand) made the change, and a **Use the original** button on each (that one always goes back to the console's own name). In the preview, a game you renamed by hand before shows "Renamed by hand before", and it is still ticked so you can untick it.
+
+**Use the original names** only undoes what the cleanup changed. If the cleanup had tidied a name you gave by hand, you get your own name back. Tick **Also names I changed by hand** next to the button to put every name back to the original. A line under the button says how many names it will put back. A copy of the database is made first, and the home screen restarts by itself when the names are saved.
+
+Custom names, pictures and backgrounds stay in place: when the PS5 writes a game's own name back (it does that when you start the game), Home Screen Manager puts yours back within a moment.
 
 ## Export & Import
 
@@ -129,7 +168,7 @@ Each part has a **Use the original** button. The game's own files are never touc
 
 Home Screen Manager comes with **[LiveShell Engine](https://github.com/ZiZc3/LiveShell) 1.5.2 by ZiZc3** built in, so one payload gives you video wallpapers too. You don't need to load `liveshell.elf` separately.
 
-1. In the menu, switch **Live wallpaper** on. Home Screen Manager starts LiveShell, and from then on starts it every time Home Screen Manager runs.
+1. In the menu, open **Change and Edit Wallpapers** and switch **Live wallpaper** on, at the bottom. Home Screen Manager starts LiveShell, and from then on starts it every time Home Screen Manager runs.
 2. Add videos: copy `.mp4` files to a `liveshell` folder on a USB drive, or upload them from your phone or PC on LiveShell's page (`http://<PS5-IP>:9050`).
 3. Press **Use** on a video to make it your wallpaper. **Delete** removes a video from the PS5.
 
@@ -154,7 +193,7 @@ Because the PS5 re-sorts by recency, Home Screen Manager re-applies your order e
 
 ## Keep folders first
 
-Turn on **Keep folders first** (in the home screen section) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Screen Manager next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in **Tile hiding options** turns that off). Home Screen Manager keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
+Turn on **Keep folders first** (in **Folder options**, inside Home Screen Folders and Tiles) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Screen Manager next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in **Tile hiding options** turns that off). Home Screen Manager keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
 
 
 
@@ -163,7 +202,7 @@ Turn on **Keep folders first** (in the home screen section) and your folders sta
 Add Home Screen Manager to Payload Manager's Autoload so folders always work and your changes are kept:
 
 1. In Payload Manager, go to **Autoload > Add Item to Sequence** and choose **HomeScreenManager**.
-2. In Home Screen Manager, go to **Options > When Home Screen Manager starts** and choose **Quiet when started by Autoload**.
+2. In Home Screen Manager, open **Home Screen Manager Start-Up Options** and choose **Quiet when started by Autoload**.
 
 From then on, the Autoload start runs silently in the background, and launching Home Screen Manager yourself from Payload Manager opens the menu.
 
@@ -202,7 +241,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 | A change doesn't show | Hiding and folders: open and close any game, or restart. Names, pictures and backgrounds: **Refresh home screen now**. |
 | A folder shows "can't connect" | Home Screen Manager isn't running. Start it, or add it to Autoload. |
 | A web app in a folder shows "can't connect" | The payload behind it (for example, Payload Manager) isn't running. |
-| The menu opens at Autoload | **Options > When Home Screen Manager starts > Quiet when started by Autoload**. |
+| The menu opens at Autoload | **Home Screen Manager Start-Up Options > Quiet when started by Autoload**. |
 | "Choose from USB drive" finds nothing | Use exFAT or FAT32, keep pictures within four folders of the top, and press **Refresh**. |
 | A background "can't be written yet" | That game uses an unusual texture format. |
 | "Port 8090 is busy" | Restart the PS5 and launch Home Screen Manager again. |

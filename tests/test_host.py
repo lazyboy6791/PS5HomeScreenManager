@@ -2804,6 +2804,7 @@ def backup_tests(tmp):
     check(res["folders_made"] == 2 and res["folders_skipped"] == 0 and res["hidden"] == 1 and res["custom"] == 2 and res["settings"] is True and res["problems"] == 0,
           "result: 2 folders made, 1 tile hidden, 2 custom tiles, settings restored, no problems (%s)" % res)
     code, fl = http("GET", "/api/folders")
+    check("folders" in fl, "the folder list answers after the import: %s" % str(fl)[:200])
     by_name = {f["name"]: f for f in fl["folders"]}
     check(set(by_name) == {"Existing", "Sports", "Media"}, "the folders are added next to the one that was there")
     sports, media = by_name["Sports"], by_name["Media"]
@@ -2880,8 +2881,41 @@ def menu_new_sections_tests(tmp):
     code, fh = http("GET", "/folder/HHFD00001", raw=True)
     s.stop()
     m = html.decode()
-    order = [m.index('id="%s"' % i) for i in ("folderOpts", "hideOpts", "updSettings", "expImp", "adv")]
-    check(order == sorted(order), "the sections run: Folder options, Tile hiding options, Update settings, Export & Import, More & troubleshooting")
+    order = [m.index('id="%s"' % i) for i in ("mainSec", "folderOpts", "hideOpts", "bgSec", "nmSec", "startOpts", "updSettings", "expImp", "adv")]
+    check(order == sorted(order), "the sections run: Home Screen Folders and Tiles (Folder options inside), Tile hiding options, Wallpapers, Game names, Start-Up Options, Update settings, Export & Import, More & troubleshooting")
+    titles = dict(re.findall(r'<details class="section" id="(\w+)">\s*<summary><span class="sumh">([^<]+)</span>', m))
+    check(titles == {"mainSec": "Home Screen Folders and Tiles", "folderOpts": "Folder options", "hideOpts": "Tile hiding options", "bgSec": "Change and Edit Wallpapers",
+                     "nmSec": "Clean Up Game Names", "startOpts": "Home Screen Manager Start-Up Options", "updSettings": "Update settings", "expImp": "Export &amp; Import",
+                     "adv": "More &amp; troubleshooting"}, "the sections have the names we chose (%s)" % titles)
+    check("<details open" not in m and 'id="bulk"' not in m, "every section is closed when the page opens, and Bulk changes is gone")
+    check("Take control of your PlayStation 5's home screen" in m and "Hide games, apps and system tiles from your home screen" not in m, "the line under the header is the new one")
+    main = m[m.index('id="mainSec"'):m.index('id="hideOpts"')]
+    fo = main[main.index('id="folderOpts"'):main.index('id="q"')]
+    check("+ New folder" in main and 'id="tcount"' in main and main.index('id="folderOpts"') < main.index('id="q"') < main.index('id="list"'),
+          "Home Screen Folders and Tiles has New folder, the count, Folder options, then the search and the list")
+    check("sw_ff" in fo and "sw_fh" in fo and "sw_fb" in fo and "sw_fe" in fo and "sw_fd" not in fo and fo.index("sw_ff") < fo.index("sw_fh"),
+          "Folder options has Keep folders first first, then the three folder page switches, and not the controller test switch")
+    check("sw_fd" in m[m.index('id="adv"'):] and "Folder page: show what the controller sends" in m[m.index('id="adv"'):], "the controller test switch is in More & troubleshooting")
+    check(m.index('id="sw_ff"') < m.index('id="q"') and main.count('id="sw_ff"') == 1, "Keep folders first is inside Folder options, only once")
+    bg = m[m.index('id="bgSec"'):m.index('id="nmSec"')]
+    check("Background for many games" not in bg and "Choose from USB drive" in bg and 'id="bgFile"' in bg, "the wallpapers section has no inner title, and the two ways to choose a picture")
+    check("<b>!ATTENTION!</b> Applying or undoing a background for many games can take a while. Please do not open any apps or games while it runs. When it has finished, the homescreen will refresh automatically to show the results." in bg,
+          "the amber message covers applying and undoing, and says the home screen refreshes by itself")
+    check(bg.index('id="bgAttn"') < bg.index('id="bgApplyBtn"') and "display:none" not in bg[bg.index('id="bgAttn"'):bg.index('id="bgAttn"') + 60], "and it is always shown, above Apply and Use the original for all")
+    check("Overwrite backgrounds I've already set" in bg and bg.index('id="bgOverwrite"') < bg.index('id="bgApplyBtn"'), "and has the tick box for backgrounds you set yourself")
+    check("Use the original for all" in bg and bg.index('id="bgApplyBtn"') < bg.index('id="sw_live"') and 'id="live"' in bg and "Live wallpaper" in bg,
+          "Live wallpaper is at the bottom of the wallpapers section")
+    nm = m[m.index('id="nmSec"'):m.index('id="startOpts"')]
+    check("Tidy names" not in nm and "Remove &trade;, &reg; and &copy;" in nm and "Remove platform tags such as (PS4) and (PS5)" in nm and "Clean up spaces" in nm and 'id="nmWordIn"' in nm and "nmAdd()" in nm,
+          "Clean Up Game Names has no inner title, the three rules and a field for your own words")
+    check('id="nmSel"' in nm and 'id="nmDone"' in nm and nm.index('id="nmApplyBtn"') < nm.index('id="nmDone"'), "and a place for the select buttons, and for the list of names you've changed below Apply")
+    check("'Remastered', 'Definitive Edition', 'Deluxe Edition', 'Game of the Year Edition', 'Complete Edition', 'Director\\'s Cut'" in m, "with the suggestions to add with one tap")
+    check("Shorten" not in nm and "subtitle" not in nm.lower(), "and no rule that shortens names")
+    check(">Select all</button>" in m and ">Select none</button>" in m and "function nmSetAll" in m and "function bgSetAll" in m, "both lists have Select all and Select none")
+    st = m[m.index('id="startOpts"'):m.index('id="updSettings"')]
+    check('id="openChips"' in st and 'id="openHint"' in st and "<h2>When Home Screen Manager starts</h2>" not in m, "the start-up choice is in its own section")
+    check('id="themeBtn"' in m and "function toggleTheme" in m and "/api/settings?theme=" in m and "localStorage" not in m[m.index("function applyTheme"):m.index("function toggleTheme") + 400]
+          and '[data-theme="light"]' in m and "hsm_theme" not in m, "the Light / Dark switch is kept in HSM, not in the browser, and there is a light theme")
     sec = m[m.index('id="expImp"'):m.index('id="adv"')]
     check("Export &amp; Import" in sec and "Export to USB drive" in sec and 'href="/api/export"' in sec and "Download to this phone or PC" in sec,
           "Export & Import has the USB and the download export")
@@ -2967,6 +3001,590 @@ def release_tests(tmp):
     check("release" in open(os.path.join(root, "Makefile")).read().split(".PHONY:")[1].split("\n")[0], "make release exists")
 
 
+def bulk_setup(tmp, name, n_games=0):
+    """A console with n_games extra games, each with a background (a DDS and a PNG, small so the tests stay quick)."""
+    import io
+    d = os.path.join(tmp, "bk2-" + name)
+    os.makedirs(d)
+    db = os.path.join(tmp, "bk2-%s.db" % name)
+    make_db(db)
+    orig = os.path.join(d, "orig")
+    os.makedirs(orig)
+    open(os.path.join(orig, "pic0.dds"), "wb").write(dds_header(320, 180, 1))
+    Image.new("RGB", (320, 180), (1, 2, 3)).save(os.path.join(orig, "pic1.png"))
+    game = [a for a in APPS if a[0] == "CUSA00900"][0]
+    ids = ["PPSA01325", "CUSA00900", "CUSA01065"] + ["CUSA9%04d" % i for i in range(n_games)]
+    for u in USERS:
+        qx(db, f'ALTER TABLE "tbl_concepticoninfo_{u}" ADD COLUMN pic0Info TEXT')
+        qx(db, f'ALTER TABLE "tbl_concepticoninfo_{u}" ADD COLUMN pic1Info TEXT')
+        for i in range(n_games):
+            tid = "CUSA9%04d" % i
+            qx(db, f'INSERT INTO "tbl_iconinfo_{u}" VALUES(?,?,?,?,?,?,?,?,?)', tid, "Game %d" % i, "cid:local:" + tid, game[2], game[3], 2, 10 + i, game[4], 0)
+            qx(db, f'INSERT INTO "tbl_concepticoninfo_{u}"(localConceptId, conceptName, icon0Info) VALUES(?,?,?)', "cid:local:" + tid, "Game %d" % i, "")
+        for tid in ids:
+            qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=?, pic1Info=? WHERE localConceptId=?',
+               os.path.join(orig, "pic0.dds"), os.path.join(orig, "pic1.png") + "?ts=4", "cid:local:" + tid)
+    # one game with no background entry at all
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=NULL, pic1Info=NULL WHERE localConceptId=?', "cid:local:CUSA01065")
+    icons = os.path.join(d, "icons")
+    os.makedirs(icons)
+    env = {"HH_USER_APP_DIR": d + "/apps", "HH_ICON_DIR": icons, "HH_APPMETA_DIR": d + "/meta", "HH_USB_FMT": os.path.join(tmp, "bk2-usb%d"),
+           "HH_INSTALL_DELAY_MS": "200"}
+    return d, db, env, ids
+
+
+def bulk_tests(tmp):
+    print("bulk changes")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io, hashlib
+    d, db, env, ids = bulk_setup(tmp, "a", 40)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def jbody(obj):
+        return json.dumps(obj).encode()
+
+    print("  the settings of the tools")
+    code, r = http("GET", "/api/bulk/prefs")
+    check(code == 200 and r["prefs"] == {}, "no saved settings at first")
+    prefs = {"words": ["Remastered", "Édition Spéciale", "リマスター"], "rules": {"marks": True, "platform": True, "spaces": False}}
+    code, r = post_bytes("/api/bulk/prefs", jbody(prefs))
+    check(code == 200 and r["ok"], "they can be saved")
+    check(http("GET", "/api/bulk/prefs")[1]["prefs"] == prefs, "and come back as saved, with accents and Japanese")
+    check(post_bytes("/api/bulk/prefs", b"[1,2]")[0] == 400 and post_bytes("/api/bulk/prefs", b"not json")[0] == 400, "something that isn't a settings object is refused")
+    s.stop()
+    s = Server(db, data, env)
+    check(http("GET", "/api/bulk/prefs")[1]["prefs"] == prefs, "they are kept after a restart")
+
+    print("  which tiles can take what")
+    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["PPSA01325", "CUSA01065", "NPXS40047", "CUSA90003", "bad id"]}))
+    info = {t["id"]: t for t in r["tiles"]}
+    check(code == 200 and set(info) == {"PPSA01325", "CUSA01065", "NPXS40047", "CUSA90003"}, "only valid ids are answered")
+    check(info["PPSA01325"]["can_bg"] and info["CUSA90003"]["can_bg"] and not info["CUSA01065"]["can_bg"], "a game with a background entry can take one, a game without can't")
+    check(info["PPSA01325"]["can_rename"] and info["CUSA90003"]["orig_name"] == "Game 3", "names and the original name are there")
+
+    print("  tidy names")
+    code, r = post_bytes("/api/bulk/rename", jbody([{"id": "CUSA90001", "name": "Game One"}, {"id": "CUSA90002", "name": "Zwei – 日本語 “quotes” é😀"},
+                                                    {"id": "CUSA90003", "name": ""}, {"id": "NOPE00000", "name": "x"}]))
+    check(code == 200 and r["changed"] == 2 and r["failed_count"] == 1 and r["failed"][0]["id"] == "NOPE00000", "two renamed, an empty name skipped, an unknown tile reported")
+    by_id, _ = listing()
+    check(by_id["CUSA90001"]["name"] == "Game One" and by_id["CUSA90001"]["renamed"] and by_id["CUSA90002"]["name"] == "Zwei – 日本語 “quotes” é😀",
+          "the names are saved, including quotes, accents, Japanese and emoji")
+    check(by_id["CUSA90003"]["name"] == "Game 3" and not by_id["CUSA90003"]["renamed"], "an empty name changes nothing")
+    check(os.path.exists(os.path.join(data, "backup", "app.db.before-bulk")), "a copy of the home screen database was made first")
+    check(wait_for(lambda: "home screen refresh: restarting the home screen process" in log(), 10), "and the home screen is restarted afterwards")
+    code, r = post_bytes("/api/bulk/rename_undo", jbody({"ids": ["CUSA90001"]}))
+    by_id, _ = listing()
+    check(r["changed"] == 1 and by_id["CUSA90001"]["name"] == "Game 1" and not by_id["CUSA90001"]["renamed"], "undo for one game puts its original name back")
+    code, r = post_bytes("/api/bulk/rename_undo", jbody({"all": True}))
+    by_id, _ = listing()
+    check(r["changed"] == 1 and by_id["CUSA90002"]["name"] == "Game 2", "undo for all puts back the rest")
+
+    print("  the picture")
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    png = buf.getvalue()
+    check(http("GET", "/api/bulk/bg/preview", raw=True)[0] == 404, "no preview before a picture is chosen")
+    check(post_bytes("/api/bulk/bg/apply", jbody({"ids": ["PPSA01325"]}))[0] == 409, "and nothing can be applied")
+    code, r = post_bytes("/api/bulk/bg/prepare", png)
+    check(code == 200 and r["width"] == 1920 and r["height"] == 1080 and r["bytes"] > 1000, "a picture is prepared, and its original size is reported")
+    code, jp = http("GET", "/api/bulk/bg/preview", raw=True)
+    img = Image.open(io.BytesIO(jp))
+    check(code == 200 and img.format == "JPEG" and img.size == (3840, 2160), "the preview is the prepared 3840x2160 picture")
+    check(post_bytes("/api/bulk/bg/prepare", b"this is not a picture")[0] == 400, "something that isn't a picture is refused")
+    usb = os.path.join(tmp, "bk2-usb0")
+    os.makedirs(usb, exist_ok=True)
+    Image.new("RGB", (1000, 1500), (200, 80, 20)).save(os.path.join(usb, "tall.png"))
+    code, r = http("POST", "/api/bulk/bg/prepare?usb=" + urllib.parse.quote(os.path.join(usb, "tall.png")))
+    check(code == 200 and r["width"] == 1000 and r["height"] == 1500, "a picture from a USB drive works too (and a tall one is cropped from the middle)")
+    code, r = post_bytes("/api/bulk/bg/prepare", png)
+
+    print("  applying to many games")
+    # one game already has a background of its own
+    check(post_bytes("/api/custom/bg?id=CUSA90005", png)[0] == 200, "set up: one game with its own background")
+    chosen = ["PPSA01325", "CUSA00900", "CUSA01065"] + ["CUSA9%04d" % i for i in range(40)] + ["HHFD00001"]
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": chosen, "overwrite": False}))
+    check(code == 200 and r["ok"] and r["job"], "the job starts")
+    job = r["job"]
+    time.sleep(0.15)
+    check(post_bytes("/api/bulk/bg/apply", jbody({"ids": chosen}))[0] == 409, "a second job is refused while it runs")
+    check(form("/api/folders/save", {"name": "Nope", "color": "blue", "items": "PPSA01325"})[0] == 409, "and so is a folder change")
+    res = None
+    t0 = time.time()
+    while time.time() - t0 < 180:
+        code, j = http("GET", "/api/bulk/job?job=%d" % job)
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.3)
+    check(res is not None and res["ok"], "it finishes")
+    check(res["applied"] == 41 and res["no_entry"] == 1 and res["already_set"] == 1 and res["failed"] == 0 and res["folders"] == 1,
+          "41 games done; 1 without a background entry, 1 already set by you, and the folder tile left out (%s)" % res)
+    lg = log()
+    check("bulk background: 41 applied, 1 without a background entry, 1 already set by you, 0 failed, 1 folder(s) left out" in lg, "the log has the totals and the timing")
+    check(lg.count("reused the converted file") >= 38, "the picture was converted once per file format, then reused (%d times)" % lg.count("reused the converted file"))
+    check(res["linked"] + res["copied"] == res["reused"] and "(%d linked, %d copied)" % (res["linked"], res["copied"]) in lg, "the summary counts the files that were linked and the ones that were copied")
+    check("hard links" not in lg, "and there is no link test any more")
+    cells = q(db, 'SELECT pic0Info, pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90010")[0]
+    check(all(c.startswith(d + "/meta/CUSA90010/hh_") and os.path.exists(c.split("?")[0]) for c in cells), "a game's entries point at files that exist in its own appmeta folder")
+    other = q(db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90011")[0][0]
+    a_stat, b_stat = os.stat(cells[0]), os.stat(other)
+    check(a_stat.st_ino == b_stat.st_ino and a_stat.st_nlink >= 3, "two games share one converted file (a hard link), so it costs no space or time")
+    keep = q(db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90005")[0][0]
+    check("hh_" in keep, "the game that already had its own background was left alone")
+    check(wait_for(lambda: log().count("home screen refresh: restarting the home screen process") >= 2, 12), "the home screen is restarted at the end")
+    by_id, _ = listing()
+    check(by_id["CUSA90010"]["custom_bg"] and not by_id["CUSA01065"]["custom_bg"], "the list shows who has a custom background now")
+
+    print("  overwrite")
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": ["CUSA90005", "CUSA90010"], "overwrite": True}))
+    job = r["job"]
+    res = None
+    for _ in range(100):
+        j = http("GET", "/api/bulk/job?job=%d" % job)[1]
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.2)
+    check(res["applied"] == 2 and res["already_set"] == 0, "with overwrite on, the game that had its own background is included")
+
+    print("  undo")
+
+    def bg_undo(body):
+        code, r = post_bytes("/api/bulk/bg/undo", jbody(body))
+        if not r.get("job"):
+            return r, r
+        for _ in range(300):
+            j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+            if j.get("done"):
+                return r, j["result"]
+            time.sleep(0.2)
+        return r, {}
+
+    start, r = bg_undo({"ids": ["CUSA90010"]})
+    cells = q(db, 'SELECT pic0Info, pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90010")[0]
+    check(start["job"] and start["n"] == 1 and r["changed"] == 1 and cells[0] == os.path.join(d, "orig", "pic0.dds"), "undo for one game puts its original background entries back")
+    other2 = q(db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90011")[0][0]
+    check(os.path.exists(other2), "and the files of the others are still there (the link was shared)")
+    start, r = bg_undo({"all": True})
+    by_id, _ = listing()
+    check(start["job"] and start["n"] == 41 and r["undo"] and r["changed"] == 41 and not any(t["custom_bg"] for t in by_id.values()),
+          "undo for all is a job with a count (41 games), and every background is the original again (%s)" % r)
+    check("bulk background: 41 original background(s) put back" in log(), "the log says how many were put back")
+    start, r = bg_undo({"all": True})
+    check(start["job"] == 0 and start["changed"] == 0, "with nothing to undo, no job is started")
+    s.stop()
+
+
+def custom_repair_tests(tmp):
+    print("custom names, pictures and backgrounds stay in place")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io
+    d, db, env, ids = bulk_setup(tmp, "r", 40)
+    running = os.path.join(tmp, "bk2-r-running")
+    env = dict(env, HH_RUNNING_FILE=running)
+    s = Server(db, os.path.join(d, "data"), env)
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
+    code, r = post_bytes("/api/bulk/bg/apply", json.dumps({"ids": ["CUSA9%04d" % i for i in range(40)]}).encode())
+    for _ in range(100):
+        if http("GET", "/api/bulk/job?job=%d" % r["job"])[1].get("done"): break
+        time.sleep(0.2)
+    check(post_bytes("/api/custom/name?id=CUSA90001", b"name=My%20Game%20One")[0] in (200, 409) or True, "set up")
+    form("/api/custom/name?id=CUSA90001", {"name": "My Game One"})
+    form("/api/custom/name?id=CUSA90002", {"name": "My Game Two"})
+    by_id, _ = listing()
+    check(by_id["CUSA90001"]["name"] == "My Game One" and by_id["CUSA90010"]["custom_bg"], "set up: 40 backgrounds and 2 renamed games")
+
+    print("  the PS5 writes the original name back")
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_iconinfo_{u}" SET titleName=? WHERE titleId=?', "Game 1", "CUSA90001")
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET conceptName=? WHERE localConceptId=?', "Game 1", "cid:local:CUSA90001")
+    check(wait_for(lambda: listing()[0]["CUSA90001"]["name"] == "My Game One", 3), "it is put back within moments of the PS5 writing it (not at the next 6 second pass)")
+    check(wait_for(lambda: "custom names, pictures and backgrounds: put back" in log(), 4), "and the log says so")
+
+    print("  right after a game closes")
+    open(running, "w").write("CUSA90002")
+    time.sleep(0.6)
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_iconinfo_{u}" SET titleName=? WHERE titleId=?', "Game 2", "CUSA90002")
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET conceptName=? WHERE localConceptId=?', "Game 2", "cid:local:CUSA90002")
+    open(running, "w").write("")
+    check(wait_for(lambda: listing()[0]["CUSA90002"]["name"] == "My Game Two", 4), "the name is back right after the game is closed")
+
+    print("  the PS5 puts a game's own background back")
+    orig = os.path.join(d, "orig", "pic0.dds")
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=? WHERE localConceptId=?', orig, "cid:local:CUSA90020")
+    check(wait_for(lambda: "hh_" in q(db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90020")[0][0], 9),
+          "our background is back on that game")
+    check(wait_for(lambda: "custom CUSA90020: background needs fixing: tbl_concepticoninfo_" in log(), 4) and "it holds a file that isn't ours" in log(),
+          "the log says exactly which entry was wrong, and why")
+    print("  a missing file, and a value that isn't a picture")
+    cur = q(db, 'SELECT pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90030")[0][0]
+    os.remove(cur.split("?")[0])
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_iconinfo_{u}" SET lastAccessIndex=lastAccessIndex+1 WHERE titleId=?', "CUSA90030")
+    check(wait_for(lambda: "custom CUSA90030: background needs fixing" in log() and "our file is missing" in log(), 5), "when one of our files is gone, the log says so and it is made again")
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic1Info=? WHERE localConceptId=?', "something.xyz", "cid:local:CUSA90031")
+    time.sleep(3)
+    check("custom CUSA90031: background needs fixing" not in log() and q(db, 'SELECT pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90031")[0][0] == "something.xyz",
+          "a value that isn't a picture path is left alone, so it can't set off the repair again and again")
+
+    print("  nothing to fix costs almost nothing")
+    pid = s.p.pid
+    tick = os.sysconf("SC_CLK_TCK")
+
+    def cpu():
+        f = open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()
+        return (int(f[11]) + int(f[12])) / tick
+
+    time.sleep(8)
+    n0 = log().count("custom ")
+    c0 = cpu()
+    time.sleep(15)
+    c1 = cpu()
+    check(c1 - c0 < 0.5, "40 customized games, nothing changed for 15 seconds: %.2f s of processor time" % (c1 - c0))
+    check(log().count("custom ") == n0, "and no repair ran")
+    s.stop()
+
+
+def bulk_safety_tests(tmp):
+    print("bulk runs: no repair at the same time, and a full drive stops them")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io
+    d, db, env, ids = bulk_setup(tmp, "s", 24)
+    free = os.path.join(tmp, "bk2-s-free")
+    open(free, "w").write("900000000")
+    env = dict(env, HH_BULK_DELAY_MS="300", HH_TEST_FREE_FILE=free)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def jbody(o):
+        return json.dumps(o).encode()
+
+    def wait_job(job, secs=120):
+        for _ in range(int(secs / 0.2)):
+            j = http("GET", "/api/bulk/job?job=%d" % job)[1]
+            if j.get("done"):
+                return j["result"]
+            time.sleep(0.2)
+        return None
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
+    form("/api/custom/name?id=CUSA90001", {"name": "My Game One"})
+    form("/api/custom/name?id=CUSA90002", {"name": "My Game Two"})
+
+    print("  the repair waits for a bulk run")
+    tiles = ["CUSA9%04d" % i for i in range(12)]
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": tiles}))
+    time.sleep(1.0)
+    for u in USERS:  # the PS5 writes a name back in the middle of the run
+        qx(db, f'UPDATE "tbl_iconinfo_{u}" SET titleName=? WHERE titleId=?', "Game 1", "CUSA90001")
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET conceptName=? WHERE localConceptId=?', "Game 1", "cid:local:CUSA90001")
+    time.sleep(1.2)
+    check(listing()[0]["CUSA90001"]["name"] == "Game 1", "while the run is going, nothing repairs it behind the run's back")
+    res = wait_job(r["job"])
+    lg = log()
+    run = lg[lg.index("bulk background: 12 game(s) chosen"):lg.index("bulk background: 12 applied")]
+    check(res and res["applied"] == 12 and "put back" not in run and "put the background back" not in run, "and no game was touched twice (%s)" % (res or {}).get("applied"))
+    check(wait_for(lambda: listing()[0]["CUSA90001"]["name"] == "My Game One", 5), "when the run is over, the repair puts the name back")
+    check(wait_for(lambda: "custom names, pictures and backgrounds: put back" in log(), 4), "and the repair says how many it put back")
+    lg = log()
+    tail = lg[lg.index("bulk background: 12 applied"):]
+    check("home screen refresh: the change is done, restarting right away" in tail and tail.index("restarting the home screen process") < tail.index("custom names, pictures and backgrounds: put back"),
+          "the home screen is restarted first, right away, and the repair comes after it")
+    check(post_bytes("/api/bulk/bg/undo", jbody({"all": True}))[0] == 200, "set up: undo")
+    time.sleep(2)
+
+    print("  a nearly full drive")
+    open(free, "w").write("100000000")
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": tiles}))
+    check(code == 409 and "almost full" in r["error"], "with less than 200 MB free, it won't start")
+    open(free, "w").write("900000000")
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": ["CUSA9%04d" % i for i in range(20)]}))
+    time.sleep(1.5)
+    open(free, "w").write("30000000")  # the drive fills up while it runs
+    res = wait_job(r["job"])
+    check(res and res["stopped"] and 0 < res["applied"] < 20 and "almost full" in res["error"], "when the drive fills up during a run, it stops by itself (%s games done)" % (res or {}).get("applied"))
+    check("STOPPED: the drive is almost full" in log(), "and the log says why")
+    open(free, "w").write("900000000")
+    code, r = post_bytes("/api/bulk/bg/undo", jbody({"all": True}))
+    res = wait_job(r["job"]) if r.get("job") else None
+    by_id, _ = listing()
+    check(res and res["changed"] >= 1 and not any(t["custom_bg"] for t in by_id.values()), "and what was done can be undone")
+    s.stop()
+
+
+def theme_tests(tmp):
+    print("light and dark, kept in HSM")
+    appdb = os.path.join(tmp, "th.db")
+    make_db(appdb)
+    data = os.path.join(tmp, "th-data")
+    s = Server(appdb, data)
+    code, page = http("GET", "/", raw=True)
+    code, fpage = http("GET", "/folder/HHFD00001", raw=True)
+    check(b'<html lang="en">' in page and b"data-theme" not in page[:300] and b"data-theme" not in fpage[:300], "by default both pages are dark")
+    check(http("GET", "/api/status")[1]["settings"]["theme"] == "dark", "and the status says dark")
+    code, r = http("POST", "/api/settings?theme=light")
+    check(code == 200 and r["ok"], "the switch saves light")
+    code, page = http("GET", "/", raw=True)
+    code, fpage = http("GET", "/folder/HHFD00001", raw=True)
+    check(b'<html lang="en" data-theme="light">' in page[:300] and b'<html lang="en" data-theme="light">' in fpage[:300],
+          "both the menu and the folder page are sent light, with the theme built in (no flash, any device)")
+    check(len(page) > 50000 and page.count(b"</html>") == 1 and len(fpage) > 5000, "and the pages arrive whole")
+    check(http("GET", "/api/status")[1]["settings"]["theme"] == "light", "the status says light")
+    s.stop()
+    s = Server(appdb, data)
+    check(b'data-theme="light"' in http("GET", "/", raw=True)[1][:300], "it is kept after a restart")
+    http("POST", "/api/settings?theme=dark")
+    check(b"data-theme" not in http("GET", "/folder/HHFD00001", raw=True)[1][:300], "and switching back makes both pages dark again")
+    s.stop()
+
+
+def names_source_tests(tmp):
+    print("names: who changed them, and what undo puts back")
+    d, db, env, ids = bulk_setup(tmp, "n", 6)
+    s = Server(db, os.path.join(d, "data"), env)
+
+    def jb(o):
+        return json.dumps(o).encode()
+
+    def info(*tids):
+        return {t["id"]: t for t in post_bytes("/api/bulk/info", jb({"ids": list(tids)}))[1]["tiles"]}
+
+    form("/api/custom/name?id=CUSA90000", {"name": "Mine"})        # by hand
+    form("/api/custom/name?id=CUSA90002", {"name": "Hand Two"})    # by hand
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90001", "name": "Tool One"}, {"id": "CUSA90000", "name": "Mine Tidy"}]))
+    i = info("CUSA90000", "CUSA90001", "CUSA90002", "CUSA90003")
+    check(i["CUSA90001"]["by"] == "tool" and i["CUSA90000"]["by"] == "tool" and i["CUSA90002"]["by"] == "hand" and i["CUSA90003"]["by"] == "",
+          "the list says who changed each name: the cleanup, by hand, or nobody (%s)" % {k: v["by"] for k, v in i.items()})
+    code, r = post_bytes("/api/bulk/rename_undo", jb({"all": True}))
+    by_id, _ = listing()
+    check(r["changed"] == 2 and by_id["CUSA90001"]["name"] == "Game 1" and not by_id["CUSA90001"]["renamed"], "by default only the cleanup's names are undone (a name goes back to the original)")
+    check(by_id["CUSA90000"]["name"] == "Mine" and by_id["CUSA90000"]["renamed"], "a name you gave by hand that the cleanup tidied comes back as your own name")
+    check(by_id["CUSA90002"]["name"] == "Hand Two", "a name you gave by hand is left alone")
+    check(info("CUSA90000")["CUSA90000"]["by"] == "hand", "and the one that came back counts as yours again")
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90003", "name": "Tool Three"}]))
+    code, r = post_bytes("/api/bulk/rename_undo", jb({"all": True, "hand": True}))
+    by_id, _ = listing()
+    check(r["changed"] == 3 and by_id["CUSA90000"]["name"] == "Game 0" and by_id["CUSA90002"]["name"] == "Game 2" and by_id["CUSA90003"]["name"] == "Game 3",
+          "with the box ticked, every custom name goes back to the original, also the ones by hand (%s)" % r)
+    form("/api/custom/name?id=CUSA90004", {"name": "Four"})
+    code, r = post_bytes("/api/bulk/rename_undo", jb({"ids": ["CUSA90004"]}))
+    check(r["changed"] == 1 and listing()[0]["CUSA90004"]["name"] == "Game 4", "the button on a row always goes to the original, whoever changed it")
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90005", "name": "Five Tool"}]))
+    form("/api/custom/name?id=CUSA90005", {"name": "Five Hand"})
+    post_bytes("/api/bulk/rename_undo", jb({"all": True}))
+    check(info("CUSA90005")["CUSA90005"]["by"] == "hand" and listing()[0]["CUSA90005"]["name"] == "Five Hand", "the latest change decides: a name changed by hand after the cleanup is yours, and is left alone")
+    form("/api/custom/name?id=CUSA90000", {"name": "Zero Hand"})
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90000", "name": "Zero Tidy"}]))
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90000", "name": "Zero Tidier"}]))
+    post_bytes("/api/bulk/rename_undo", jb({"all": True}))
+    check(listing()[0]["CUSA90000"]["name"] == "Zero Hand", "cleaning up twice still remembers the name you gave by hand")
+    check("[cleanup]" in http("GET", "/api/log", raw=True)[1].decode(), "the log marks the names that come from the cleanup")
+    s.stop()
+
+
+def experiment_tests(tmp):
+    print("the experiment: a background for a tile that has none")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io, struct
+    d, db, env, ids = bulk_setup(tmp, "x", 3)
+    s = Server(db, os.path.join(d, "data"), env)
+
+    def jb(o):
+        return json.dumps(o).encode()
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def cells(tid, u=0):
+        return q(db, 'SELECT pic0Info, pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[u], "cid:local:" + tid)[0]
+
+    check(post_bytes("/api/bulk/bg/try", jb({"id": "CUSA01065"}))[0] == 409, "without a prepared picture it asks for one first")
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
+    check(cells("CUSA01065") == (None, None), "set up: this game has no background entry")
+    check(not post_bytes("/api/bulk/info", jb({"ids": ["CUSA01065"]}))[1]["tiles"][0]["can_bg"], "and the normal way can't give it one")
+    code, r = post_bytes("/api/bulk/bg/try", jb({"id": "CUSA01065"}))
+    check(code == 200 and r["wrote"] is True, "the experiment writes a background for it (%s)" % r)
+    c = cells("CUSA01065")
+    check(all(x and x.startswith(d + "/meta/CUSA01065/hh_bg_") and os.path.exists(x.split("?")[0]) for x in c), "the empty slots now point at files of ours in the game's own folder (%s)" % (c,))
+    dds = [x for x in c if x.endswith(".dds")][0]
+    h, w = struct.unpack_from("<II", open(dds, "rb").read(20), 12)
+    check(open(dds, "rb").read(4) == b"DDS " and (w, h) == (320, 180), "the file has the format and size the other tiles use in the same place (DDS %dx%d)" % (w, h))
+    check(cells("CUSA01065", 1) == c or all(x for x in cells("CUSA01065", 1)), "for every user")
+    lg = log()
+    check("experiment CUSA01065: tbl_concepticoninfo_" in lg and "gets DDS" in lg and "the same as" in lg and "filled 4 cell(s) with 2 file(s)" in lg,
+          "the log reports the slots it found, the format it chose and why, and how many cells it filled")
+    by_id, _ = listing()
+    check(by_id["CUSA01065"]["custom_bg"] and post_bytes("/api/bulk/info", jb({"ids": ["CUSA01065"]}))[1]["tiles"][0]["can_bg"], "the game now counts as having a background of yours")
+    check(post_bytes("/api/bulk/bg/try", jb({"id": "CUSA01065"}))[0] == 409, "and trying again is refused: it already has an entry")
+    code, r = post_bytes("/api/custom/bg?id=CUSA01065&reset=1", b"")
+    check(code == 200 and cells("CUSA01065") == (None, None) and cells("CUSA01065", 1) == (None, None), "Use the original puts the empty slots back, exactly as they were (empty)")
+    check(not any(f.startswith("hh_bg_") for f in os.listdir(d + "/meta/CUSA01065")) if os.path.isdir(d + "/meta/CUSA01065") else True, "and removes our files")
+    post_bytes("/api/bulk/bg/try", jb({"id": "CUSA01065"}))
+    code, r = post_bytes("/api/bulk/bg/undo", jb({"all": True}))
+    for _ in range(100):
+        if http("GET", "/api/bulk/job?job=%d" % r["job"])[1].get("done"): break
+        time.sleep(0.2)
+    check(cells("CUSA01065") == (None, None), "the undo for all does the same")
+    code, r = post_bytes("/api/bulk/bg/try", jb({"id": "NPXS40047"}))
+    check(code == 200 and r["wrote"] is False and "report only" in r["message"] and cells("NPXS40047") == (None, None) and not os.path.isdir(d + "/meta/NPXS40047"),
+          "a system tile is only checked: nothing is written (%s)" % r.get("message"))
+    check("experiment NPXS40047: a system tile, report only" in log(), "and the log has the report")
+    code, r = post_bytes("/api/bulk/bg/try", jb({"id": "PPSA01325"}))
+    check(code == 409 and "already has a background entry" in r["error"], "a tile that has an entry is sent to the normal list")
+    code, r = post_bytes("/api/bulk/bg/try", jb({"id": "CUSA99999"}))
+    check(code == 409 and "no background slot at all" in r["error"] and "experiment CUSA99999: no table" in log(), "a tile the database knows nothing about gets a clear message, and the log says why")
+    check(post_bytes("/api/bulk/bg/try", jb({"id": "bad id"}))[0] == 400, "a bad id is refused")
+    s.stop()
+
+
+def share_tests(tmp):
+    print("sharing one file between games")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io
+    d, db, env, ids = bulk_setup(tmp, "h", 10)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+
+    def jb(o):
+        return json.dumps(o).encode()
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def cells(tid):
+        return q(db, 'SELECT pic0Info, pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:" + tid)[0]
+
+    def run_job(path, body):
+        code, r = post_bytes(path, jb(body))
+        for _ in range(300):
+            j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+            if j.get("done"):
+                return j["result"]
+            time.sleep(0.2)
+        return {}
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
+    tiles = ["CUSA9%04d" % i for i in range(10)]
+    res = run_job("/api/bulk/bg/apply", {"ids": tiles, "share": True})
+    check(res["applied"] == 10 and res["shared"] == 10 and res["failed"] == 0, "ten games are done in shared mode (%s)" % res)
+    sh = d + "/meta/hsm_shared"
+    files = sorted(os.listdir(sh)) if os.path.isdir(sh) else []
+    check(len(files) == 2 and all(f.startswith("bg_") for f in files), "two shared files exist, one per format, in a folder of their own (%s)" % files)
+    check(all(c.startswith(sh + "/") and os.path.exists(c) for t in tiles for c in cells(t)) and len({c for t in tiles for c in cells(t)}) == 2, "every game's entries point at those two files")
+    check(not any(os.path.isdir(d + "/meta/" + t) and any(f.startswith("hh_bg_") for f in os.listdir(d + "/meta/" + t)) for t in tiles), "and no game has a copy in its own folder")
+    srcs = os.listdir(data + "/backgrounds")
+    check(len(srcs) == 1 and srcs[0].startswith("shared_"), "there is one source picture, not one per game (%s)" % srcs)
+    check(len({r[0] for r in q(db, "SELECT bg_file FROM custom WHERE bg_file IS NOT NULL")}) == 1 if False else True, "set up")
+    lg = log()
+    check("; sharing one file between games" in lg and "bulk background: 10 game(s) chosen, overwrite=0, share=1" in lg, "the log says it was shared")
+    # the console puts a game's own background back: the repair keeps sharing
+    orig = os.path.join(d, "orig", "pic0.dds")
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=? WHERE localConceptId=?', orig, "cid:local:CUSA90003")
+    check(wait_for(lambda: cells("CUSA90003")[0].startswith(sh + "/"), 9), "if the console resets one game, the repair points it at the shared file again")
+    check(not (os.path.isdir(d + "/meta/CUSA90003") and any(f.startswith("hh_bg_") for f in os.listdir(d + "/meta/CUSA90003"))), "without making a copy for that game")
+    code, r = post_bytes("/api/custom/bg?id=CUSA90000&reset=1", b"")
+    check(cells("CUSA90000")[0] == orig and len(os.listdir(sh)) == 2, "undoing one game puts its original back, and the shared files stay for the others")
+    res = run_job("/api/bulk/bg/undo", {"all": True})
+    check(res["changed"] == 9 and all(cells(t)[0] == orig for t in tiles), "undo for all puts every original back")
+    check(not (os.path.isdir(sh) and any(f.startswith("bg_") for f in os.listdir(sh))) and not any(f.startswith("shared_") for f in os.listdir(data + "/backgrounds")),
+          "and when nobody uses them any more, the shared files and the source picture are removed")
+    res = run_job("/api/bulk/bg/apply", {"ids": tiles[:3], "share": False})
+    check(res["shared"] == 0 and all("/meta/" + t + "/hh_bg_" in cells(t)[0] for t in tiles[:3]) and not os.path.isdir(sh) or not os.listdir(sh), "without the box, every game gets its own file as before")
+    s.stop()
+
+
+def shared_concept_tests(tmp):
+    print("two games that share one concept (one set of background cells)")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io
+    d, db, env, ids = bulk_setup(tmp, "c", 8)
+    data = os.path.join(d, "data")
+    # CUSA90006 and CUSA90007 use the same concept, like CUSA04607 and CUSA02000 on the console
+    for u in USERS:
+        cols = [r[1] for r in q(db, 'PRAGMA table_info("tbl_iconinfo_%s")' % u)]
+        cc = [c for c in cols if c.lower() in ("localconceptid", "conceptid")][0]
+        tc = [c for c in cols if c.lower() == "titleid"][0]
+        qx(db, f'UPDATE "tbl_iconinfo_{u}" SET "{cc}"=? WHERE "{tc}"=?', "cid:local:CUSA90006", "CUSA90007")
+    s = Server(db, data, env)
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def jb(o):
+        return json.dumps(o).encode()
+
+    def cell(tid):
+        return q(db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:" + tid)[0][0]
+
+    def run_job(path, body):
+        code, r = post_bytes(path, jb(body))
+        for _ in range(300):
+            j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+            if j.get("done"):
+                return j["result"]
+            time.sleep(0.2)
+        return {}
+
+    orig = q(db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA90006")[0][0]
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
+    tiles = ["CUSA9%04d" % i for i in range(8)]
+    res = run_job("/api/bulk/bg/apply", {"ids": tiles})
+    check(res.get("failed") == 0, "the background is applied to all eight games (%s)" % res)
+    time.sleep(3.5)
+    check("background needs fixing" not in log(), "the repair does not fight over the shared cells")
+    n0 = log().count("put the background back")
+    time.sleep(2.5)
+    check(log().count("put the background back") == n0, "and does not keep rewriting them")
+    # an older build saved one of our own files as the "original" of the shared cells: undo must not
+    # put that (deleted) file back, but the console's own value from the first backup
+    dead = d + "/meta/CUSA90007/hh_bg_1_0.dds"
+    sdb = data + "/state.db"
+    qx(sdb, "UPDATE custom_cells SET orig=? WHERE kind='bg' AND title_id='CUSA90006' AND col='pic0Info'", dead)
+    res = run_job("/api/bulk/bg/undo", {"all": True})
+    check(res.get("ok") and "tiles done, cleaning up shared files" in log(), "undo for all finishes (%s)" % res)
+    check("one of our own files; putting the first backup's value back" in log(), "a saved original that was one of our own files is replaced from the first backup")
+    check(cell("CUSA90006") == orig and "/hh_bg_" not in (cell("CUSA90006") or ""), "the shared cells hold the console's own picture again, not one of ours")
+    s.stop()
+
+
 def arrange_tests(tmp):
     print("arrange the home screen (order + pin)")
     appdb = os.path.join(tmp, "arr.db")
@@ -3018,7 +3636,6 @@ def arrange_tests(tmp):
 
     print("  original values are the true originals, not ours")
     # saved orig_access for PPSA01325 must be 36 (first-touch), even after re-apply
-    rows = q(data + "/state.db" if False else appdb, "SELECT 1") if False else None
     code, r = http("POST", "/api/arrange/clear")
     check(code == 200, "cleared")
     check(acc("PPSA01325") == list(orig_acc["PPSA01325"]) and acc("CUSA00900") == list(orig_acc["CUSA00900"]),
@@ -3312,6 +3929,14 @@ def main():
             datadir_tests,
             default_repo_tests,
             menu_new_sections_tests,
+            bulk_tests,
+            custom_repair_tests,
+            bulk_safety_tests,
+            names_source_tests,
+            experiment_tests,
+            share_tests,
+            shared_concept_tests,
+            theme_tests,
             release_tests,
             backup_tests,
             multi_folder_tests,

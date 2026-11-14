@@ -55,6 +55,29 @@ int  custom_get_json(hh_t *h, const char *tid, strbuf_t *sb);
  * restored the originals. *fixed = number of values changed. */
 int  custom_reapply(hh_t *h, int *fixed);
 
+/* Bulk changes (several tiles at once). Between begin and end, the picture is converted once for
+ * each file format and the result is linked into every tile. */
+void custom_gc_defer(int on);       /* 1: do not clean shared files after every tile (bulk undo) */
+void custom_shared_gc(hh_t *h);     /* remove shared files no tile uses any more */
+void custom_bulk_begin(int share); /* share: one converted file for all the games (experimental) */
+void custom_bulk_end(long *encode_ms, long *reused, long *linked, long *copied, long *shared);
+int  custom_set_bg_prepared(hh_t *h, const char *tid, const unsigned char *jpg, size_t len, const char *prepared_path);
+int  custom_can_bg(hh_t *h, const char *tid);
+void custom_bulk_info_json(hh_t *h, char (*ids)[16], int n, strbuf_t *sb);
+/* Number of tiles with a custom name, picture or background. */
+int  custom_rows(hh_t *h);
+
 /* Deletes Home Screen Manager's picture files (before the original database is
  * restored, which brings back the original names and pictures). */
 void custom_forget_all(hh_t *h);
+int  custom_has_bg(hh_t *h, const char *tid);
+int  custom_renamed_ids(hh_t *h, char (*ids)[16], int max);
+int  custom_bg_ids(hh_t *h, char (*ids)[16], int max);
+
+/* A name from Clean Up Game Names (remembers that it did not come from the tile editor). */
+int  custom_set_name_tool(hh_t *h, const char *tid, const char *name);
+/* Puts a name back after a cleanup; names given by hand only when hand_too. 1 = changed, 0 = not, -1 = error. */
+int  custom_undo_names(hh_t *h, const char *tid, int hand_too);
+/* The experiment: fill the empty background slots of a tile that has none. write = 0 only reports.
+ * 0 = done, 1 = only a report was made, -1 = error (text in h->err). */
+int  custom_try_bg(hh_t *h, const char *tid, const unsigned char *jpg, size_t len, const char *prepared_path, int write);

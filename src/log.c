@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#define LOG_MAX (256 * 1024)
+#define LOG_MAX (1024 * 1024)
 
 static char g_path[300];
 static pthread_mutex_t g_mx = PTHREAD_MUTEX_INITIALIZER;

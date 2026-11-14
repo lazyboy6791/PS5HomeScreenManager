@@ -38,3 +38,6 @@ uint8_t *icon_load_cover(const unsigned char *data, size_t len, int w, int h);
 /* PNG (comp 3 = RGB, 4 = RGBA) and JPEG (from RGBA) encoders. 0 on success. */
 int  img_encode_png(const uint8_t *px, int w, int h, int comp, unsigned char **png, size_t *len);
 int  img_encode_jpg(const uint8_t *rgba, int w, int h, int quality, unsigned char **jpg, size_t *len);
+
+/* The width and height of a picture (PNG, JPEG, BMP, GIF, TGA). 0 on success. */
+int  icon_dims(const unsigned char *data, size_t len, int *w, int *h);
