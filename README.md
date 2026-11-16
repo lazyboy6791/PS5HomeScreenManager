@@ -31,7 +31,6 @@ Nothing is ever deleted. Hidden games still work, and every change can be undone
 | **Rename** | Give any tile the name you want. |
 | **Custom pictures** | Replace any tile's icon. Transparent PNGs work too. |
 | **Custom backgrounds** | Replace the big background shown when a tile is selected, for games, apps and folders. |
-| **Live wallpaper** | Play a video behind the home screen, powered by the built-in [LiveShell Engine](https://github.com/ZiZc3/LiveShell) by ZiZc3. |
 | **One home-screen list** | Your games, apps and folders in one list, in the same order as your home screen, grouped by tab. Hidden tiles sit greyed at the end. Folders appear automatically next to your games. |
 | **Reorder in place** | Use the ▲▼ arrows on any tile to move it earlier or later on its tab, then **Save order**. Home Screen Manager re-applies your order each time it runs. |
 | **Move between tabs** | Open **Edit** on any tile or folder and move it to the other tab. A folder carries everything inside it; take a single app out of a folder to move it on its own. |
@@ -74,7 +73,7 @@ The menu is one page of sections. Every section is closed when the page opens, s
 
 1. **Home Screen Folders and Tiles**: your folders and tiles, with the **Folder options** inside it.
 2. **Tile hiding options**
-3. **Change and Edit Wallpapers**, with Live wallpaper at the bottom.
+3. **Change and Edit Wallpapers**
 4. **Clean Up Game Names**
 5. **Home Screen Manager Start-Up Options**
 6. **Update settings**
@@ -89,11 +88,11 @@ A folder is one tile on the **Games** or **Media** tab. Selecting it opens a pag
 
 - Games in a folder are hidden from the home screen. A game can be in more than one folder, and it stays hidden while it is in any of them. Take it out of its last folder and it comes back, unless you had hidden it before.
 - Give the folder a colour, or choose the chequered swatch for **no colour** (see-through).
-- Use the four games as the folder picture, or choose your own picture and background.
+- Use the games as the folder picture (five styles: Grid 2×2, Grid 3×3, Stack, Feature, Single), or choose your own picture and background. Every picture you choose opens a crop and zoom window first.
 - Web apps such as Payload Manager can go in folders too. Selecting one opens its page.
 - If another game is running, the folder page asks before closing it.
 - The d-pad works on the folder page. The first game is highlighted when a folder opens, the d-pad moves the highlight, and X starts the highlighted game. Moving the pointer takes over again. If it doesn't behave, turn on **Folder page: show what the controller sends** in Folder options to see what the browser receives.
-- The folder page shows the folder's picture and name at the top, a row with the count and the **Sort by** button, and an **Edit this folder in Home Screen Manager** link under the games. Each can be switched off in **Folder options**.
+- The folder page shows the folder's picture and name at the top, a row with the count, the **Sort by** button and the **View** menu (**Icon** with the pictures, **Compact** with the picture and title in a row, or **List** with the titles only) and a menu next to it for **Tiles per row** (Icon, 5 to 10, default 6) or **Columns** (Compact and List, 1 to 3, default 1); your choices are remembered, and an **Edit this folder in Home Screen Manager** link under the games. Each can be switched off in **Folder options**.
 - Adding a tile goes through the console's installer, which can take about 90 seconds on newer firmware. The folder editor warns about this above its buttons, the menu shows **Creating folder…** and waits, and Home Screen Manager keeps answering meanwhile. When a folder has been created or really changed, Home Screen Manager puts the tile positions right and then restarts the home screen by itself, because the console shuffles tiles while it works and the home screen only shows the repaired layout after a restart. Saving a folder without changing anything does nothing and says **Nothing was changed**.
 - Editing a folder that already exists (name, colour, games, picture) is put straight into the home screen database whenever that is possible, which takes seconds. Creating a folder, changing its background, or a folder whose tile can't be updated that way, go through the installer.
 
@@ -106,9 +105,9 @@ Open **Change and Edit Wallpapers** to give many games the same background in on
 
 Choose one picture (from a USB drive, your phone or PC, or the pictures folder). Home Screen Manager crops it to 16:9 from the middle, shows the result with warnings if it is small or not 16:9, and lists every game with a tick box and **Select all** / **Select none** buttons. Games are ticked. Apps and system tiles that can take a background are listed and not ticked. Games that have no background entry in the database can't take one and are skipped, and folders are not included. **Overwrite backgrounds I've already set** is off by default, so your own work is never undone by accident.
 
-The picture is converted once for each file format and the result is shared between the games (linked when the drive allows it, copied when not), so a big library takes seconds to minutes, not hours. The log says how many files were linked and how many were copied. If the console's drive gets almost full, the job stops by itself and what is done stays. **Use the original for all** puts every original background back, with the same message and counter. **Live wallpaper** is at the bottom of this section.
+The picture is converted once for each file format and the result is shared between the games (linked when the drive allows it, copied when not), so a big library takes seconds to minutes, not hours. The log says how many files were linked and how many were copied. If the console's drive gets almost full, the job stops by itself and what is done stays. **Use the original for all** puts every original background back, with the same message and counter.
 
-**Games without a background entry (experimental).** The list ends with the games that have no background entry in the home screen database. Each has a **Try a background** button that fills that game's empty slots with your picture, in the format the other tiles use in the same place; the log reports what it found and what it chose. **Use the original** puts the empty slots back. System tiles (Game Library, Media Gallery and so on) are only checked, nothing is written.
+**Games without a background entry.** They are in the normal list, ticked like the others, and get your picture too: HSM fills their empty slots in the home screen database, in the format the other tiles use in the same place (the log reports what it found and chose). They carry the note "game has no own wallpaper", because **Use the original** gives them back no wallpaper at all. System tiles (Game Library, Media Gallery and so on) are not included: the home screen does not keep a background that is given to them. The share box does not apply to these games, they get files of their own.
 
 **Share one file between games (experimental).** Instead of one converted file per game, one file per format is kept in a folder of its own (`hsm_shared` in `appmeta`) and every game points at it. It is much smaller and faster. It is off by default: try it on a few games first, restart the console once, and check that the backgrounds are still there. The shared files are removed when no game uses them any more.
 
@@ -116,7 +115,7 @@ The picture is converted once for each file format and the result is shared betw
 
 Open **Clean Up Game Names** to tidy many names in one go. Tick the rules you want: remove &trade;, &reg; and &copy;, remove platform tags such as (PS4) and (PS5), clean up spaces, and **Fix capital letters**. Add your own words and phrases to remove, such as "Remastered", in any language, or add one of the suggestions with a tap.
 
-**Fix capital letters** only touches names that are all upper case or all lower case, so GOD OF WAR becomes God of War. Small words (a, an, and, as, at, but, by, for, in, nor, of, on, or, the, to, up, vs) stay small, except as the first or last word or right after a colon or dash. Roman numerals stay capitals, and words with digits are left as written. It is off until you tick it. Under **Keep name as intended** you list words that must keep the capitals you write, such as FIFA, NBA or inFAMOUS (suggestions are one tap away, and you can type your own); the spelling in your list wins. The list shows every name that would change, old next to new, with **Select all** and **Select none**. If two games would end up with the same name, you get a warning and they are not ticked. Names that would end up empty or longer than 64 characters are skipped.
+**Fix capital letters** changes names that are all upper case or all lower case, so GOD OF WAR becomes God of War. In a name that has both cases it fixes only words of four or more capital letters (RESIDENT EVIL requiem becomes Resident Evil Requiem); shorter capital words such as GTA or NBA are left alone. Small words (a, an, and, as, at, but, by, for, in, nor, of, on, or, the, to, up, vs) stay small, except as the first or last word or right after a colon or dash. Roman numerals stay capitals, and words with digits are left as written. It is off until you tick it. Under **Keep name as intended** you list words that must keep the capitals you write, such as FIFA, NBA or inFAMOUS (suggestions are one tap away, and you can type your own); the spelling in your list wins. The list shows every name that would change, old next to new, with **Select all** and **Select none**. If two games would end up with the same name, you get a warning and they are not ticked. Names that would end up empty or longer than 64 characters are skipped.
 
 **Names you've changed** lists every game whose name is changed, with the original, a label that says whether the cleanup or you (by hand) made the change, and a **Use the original** button on each (that one always goes back to the console's own name). In the preview, a game you renamed by hand before shows "Renamed by hand before", and it is still ticked so you can untick it.
 
@@ -164,23 +163,6 @@ Each part has a **Use the original** button. The game's own files are never touc
 
 </details>
 
-## Live wallpaper
-
-Home Screen Manager comes with **[LiveShell Engine](https://github.com/ZiZc3/LiveShell) 1.5.2 by ZiZc3** built in, so one payload gives you video wallpapers too. You don't need to load `liveshell.elf` separately.
-
-1. In the menu, open **Change and Edit Wallpapers** and switch **Live wallpaper** on, at the bottom. Home Screen Manager starts LiveShell, and from then on starts it every time Home Screen Manager runs.
-2. Add videos: copy `.mp4` files to a `liveshell` folder on a USB drive, or upload them from your phone or PC on LiveShell's page (`http://<PS5-IP>:9050`).
-3. Press **Use** on a video to make it your wallpaper. **Delete** removes a video from the PS5.
-
-| | |
-|---|---|
-| Videos | `.mp4`, H.264 or HEVC, 8-bit, up to 4K, with or without sound |
-| More settings | **Open LiveShell** opens LiveShell's own page: looks, sound, playlists, a video for each game, and Discover (download wallpapers) |
-| Turning it off | Switch **Live wallpaper** off. LiveShell stops, and the home screen restarts with its normal background. |
-
-> [!NOTE]
-> If you already load `liveshell.elf` from Payload Manager, Home Screen Manager sees that it's running and doesn't start a second copy. LiveShell's files are in `/data/LiveShell/`.
-
 ## Reorder the home screen
 
 The PS5 sorts each tab by most-recently-played and has no manual reorder. The home-screen list shows your tiles in that same order, and lets you set your own instead.
@@ -194,6 +176,8 @@ Because the PS5 re-sorts by recency, Home Screen Manager re-applies your order e
 ## Keep folders first
 
 Turn on **Keep folders first** (in **Folder options**, inside Home Screen Folders and Tiles) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Screen Manager next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in **Tile hiding options** turns that off). Home Screen Manager keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
+
+**Other apps that change the home screen.** Apps such as PS4 Mount or ShadowMountPlus re-register games, and the console then reshuffles tiles while they work: folders can show up on the Media tab and hidden games can appear for a moment. Home Screen Manager waits until the other app is done (a missing folder tile is only reinstalled after it has been missing for 45 seconds and the home screen database has been quiet for 30 seconds), then puts everything back by itself. It does not restart the home screen, so open and close any game or folder to redraw it sooner.
 
 
 
@@ -226,7 +210,8 @@ Opening **Update settings** looks for a newer version on a USB drive; nothing ch
 |---|---|
 | One tile | **Show**, or **Edit > Use the original…** |
 | Everything you hid | **More & troubleshooting > Show everything I hid** |
-| Everything | **More & troubleshooting > Restore original backup**, then restart the PS5 |
+| Everything Home Screen Manager changed | **More & troubleshooting > Undo everything I changed**. Takes back folders, moved tiles, order, hidden tiles, pictures, backgrounds and names, and leaves the rest of the database alone |
+| The whole database (last resort) | **More & troubleshooting > Restore original backup**, then restart the PS5. Games deleted since the backup can come back as blank tiles that only Safe Mode > Rebuild Database removes |
 | Without the jailbreak | Safe Mode > **Rebuild Database** |
 
 The first-run backup of the home-screen database is kept in `/data/homescreenmanager/backup/app.db.original`.
@@ -245,9 +230,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 | "Choose from USB drive" finds nothing | Use exFAT or FAT32, keep pictures within four folders of the top, and press **Refresh**. |
 | A background "can't be written yet" | That game uses an unusual texture format. |
 | "Port 8090 is busy" | Restart the PS5 and launch Home Screen Manager again. |
-| The video stops after **Refresh home screen now** | Switch **Live wallpaper** off and on again. |
-| Live wallpaper says "Starting" and nothing happens | Check that Payload Manager's ELF loader is running, then switch Live wallpaper off and on. If LiveShell itself shows an error, see its log in `/data/LiveShell/liveshell.log`. |
-| Anything else | **More & troubleshooting > Diagnostics** shows a log of every step, and **Copy log** copies it with one tap. Please include it when you open an issue. |
+| Anything else | **More & troubleshooting > Diagnostics** shows a log of every step, and lists of the tiles and directories that are not games, and **Copy log** copies it with one tap. Please include it when you open an issue. |
 
 </details>
 
@@ -260,7 +243,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 
 **Do changes survive without the jailbreak?** Yes. Only a system update or Rebuild Database can undo them, and Home Screen Manager puts them back the next time it runs.
 
-**Can GIFs or backgrounds animate?** Tile pictures and backgrounds are still pictures. For a moving wallpaper, use [Live wallpaper](#live-wallpaper).
+**Can GIFs or backgrounds animate?** No. Tile pictures and backgrounds are still pictures.
 
 **Why can't Game Library and App Library be hidden?** The home screen adds those two tiles itself.
 
@@ -275,7 +258,6 @@ See [BUILDING.md](BUILDING.md). It covers the PS5 build, the desktop test suite 
 ## Credits
 
 - **[HomeHider](https://github.com/Euphoric-Dev/HomeHider) by Euphoric-Dev**: developer of the original HomeHider on which this project is based upon
-- **[LiveShell Engine](https://github.com/ZiZc3/LiveShell) by ZiZc3**: the live wallpaper engine, built into Home Screen Manager unchanged (GPL-3.0). LiveShell's own credits: [OnionHEN](https://github.com/aydencharles/onionHEN) (payload injector, detour library and ShellUI groundwork) and the PS5 Payload SDK.
 - [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) by John Törnblom
 - [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) by itsPLK
 - Home-screen research: [PS5-TabShifter](https://github.com/xvvulcanvx/PS5-TabShifter), [psgfx](https://github.com/elripalda/psgfx), [PS5 Art Swap](https://github.com/griches/PS5_ArtSwap) and the [PS5 Developer Wiki](https://www.psdevwiki.com/ps5/Title_ID)
@@ -285,7 +267,7 @@ See [BUILDING.md](BUILDING.md). It covers the PS5 build, the desktop test suite 
 
 Copyright © 2026 lazyboy6791. Home Screen Manager is a modified version of [HomeHider](https://github.com/Euphoric-Dev/HomeHider) by Euphoric-Dev (GPL-3.0), changed and renamed in 2026.
 
-Home Screen Manager is free software under the **GNU General Public License v3.0** (see [LICENSE](LICENSE)). It includes LiveShell Engine, which is GPL-3.0. LiveShell's source code is in [`third_party/liveshell/source`](third_party/liveshell/source), and its project lives at [github.com/ZiZc3/LiveShell](https://github.com/ZiZc3/LiveShell).
+Home Screen Manager is free software under the **GNU General Public License v3.0** (see [LICENSE](LICENSE)).
 
 <div align="center">
 <sub>Use at your own risk. Home Screen Manager only changes the home-screen layout, keeps backups, and can undo everything it does.</sub>
