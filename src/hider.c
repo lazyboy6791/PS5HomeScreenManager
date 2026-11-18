@@ -1,7 +1,9 @@
 #include "hider.h"
 #include "log.h"
+#include "folders.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -276,6 +278,7 @@ int hh_open(hh_t *h, const char *app_db, const char *state_db) {
     return -1;
   }
   /* columns added in later versions (fails harmlessly when present) */
+  sqlite3_exec(sdb, "ALTER TABLE folders ADD COLUMN style INTEGER NOT NULL DEFAULT 0", NULL, NULL, NULL); /* collage style */
   sqlite3_exec(sdb, "ALTER TABLE custom ADD COLUMN bg_file TEXT", NULL, NULL, NULL);
   sqlite3_exec(sdb, "ALTER TABLE custom ADD COLUMN name_src TEXT", NULL, NULL, NULL);    /* 'tool' = Clean Up Game Names */
   sqlite3_exec(sdb, "ALTER TABLE custom ADD COLUMN name_before TEXT", NULL, NULL, NULL); /* a name by hand that the tool replaced */
@@ -711,10 +714,12 @@ static list_item_t *find_item(list_item_t *items, int n, const char *id) {
   return NULL;
 }
 
+/* The tab a tile sits on. dispLocation decides; a tile that is pinned (MyHome) but has no tab bits at all
+ * counts as a game. (A pinned media app used to be called a game just for being pinned.) */
 static const char *tab_of(long long disp, int pinned) {
-  if (pinned) return "games";
   if (disp >= 0 && (disp & HH_BIT_GAMES)) return "games";
   if (disp >= 0 && (disp & HH_BIT_MEDIA)) return "media";
+  if (pinned) return "games";
   return "none";
 }
 
@@ -994,6 +999,45 @@ static int safe_icon_path(const char *in, char *out, size_t outsz) {
          strcasecmp(dot, ".jpeg") == 0;
 }
 
+/* The title's own picture (tbl_contentinfo.icon0Info). */
+static int icon_from_contentinfo(hh_t *h, const char *tid, char *out, size_t outsz) {
+  struct stat sbuf;
+  char cand[512];
+  if (h->db && has_table(h, "main", "tbl_contentinfo") && has_col(h, "main", "tbl_contentinfo", "icon0Info")) {
+    sqlite3_stmt *st = prep(h, "SELECT icon0Info FROM main.tbl_contentinfo WHERE titleId=?1", tid, NULL, NULL);
+    if (st) {
+      if (sqlite3_step(st) == SQLITE_ROW && safe_icon_path((const char *)sqlite3_column_text(st, 0), cand, sizeof(cand)) &&
+          stat(cand, &sbuf) == 0) {
+        sqlite3_finalize(st);
+        snprintf(out, outsz, "%s", cand);
+        return 0;
+      }
+      sqlite3_finalize(st);
+    }
+  }
+  return -1;
+}
+
+/* More than one title on the same concept (the games of a collection): the concept has one picture,
+ * so the titles would all show the same one. */
+static int concept_shared(hh_t *h, const char *tid) {
+  int shared = 0;
+  for (int ui = 0; h->db && ui < h->nusers && !shared; ui++) {
+    char icon_t[96], sql[400];
+    snprintf(icon_t, sizeof(icon_t), "tbl_iconinfo_%s", h->users[ui]);
+    if (!has_table(h, "main", icon_t) || !has_col(h, "main", icon_t, "localConceptId")) continue;
+    snprintf(sql, sizeof(sql),
+             "SELECT COUNT(*) FROM main.\"%s\" WHERE localConceptId=(SELECT localConceptId FROM main.\"%s\" WHERE titleId=?1)",
+             icon_t, icon_t);
+    sqlite3_stmt *st = prep(h, sql, tid, NULL, NULL);
+    if (st) {
+      if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) > 1) shared = 1;
+      sqlite3_finalize(st);
+    }
+  }
+  return shared;
+}
+
 int hh_icon_path(hh_t *h, const char *tid, char *out, size_t outsz) {
   if (!hh_valid_tid(tid)) return -1;
   struct stat sbuf;
@@ -1013,6 +1057,8 @@ int hh_icon_path(hh_t *h, const char *tid, char *out, size_t outsz) {
       sqlite3_finalize(st);
     }
   }
+  /* 0b. games that share a concept each have a picture of their own */
+  if (concept_shared(h, tid) && icon_from_contentinfo(h, tid, out, outsz) == 0) return 0;
   /* 1. what the home screen itself uses (icon0Info) */
   for (int ui = 0; h->db && ui < h->nusers; ui++) {
     const char *u = h->users[ui];
@@ -1056,21 +1102,7 @@ int hh_icon_path(hh_t *h, const char *tid, char *out, size_t outsz) {
       }
     }
   }
-  if (h->db && has_table(h, "main", "tbl_contentinfo") &&
-      has_col(h, "main", "tbl_contentinfo", "icon0Info")) {
-    sqlite3_stmt *st = prep(h, "SELECT icon0Info FROM main.tbl_contentinfo WHERE titleId=?1",
-                            tid, NULL, NULL);
-    if (st) {
-      if (sqlite3_step(st) == SQLITE_ROW &&
-          safe_icon_path((const char *)sqlite3_column_text(st, 0), cand, sizeof(cand)) &&
-          stat(cand, &sbuf) == 0) {
-        sqlite3_finalize(st);
-        snprintf(out, outsz, "%s", cand);
-        return 0;
-      }
-      sqlite3_finalize(st);
-    }
-  }
+  if (icon_from_contentinfo(h, tid, out, outsz) == 0) return 0;
 
 #ifdef HH_HOST
   /* tests: artwork from a plain folder */
@@ -1185,6 +1217,70 @@ void hh_diag(hh_t *h, strbuf_t *o) {
     if (has_table(h, "main", t)) dump_cols(h, o, t);
   }
   if (has_table(h, "main", "tbl_contentinfo")) dump_cols(h, o, "tbl_contentinfo");
+
+  /* tiles whose tab can be read two ways: on both tabs, or pinned (for tab-listing questions) */
+  for (int i = 0; i < h->nusers; i++) {
+    if (!h->has_disp[i] || !h->has_group[i]) continue;
+    char sql[600];
+    snprintf(sql, sizeof(sql),
+             "SELECT titleId, dispLocation, (SELECT count(*) FROM main.\"tbl_group_%s\" g WHERE g.itemId=i.titleId AND g.groupName='MyHome') "
+             "FROM main.\"tbl_iconinfo_%s\" i WHERE (dispLocation & 6)=6 OR titleId IN "
+             "(SELECT itemId FROM main.\"tbl_group_%s\" WHERE groupName='MyHome') ORDER BY titleId",
+             h->users[i], h->users[i], h->users[i]);
+    st = prep(h, sql, NULL, NULL, NULL);
+    if (!st) continue;
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW && n < 60) {
+      if (!n) sb_printf(o, "\nTiles on both tabs or pinned (user %s): title, dispLocation, pinned\n", h->users[i]);
+      sb_printf(o, "  %s  0x%llX  %s\n", sqlite3_column_text(st, 0), (unsigned long long)sqlite3_column_int64(st, 1),
+                sqlite3_column_int(st, 2) ? "pinned" : "-");
+      n++;
+    }
+    sqlite3_finalize(st);
+  }
+
+  /* Everything on the home screen that is not a game, and every directory in the apps folder that is not
+   * a game: if a blank or unexpected tile keeps coming back, it is in one of these two lists. */
+  for (int i = 0; i < h->nusers; i++) {
+    char icon_t[64], sql[512];
+    snprintf(icon_t, sizeof(icon_t), "tbl_iconinfo_%s", h->users[i]);
+    int has_name = has_col(h, "main", icon_t, "titleName");
+    snprintf(sql, sizeof(sql),
+             "SELECT titleId, %s, visible, dispLocation FROM main.\"%s\" "
+             "WHERE titleId NOT LIKE 'CUSA%%' AND titleId NOT LIKE 'PPSA%%' ORDER BY titleId",
+             has_name ? "titleName" : "NULL", icon_t);
+    sqlite3_stmt *st = prep(h, sql, NULL, NULL, NULL);
+    if (!st) continue;
+    int n = 0;
+    while (sqlite3_step(st) == SQLITE_ROW && n < 120) {
+      if (!n) sb_printf(o, "\nTiles that are not games (user %s): title, name, visible, dispLocation, folder of ours\n", h->users[i]);
+      const char *t = (const char *)sqlite3_column_text(st, 0);
+      const char *nm = (const char *)sqlite3_column_text(st, 1);
+      sb_printf(o, "  %s  \"%s\"  %d  0x%llX  %s\n", t ? t : "?", nm ? nm : "", sqlite3_column_int(st, 2),
+                (unsigned long long)sqlite3_column_int64(st, 3), t && folders_is_folder(t) ? "HHFD tile" : "-");
+      n++;
+    }
+    sqlite3_finalize(st);
+  }
+  {
+    DIR *d = opendir(folders_app_dir());
+    int n = 0;
+    struct dirent *e;
+    while (d && (e = readdir(d)) && n < 120) {
+      if (e->d_name[0] == '.' || !strncmp(e->d_name, "CUSA", 4) || !strncmp(e->d_name, "PPSA", 4)) continue;
+      char p[600];
+      struct stat sb;
+      snprintf(p, sizeof(p), "%s/%s/sce_sys/param.json", folders_app_dir(), e->d_name);
+      int pj = stat(p, &sb) == 0;
+      snprintf(p, sizeof(p), "%s/%s", folders_app_dir(), e->d_name);
+      int isdir = stat(p, &sb) == 0 && S_ISDIR(sb.st_mode);
+      if (!n) sb_printf(o, "\nDirectories in %s that are not games: name, param.json\n", folders_app_dir());
+      sb_printf(o, "  %s%s  %s%s\n", e->d_name, isdir ? "/" : "", pj ? "param.json: yes" : "param.json: no",
+                folders_is_folder(e->d_name) ? "  (HHFD folder tile)" : "");
+      n++;
+    }
+    if (d) closedir(d);
+  }
 
   for (int k = 0; k < HH_TARGET_COUNT; k++) {
     const char *tid = HH_TARGETS[k].title_id;

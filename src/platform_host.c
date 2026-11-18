@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -33,6 +34,11 @@ int plat_launch_browser(const char *url) {
   printf("[browser] would open %s\n", url);
   fflush(stdout);
   return 0;
+}
+
+void plat_describe_mount(const char *path, char *out, size_t n) {
+  (void)path;
+  snprintf(out, n, "host build: no mount information");
 }
 
 int plat_get_ip(char *buf, size_t n) {
@@ -275,12 +281,29 @@ static sqlite3 *open_app_db(void) {
   return db;
 }
 
+static int host_register(const char *title_id, const char *app_dir);
+
 int plat_app_install(const char *title_id, const char *app_dir) {
   /* tests: HH_INSTALL_DELAY_MS makes the install slow, like the console's on newer firmware */
   const char *dl = getenv("HH_INSTALL_DELAY_MS");
   int delay_ms = dl ? atoi(dl) : 0;
   hh_log("install %s: host test build%s", title_id, delay_ms > 0 ? " (slow install simulated)" : "");
   if (delay_ms > 0) usleep((useconds_t)delay_ms * 1000);
+  int rc = host_register(title_id, app_dir);
+  /* tests: HH_INSTALL_ALL=1 behaves like the console without the fast function: every tile folder
+   * that is waiting gets registered by this one call */
+  if (getenv("HH_INSTALL_ALL")) {
+    DIR *d = opendir(app_dir);
+    struct dirent *e;
+    while (d && (e = readdir(d))) {
+      if (strncmp(e->d_name, "HHFD", 4) == 0 && strcmp(e->d_name, title_id) != 0) host_register(e->d_name, app_dir);
+    }
+    if (d) closedir(d);
+  }
+  return rc;
+}
+
+static int host_register(const char *title_id, const char *app_dir) {
   char path[600], name[200] = "";
   snprintf(path, sizeof(path), "%s/%s/sce_sys/param.json", app_dir, title_id);
   FILE *f = fopen(path, "r");
@@ -419,3 +442,7 @@ int plat_app_uninstall(const char *title_id) {
   fflush(stdout);
   return 0;
 }
+
+void plat_set_process_name(const char *name) { (void)name; }
+void plat_set_stage_dir(const char *dir) { (void)dir; }
+void plat_unmask_leftover(void) {}

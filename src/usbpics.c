@@ -20,22 +20,56 @@ static char g_fmt[256] = "/mnt/usb%d";
 static char g_cache[256];
 static char g_local[256]; /* pictures folder on internal storage (for FTP) */
 
-/* previews are small, but don't let them pile up forever */
+/* previews are small, but don't let them pile up forever: when there are more than 600 files or they
+ * take more than 40 MB, the oldest ones go first until 75% of that is left */
+typedef struct {
+  char name[64];
+  time_t mtime;
+  off_t size;
+} thumb_t;
+
+static int thumb_older(const void *a, const void *b) {
+  const thumb_t *x = a, *y = b;
+  return x->mtime < y->mtime ? -1 : x->mtime > y->mtime;
+}
+
 static void prune_cache(void) {
+  enum { MAX_FILES = 600, MAX_BYTES = 40 * 1024 * 1024, KEEP_PCT = 75, CAP = 5000 };
   DIR *d = opendir(g_cache);
   if (!d) return;
+  thumb_t *list = malloc(sizeof(*list) * CAP);
+  if (!list) {
+    closedir(d);
+    return;
+  }
   int n = 0;
+  long long total = 0;
   struct dirent *e;
-  while ((e = readdir(d))) n += e->d_name[0] != '.';
-  if (n > 600) {
-    rewinddir(d);
-    while ((e = readdir(d))) {
-      if (e->d_name[0] == '.') continue;
-      char p[600];
-      if ((size_t)snprintf(p, sizeof(p), "%s/%s", g_cache, e->d_name) < sizeof(p)) unlink(p);
-    }
+  while ((e = readdir(d)) && n < CAP) {
+    if (e->d_name[0] == '.') continue;
+    char p[600];
+    struct stat st;
+    if ((size_t)snprintf(p, sizeof(p), "%s/%s", g_cache, e->d_name) >= sizeof(p) || stat(p, &st)) continue;
+    snprintf(list[n].name, sizeof(list[n].name), "%.63s", e->d_name);
+    list[n].mtime = st.st_mtime;
+    list[n].size = st.st_size;
+    total += st.st_size;
+    n++;
   }
   closedir(d);
+  if (n > MAX_FILES || total > MAX_BYTES) {
+    qsort(list, (size_t)n, sizeof(*list), thumb_older);
+    long long keep_bytes = (long long)MAX_BYTES * KEEP_PCT / 100;
+    int keep_files = MAX_FILES * KEEP_PCT / 100, left = n;
+    for (int i = 0; i < n && (left > keep_files || total > keep_bytes); i++) {
+      char p[600];
+      if ((size_t)snprintf(p, sizeof(p), "%s/%s", g_cache, list[i].name) < sizeof(p) && !unlink(p)) {
+        left--;
+        total -= list[i].size;
+      }
+    }
+  }
+  free(list);
 }
 
 void usbpics_init(const char *usb_fmt, const char *cache_dir, const char *local_dir) {
@@ -209,7 +243,11 @@ int usbpics_thumb(const char *path, unsigned char **png, size_t *len) {
   f = fopen(tmp, "wb");
   if (f) {
     int ok = fwrite(*png, 1, *len, f) == *len;
-    if (fclose(f) == 0 && ok) rename(tmp, cpath);
+    if (fclose(f) == 0 && ok) {
+      rename(tmp, cpath);
+      static int added;
+      if (++added % 100 == 0) prune_cache();
+    }
     else unlink(tmp);
   }
   return 0;

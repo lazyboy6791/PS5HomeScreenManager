@@ -6,9 +6,16 @@
 #include <stdint.h>
 
 void plat_init(void);
+/* Names the process (and the main thread) so a payload manager can list it as running. */
+void plat_set_process_name(const char *name);
+/* Fast install of a folder tile: where the staging folders go, and the clean-up of an earlier run's. */
+void plat_set_stage_dir(const char *dir);
+void plat_unmask_leftover(void);
 void plat_notify(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* Opens the PS5 web browser at url. Returns 0 on success. */
 int  plat_launch_browser(const char *url);
+/* one line about the filesystem a path is on (type, device, read-only or writable) for the log; "" when unknown */
+void plat_describe_mount(const char *path, char *out, size_t n);
 /* Writes the console's LAN IPv4 address. Returns 0 on success. */
 int  plat_get_ip(char *buf, size_t n);
 /* Launcher (sceLncUtil) error codes Home Screen Manager handles itself. */

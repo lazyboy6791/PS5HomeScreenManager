@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """make release: puts the build, its checksum and a release note in ./release/
 
-    python3 tools/release.py HomeScreenManager.elf [--out release] [--version 2.2.0]
+    python3 tools/release.py HomeScreenManager.elf [--out release] [--version 2.2.2]
 
 It does not upload anything. See "Publishing a release" in BUILDING.md for the part on GitHub.
 """

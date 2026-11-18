@@ -331,9 +331,46 @@ static void over(uint8_t *px, const uint8_t *c, int a) {
   px[3] = (uint8_t)oa;
 }
 
-int icon_collage(const char *const *paths, int n, const char *color,
+/* One rounded tile of side C at (ox,oy): the game's picture, or an empty slot. shadow > 0 darkens the area
+ * around it a little so overlapping tiles keep their edges. */
+static void put_tile(uint8_t *canvas, int S, const char *path, int C, int ox, int oy, int clear, int shadow) {
+  static const uint8_t white[3] = {255, 255, 255};
+  static const uint8_t black[3] = {0, 0, 0};
+  static const uint8_t slot[3] = {0x9a, 0xa3, 0xb5};
+  const int R = C / 9;
+  uint8_t *tile = path ? load_square(NULL, 0, path, C) : NULL;
+  if (shadow > 0) {
+    int d = C / 28 + 2; /* the shadow sits a little lower and to the right */
+    for (int y = 0; y < C; y++)
+      for (int x = 0; x < C; x++) {
+        int cov = rounded_cov(x, y, C, R);
+        int px_x = ox + x + d, px_y = oy + y + d;
+        if (!cov || px_x < 0 || px_y < 0 || px_x >= S || px_y >= S) continue;
+        over(canvas + ((size_t)px_y * S + px_x) * 4, black, cov * shadow / 255);
+      }
+  }
+  for (int y = 0; y < C; y++)
+    for (int x = 0; x < C; x++) {
+      int cov = rounded_cov(x, y, C, R);
+      if (!cov || ox + x < 0 || oy + y < 0 || ox + x >= S || oy + y >= S) continue;
+      uint8_t *px = canvas + ((size_t)(oy + y) * S + (ox + x)) * 4;
+      if (tile) {
+        const uint8_t *tp = tile + ((size_t)y * C + x) * 4;
+        over(px, tp, cov * tp[3] / 255);
+        /* darken the anti-aliased rim a little so light artwork keeps its shape */
+        if (cov < 255 && !clear) over(px, black, (255 - cov) / 4);
+      } else {
+        over(px, clear ? slot : white, clear ? cov * 70 / 255 : cov * 30 / 255); /* empty slot */
+      }
+    }
+  free(tile);
+}
+
+/* style 4: 3x3 grid (nine games). style 0: 2x2 grid, 1: stack (cascading, the first game in front), 2: feature (the first game big, up to five
+ * small ones around it), 3: single (the first game alone). paths[] holds up to ICON_COLLAGE_MAX files. */
+int icon_collage(const char *const *paths, int n, const char *color, int style,
                  unsigned char **png, size_t *png_len) {
-  const int S = ICON_SIZE, M = 36, G = 24, C = (S - 2 * M - G) / 2, R = 22;
+  const int S = ICON_SIZE, M = 36;
   int clear = is_none(color);
   const palette_t *pal = find_color(color);
   uint8_t *canvas = malloc((size_t)S * S * 4);
@@ -349,28 +386,27 @@ int icon_collage(const char *const *paths, int n, const char *color,
     for (int x = 0; x < S; x++) memcpy(canvas + ((size_t)y * S + x) * 4, c, 4);
   }
 
-  static const uint8_t white[3] = {255, 255, 255};
-  static const uint8_t black[3] = {0, 0, 0};
-  static const uint8_t slot[3] = {0x9a, 0xa3, 0xb5};
-  for (int i = 0; i < 4; i++) {
-    int ox = M + (i % 2) * (C + G), oy = M + (i / 2) * (C + G);
-    uint8_t *tile = i < n && paths[i] ? load_square(NULL, 0, paths[i], C) : NULL;
-    for (int y = 0; y < C; y++)
-      for (int x = 0; x < C; x++) {
-        int cov = rounded_cov(x, y, C, R);
-        if (!cov) continue;
-        uint8_t *px = canvas + ((size_t)(oy + y) * S + (ox + x)) * 4;
-        if (tile) {
-          const uint8_t *tp = tile + ((size_t)y * C + x) * 4;
-          over(px, tp, cov * tp[3] / 255);
-          /* darken the anti-aliased rim a little so light artwork keeps its shape */
-          if (cov < 255 && !clear) over(px, black, (255 - cov) / 4);
-        } else {
-          over(px, clear ? slot : white, clear ? cov * 70 / 255 : cov * 30 / 255); /* empty slot */
-        }
-      }
-    free(tile);
+#define PATH(i) ((i) < n && paths[i] ? paths[i] : NULL)
+  if (style == 1) {
+    int cnt = n < 2 ? 2 : (n > 4 ? 4 : n), T = 300, step = (S - 2 * M - T) / (cnt - 1);
+    for (int i = cnt - 1; i >= 0; i--)
+      put_tile(canvas, S, PATH(i), T, M + (cnt - 1 - i) * step, M + (cnt - 1 - i) * step, clear, i == cnt - 1 ? 0 : 90);
+  } else if (style == 2) {
+    const int G = 16, cell = (S - 2 * M - 2 * G) / 3, big = 2 * cell + G;
+    put_tile(canvas, S, PATH(0), big, M, M, clear, 0);
+    const int pos[5][2] = {{2, 0}, {2, 1}, {0, 2}, {1, 2}, {2, 2}};
+    for (int i = 0; i < 5; i++)
+      put_tile(canvas, S, PATH(i + 1), cell, M + pos[i][0] * (cell + G), M + pos[i][1] * (cell + G), clear, 0);
+  } else if (style == 3) {
+    put_tile(canvas, S, PATH(0), S - 2 * M, M, M, clear, 0);
+  } else if (style == 4) {
+    const int G = 16, C = (S - 2 * M - 2 * G) / 3;
+    for (int i = 0; i < 9; i++) put_tile(canvas, S, PATH(i), C, M + (i % 3) * (C + G), M + (i / 3) * (C + G), clear, 0);
+  } else {
+    const int G = 24, C = (S - 2 * M - G) / 2;
+    for (int i = 0; i < 4; i++) put_tile(canvas, S, PATH(i), C, M + (i % 2) * (C + G), M + (i / 2) * (C + G), clear, 0);
   }
+#undef PATH
 
   int rc;
   if (clear) {

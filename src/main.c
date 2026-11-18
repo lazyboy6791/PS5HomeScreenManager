@@ -33,7 +33,6 @@
 #include "http.h"
 #include "json.h"
 #include "launch.h"
-#include "liveshell.h"
 #include "platform.h"
 #include "strbuf.h"
 #include "folder_html.h"
@@ -62,7 +61,6 @@ typedef struct {
                          start after boot (Autoload), menu on later starts */
   int  reapply;       /* re-hide tiles the system brought back, at launch */
   int  auto_check;    /* look for updates (GitHub/USB) at launch */
-  int  live;          /* start LiveShell (live wallpaper) with Home Screen Manager */
   int  folders_first; /* keep the folders in the first spots of their tab */
   int  show_running;  /* a running game's tile stays on screen (so it can be closed from the row) */
   int  folder_header; /* folder page: show the folder's picture and name at the top */
@@ -78,11 +76,16 @@ typedef struct {
  * positions right), so two database passes never run at once. */
 static volatile int g_refresh_request;
 static volatile int g_import_running; /* an import is running: folder changes wait */
+static volatile int g_refresh_full;  /* a change that needs the home screen restarted (not only redrawn) */
 static volatile int g_refresh_quick; /* the change is done (a bulk run): restart the home screen at once */
 static volatile int g_refresh_hold;  /* a refresh is under way: the repair of custom names waits until it is over */
-static void request_home_refresh(void) { g_refresh_request = 1; }
+static void request_home_refresh(void) {
+  g_refresh_full = 1;
+  g_refresh_request = 1;
+}
 static void request_home_refresh_quick(void) {
   g_refresh_quick = 1;
+  g_refresh_full = 1;
   g_refresh_request = 1;
 }
 
@@ -90,7 +93,7 @@ static void request_home_refresh_quick(void) {
  * saved in the settings means "use this one". */
 static const char *g_default_repo = HH_DEFAULT_REPO;
 
-static settings_t g_cfg = {1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, HH_DEFAULT_REPO};
+static settings_t g_cfg = {1, 1, 1, 0, 1, 1, 1, 1, 0, 0, HH_DEFAULT_REPO};
 static char g_pldmgr_dir[256];
 static char g_usb_fmt[256];
 static char g_github_api[128];
@@ -170,7 +173,6 @@ static void load_settings(void) {
     if (sscanf(line, "open_browser=%d", &v) == 1) g_cfg.open_browser = v == 2 ? 2 : v ? 1 : 0;
     if (sscanf(line, "reapply=%d", &v) == 1) g_cfg.reapply = v ? 1 : 0;
     if (sscanf(line, "auto_check=%d", &v) == 1) g_cfg.auto_check = v ? 1 : 0;
-    if (sscanf(line, "live=%d", &v) == 1) g_cfg.live = v ? 1 : 0;
     if (sscanf(line, "folders_first=%d", &v) == 1) g_cfg.folders_first = v ? 1 : 0;
     if (sscanf(line, "show_running=%d", &v) == 1) g_cfg.show_running = v ? 1 : 0;
     if (sscanf(line, "folder_header=%d", &v) == 1) g_cfg.folder_header = v ? 1 : 0;
@@ -190,9 +192,9 @@ static int save_settings(void) {
   snprintf(tmp, sizeof(tmp), "%s.tmp", g_settings);
   FILE *f = fopen(tmp, "w");
   if (!f) return -1;
-  fprintf(f, "open_browser=%d\nreapply=%d\nauto_check=%d\nlive=%d\nfolders_first=%d\nshow_running=%d\n"
+  fprintf(f, "open_browser=%d\nreapply=%d\nauto_check=%d\nfolders_first=%d\nshow_running=%d\n"
              "folder_header=%d\nfolder_bar=%d\nfolder_edit=%d\nfolder_debug=%d\ntheme=%d\nrepo=%s\n",
-          g_cfg.open_browser, g_cfg.reapply, g_cfg.auto_check, g_cfg.live, g_cfg.folders_first,
+          g_cfg.open_browser, g_cfg.reapply, g_cfg.auto_check, g_cfg.folders_first,
           g_cfg.show_running, g_cfg.folder_header, g_cfg.folder_bar, g_cfg.folder_edit, g_cfg.folder_debug, g_cfg.theme, g_cfg.repo);
   fclose(f);
   return rename(tmp, g_settings);
@@ -532,111 +534,6 @@ static void handle_folder_take_out(int fd, const char *query) {
   hh_close(&h);
 }
 
-/* ---- live wallpaper (LiveShell Engine by ZiZc3) ---- */
-
-static volatile int g_live_starting = 0;
-
-static void *live_start_later(void *arg) {
-  int delay = (int)(long)arg;
-  if (delay) sleep((unsigned)delay); /* let Autoload finish loading other payloads */
-  if (!live_running()) live_start();
-  g_live_starting = 0;
-  return NULL;
-}
-
-static void live_start_async(int delay) {
-  if (g_live_starting) return;
-  g_live_starting = 1;
-  pthread_t t;
-  if (pthread_create(&t, NULL, live_start_later, (void *)(long)delay) == 0) pthread_detach(t);
-  else g_live_starting = 0;
-}
-
-static void handle_live(int fd) {
-  char *state = NULL;
-  size_t n = 0;
-  int st = live_get("/api/state", &state, &n);
-  strbuf_t sb;
-  sb_init(&sb);
-  sb_printf(&sb, "{\"ok\":true,\"enabled\":%s,\"running\":%s,\"starting\":%s,\"version\":\"%s\",\"port\":9050,\"state\":",
-            g_cfg.live ? "true" : "false", st == 200 ? "true" : "false", g_live_starting ? "true" : "false",
-            LIVESHELL_VERSION);
-  if (st == 200 && state && state[0] == '{') sb_puts(&sb, state);
-  else sb_puts(&sb, "null");
-  sb_puts(&sb, "}");
-  free(state);
-  send_json(fd, 200, &sb);
-  sb_free(&sb);
-}
-
-/* Passes LiveShell's {"ok":..,"error":..} answer on. */
-static void live_forward(int fd, const char *path) {
-  char *b = NULL;
-  size_t n = 0;
-  int st = live_get(path, &b, &n);
-  if (st < 0) send_error(fd, 409, "LiveShell isn't running. Turn Live wallpaper on first.");
-  else if (st != 200 || !b || b[0] != '{') send_error(fd, 409, "LiveShell didn't accept that.");
-  else if (strstr(b, "\"ok\":true")) send_ok(fd, "done");
-  else {
-    /* its own error text */
-    json_tok_t t[16];
-    int nt = json_parse(b, n, t, 16);
-    char msg[300] = "LiveShell didn't accept that.";
-    if (nt > 0) json_str(b, t, json_get(b, t, nt, 0, "error"), msg, sizeof(msg));
-    send_error(fd, 409, msg);
-  }
-  free(b);
-}
-
-static void handle_live_video(int fd, const char *query, const char *what) {
-  char path[1024] = "", url[64];
-  if (http_query_get(query, "path", path, sizeof(path)) || !path[0]) {
-    send_error(fd, 400, "Missing video.");
-    return;
-  }
-  int i = live_video_index(path);
-  if (i < 0) {
-    send_error(fd, 404, live_running() ? "That video isn't in LiveShell's list any more." :
-                                         "LiveShell isn't running. Turn Live wallpaper on first.");
-    return;
-  }
-  snprintf(url, sizeof(url), "/api/%s?i=%d", what, i);
-  hh_log("live wallpaper: %s %s", what, path);
-  live_forward(fd, url);
-}
-
-static void handle_live_power(int fd, const char *query) {
-  char v[8] = "";
-  http_query_get(query, "on", v, sizeof(v));
-  g_cfg.live = atoi(v) ? 1 : 0;
-  save_settings();
-  if (g_cfg.live) {
-    if (live_running()) {
-      send_ok(fd, "Live wallpaper is on.");
-      return;
-    }
-    live_start_async(0);
-    send_ok(fd, "Starting LiveShell. The wallpaper appears in a few seconds.");
-  } else {
-    if (live_running()) live_stop();
-    send_ok(fd, "Live wallpaper is off. The home screen restarts with its normal background.");
-  }
-}
-
-static void handle_live_thumb(int fd, const char *query) {
-  char path[1024] = "", url[64];
-  http_query_get(query, "path", path, sizeof(path));
-  int i = path[0] ? live_video_index(path) : -1;
-  char *b = NULL;
-  size_t n = 0;
-  snprintf(url, sizeof(url), "/thumb?i=%d", i);
-  if (i >= 0 && live_get(url, &b, &n) == 200 && n > 8 && !memcmp(b, "\x89PNG", 4))
-    http_send(fd, 200, "image/png", b, n, "Cache-Control: max-age=300\r\n");
-  else
-    http_send_text(fd, 404, "text/plain", "no preview");
-  free(b);
-}
-
 /* ---- USB pictures ---- */
 
 static void handle_usb_images(int fd) {
@@ -647,6 +544,26 @@ static void handle_usb_images(int fd) {
   sb_puts(&sb, "}");
   send_json(fd, 200, &sb);
   sb_free(&sb);
+}
+
+/* the whole picture, for the crop window (the preview above is only 192 px) */
+static void handle_usb_pic(int fd, const char *query) {
+  char path[1024];
+  unsigned char *buf;
+  size_t len;
+  if (http_query_get(query, "path", path, sizeof(path)) || usbpics_read(path, &buf, &len)) {
+    http_send_text(fd, 404, "text/plain", "no picture");
+    return;
+  }
+  const char *ext = strrchr(path, '.'), *type = "application/octet-stream";
+  if (ext) {
+    if (!strcasecmp(ext, ".png")) type = "image/png";
+    else if (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg")) type = "image/jpeg";
+    else if (!strcasecmp(ext, ".gif")) type = "image/gif";
+    else if (!strcasecmp(ext, ".bmp")) type = "image/bmp";
+  }
+  http_send(fd, 200, type, buf, len, "Cache-Control: no-store\r\n");
+  free(buf);
 }
 
 static void handle_usb_thumb(int fd, const char *query) {
@@ -767,13 +684,6 @@ static void handle_diag(int fd) {
   sb_printf(&sb, "\nBackups: original=%s last-launch=%s\n",
             file_exists(g_backup_orig) ? "yes" : "no",
             file_exists(g_backup_launch) ? "yes" : "no");
-  {
-    char hex[65];
-    live_elf_sha256(hex);
-    sb_printf(&sb, "LiveShell %s built in: %zu bytes, sha256 %s; live wallpaper %s, %s\n",
-              LIVESHELL_VERSION, live_elf_size(), hex, g_cfg.live ? "on" : "off",
-              live_running() ? "running" : "not running");
-  }
   sb_puts(&sb, "\n== Log (newest last) ==\n");
   hh_log_tail(&sb, 12000);
   if (sb.oom) http_send_text(fd, 500, "text/plain", "out of memory");
@@ -843,6 +753,7 @@ static void handle_restore(int fd) {
   char before[360];
   snprintf(before, sizeof(before), "%s/app.db.before-restore", g_backup_dir);
   hh_copy_db(g_app_db, before, err, sizeof(err));
+  folders_hold(1); /* the repair of folder tiles must not run between the copy and the reset */
   {
     hh_t h;
     if (hh_open(&h, g_app_db, g_state_db) == 0) {
@@ -852,11 +763,42 @@ static void handle_restore(int fd) {
     }
   }
   if (hh_copy_db(g_backup_orig, g_app_db, err, sizeof(err))) {
+    folders_hold(0);
     send_error(fd, 500, err);
     return;
   }
   hh_reset_state(g_state_db, err, sizeof(err));
+  folders_hold(0);
   send_ok(fd, "Original database restored. Restart the PS5 to finish.");
+}
+
+/* The launcher app asks HSM to open its menu after the app itself has closed: a browser started by an app
+ * that then exits is closed with it. The menu is opened a moment later from here. */
+static void *open_menu_worker(void *arg) {
+  long delay_ms = (long)(intptr_t)arg;
+  usleep((useconds_t)(delay_ms * 1000));
+  char url[64];
+  snprintf(url, sizeof(url), "http://127.0.0.1:%d/", HH_PORT);
+  if (plat_launch_browser(url)) hh_log("open menu: couldn't open the browser");
+  else hh_log("open menu: the menu was opened (asked by the launcher app)");
+  return NULL;
+}
+
+static void handle_open_menu(int fd, const char *query) {
+  char v[16];
+  long delay = 2000;
+  if (http_query_get(query, "delay", v, sizeof(v))) {
+    delay = atol(v);
+    if (delay < 0) delay = 0;
+    if (delay > 10000) delay = 10000;
+  }
+  pthread_t t;
+  if (pthread_create(&t, NULL, open_menu_worker, (void *)(intptr_t)delay) != 0) {
+    send_error(fd, 500, "Could not start the menu opener.");
+    return;
+  }
+  pthread_detach(t);
+  send_ok(fd, "Menu will open");
 }
 
 static void handle_reload(int fd) {
@@ -973,7 +915,9 @@ static void sb_saved_json(strbuf_t *sb, hh_t *h, const char *out_id, const char 
 
 typedef struct {
   char id[32], name[256], tab[16], color[16];
+  int  style;
   char *items;
+  int  later;    /* only write the files: a following request (picture, background) installs the tile */
   int  refresh;  /* restart the home screen when this is done (if anything changed) */
 } fjob_args_t;
 
@@ -995,7 +939,10 @@ static void *folder_job_worker(void *arg) {
   } else {
     char out_id[16] = "", note[200] = "";
     int changed = 1;
-    if (folders_save(&h, a->id, a->name, a->tab, a->color, a->items, out_id, note, sizeof(note), &changed)) {
+    if (a->later) folders_defer_install(1);
+    int save_bad = folders_save(&h, a->id, a->name, a->tab, a->color, a->style, a->items, out_id, note, sizeof(note), &changed);
+    if (a->later) folders_forget_pending();
+    if (save_bad) {
       hh_log("folder job: not saved: %s", h.err);
       sb_error_json(&sb, h.err);
     } else {
@@ -1026,8 +973,8 @@ static void *folder_job_worker(void *arg) {
 }
 
 /* job number, -1 if another folder change is still running, -2 if out of memory */
-static int folder_job_start(const char *id, const char *name, const char *tab, const char *color,
-                            const char *items, int refresh) {
+static int folder_job_start(const char *id, const char *name, const char *tab, const char *color, int style,
+                            const char *items, int refresh, int later) {
   pthread_mutex_lock(&FJ.mx);
   if (FJ.running) {
     pthread_mutex_unlock(&FJ.mx);
@@ -1045,7 +992,9 @@ static int folder_job_start(const char *id, const char *name, const char *tab, c
   snprintf(a->name, sizeof(a->name), "%s", name);
   snprintf(a->tab, sizeof(a->tab), "%s", tab);
   snprintf(a->color, sizeof(a->color), "%s", color);
+  a->style = style;
   a->refresh = refresh;
+  a->later = later;
   pthread_t t;
   if (pthread_create(&t, NULL, folder_job_worker, a) != 0) {
     free(a->items);
@@ -1121,13 +1070,17 @@ static void handle_folder_save(int fd, http_req_t *r) {
   http_query_get(form, "name", name, sizeof(name));
   http_query_get(form, "tab", tab, sizeof(tab));
   http_query_get(form, "color", color, sizeof(color));
+  char sv[8] = "";
+  int style = !http_query_get(form, "style", sv, sizeof(sv)) ? atoi(sv) : -1; /* none sent: keep the present one */
   http_query_get(form, "items", items, len + 1);
   free(form);
 
   char av[8] = "", rv[8] = "";
   int refresh = !http_query_get(r->query, "refresh", rv, sizeof(rv)) && atoi(rv);
+  char lv[8] = "";
+  int later = !http_query_get(r->query, "later", lv, sizeof(lv)) && atoi(lv);
   if (!http_query_get(r->query, "async", av, sizeof(av)) && atoi(av)) {
-    int job = folder_job_start(id, name, tab, color, items, refresh);
+    int job = folder_job_start(id, name, tab, color, style, items, refresh, later);
     free(items);
     if (job == -1) {
       send_error(fd, 409, "Another folder change is still being made. Please wait until it has finished.");
@@ -1153,7 +1106,10 @@ static void handle_folder_save(int fd, http_req_t *r) {
   }
   char out_id[16] = "", note[200] = "";
   int changed = 1;
-  if (folders_save(&h, id, name, tab, color, items, out_id, note, sizeof(note), &changed)) {
+  if (later) folders_defer_install(1);
+  int save_bad = folders_save(&h, id, name, tab, color, style, items, out_id, note, sizeof(note), &changed);
+  if (later) folders_forget_pending();
+  if (save_bad) {
     send_error(fd, 409, h.err);
   } else {
     strbuf_t sb;
@@ -1180,7 +1136,10 @@ static void handle_folder_delete(int fd, const char *query) {
     return;
   }
   if (folders_delete(&h, id)) send_error(fd, 409, h.err);
-  else send_ok(fd, "Folder removed. Its games are back on the home screen.");
+  else {
+    request_home_refresh(); /* the console doesn't repaint by itself: the deleted tile stays until the home screen restarts */
+    send_ok(fd, "Folder removed. Its games are back on the home screen.");
+  }
   hh_close(&h);
 }
 
@@ -1220,7 +1179,12 @@ static void handle_folder_icon_set(int fd, http_req_t *r) {
   }
   char rv[8] = "";
   int want_refresh = !http_query_get(r->query, "refresh", rv, sizeof(rv)) && atoi(rv);
-  if (folders_set_icon(&h, id, reset ? NULL : body, len)) {
+  char lv[8] = "";
+  int later = !http_query_get(r->query, "later", lv, sizeof(lv)) && atoi(lv);
+  if (later) folders_defer_install(1);
+  int icon_bad = folders_set_icon(&h, id, reset ? NULL : body, len);
+  if (later) folders_forget_pending();
+  if (icon_bad) {
     send_error(fd, 409, h.err);
   } else {
     send_ok(fd, reset ? "Back to the automatic icon." : "Folder picture updated.");
@@ -1365,7 +1329,12 @@ static void handle_folder_bg_set(int fd, http_req_t *r) {
   }
   char rv[8] = "";
   int want_refresh = !http_query_get(r->query, "refresh", rv, sizeof(rv)) && atoi(rv);
-  if (folders_set_bg(&h, id, reset ? NULL : body, len)) {
+  char lv[8] = "";
+  int later = !http_query_get(r->query, "later", lv, sizeof(lv)) && atoi(lv);
+  if (later) folders_defer_install(1);
+  int bg_bad = folders_set_bg(&h, id, reset ? NULL : body, len);
+  if (later) folders_forget_pending();
+  if (bg_bad) {
     send_error(fd, 409, h.err);
   } else {
     send_ok(fd, reset ? "Background removed." : "Background saved.");
@@ -1416,6 +1385,28 @@ static void handle_custom_icon(int fd, http_req_t *r) {
   hh_close(&h);
 }
 
+static void handle_folder_preview(int fd, const char *query) {
+  char items[1024] = "", color[16] = "blue", sv[8] = "";
+  http_query_get(query, "items", items, sizeof(items));
+  http_query_get(query, "color", color, sizeof(color));
+  int style = !http_query_get(query, "style", sv, sizeof(sv)) ? atoi(sv) : 0;
+  hh_t h;
+  unsigned char *png = NULL;
+  size_t len = 0;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    http_send_text(fd, 500, "text/plain", "no database");
+    return;
+  }
+  int rc = folders_preview(&h, items, color, style, &png, &len);
+  hh_close(&h);
+  if (rc || !png) {
+    http_send_text(fd, 500, "text/plain", "no preview");
+    return;
+  }
+  http_send(fd, 200, "image/png", png, len, "Cache-Control: no-store\r\n");
+  free(png);
+}
+
 static void handle_folder_icon(int fd, const char *query) {
   char id[32] = "", path[512];
   http_query_get(query, "id", id, sizeof(id));
@@ -1434,7 +1425,7 @@ static struct {
   int token, job;
   volatile int done;
   backup_progress_t prog;
-  char result[1600];
+  char result[3200];
   time_t t0;
 } g_imp;
 static pthread_mutex_t g_imp_mx = PTHREAD_MUTEX_INITIALIZER;
@@ -1650,6 +1641,8 @@ static int import_settings(const char *text, size_t len) {
   return 0;
 }
 
+static int create_big_thread(pthread_t *th, void *(*fn)(void *), void *arg);
+
 static void *import_worker(void *arg) {
   backup_t *b = arg;
   hh_t h;
@@ -1713,7 +1706,9 @@ static void handle_import_apply(int fd, const char *query) {
   g_imp.job++;
   g_import_running = 1;
   pthread_t t;
-  if (pthread_create(&t, NULL, import_worker, b) != 0) {
+  /* The import can fill a background in a game that has no background entry, which needs a big stack
+   * (the bulk jobs get 4 MB too). With the small default stack the whole program stopped there. */
+  if (create_big_thread(&t, import_worker, b) != 0) {
     g_import_running = 0;
     backup_close(b);
     send_error(fd, 500, "Couldn't start the import.");
@@ -1783,6 +1778,113 @@ static void send_page(int fd, const char *html, size_t len) {
 #define BULK_MAX_TILES 1500
 
 /* Free space on the drive the backgrounds go to. (The tests can fake it with a file holding a number.) */
+
+/* Read-only look at the folders the system takes its own pictures from, written to the log (nothing is changed).
+ * It tells which of the files other theme tools replace exist on this firmware. */
+static void probe_walk(const char *path, int depth, int *budget, int maxdepth, int maxper) {
+  DIR *d = opendir(path);
+  if (!d) {
+    hh_log("probe: %s: cannot open (%s)", path, strerror(errno));
+    return;
+  }
+  struct dirent *e;
+  int shown = 0, total = 0;
+  while ((e = readdir(d))) {
+    if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    total++;
+    if (shown >= maxper || *budget <= 0) continue;
+    char sub[600];
+    snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+    struct stat sb;
+    if (lstat(sub, &sb) != 0) continue;
+    shown++;
+    (*budget)--;
+    if (S_ISDIR(sb.st_mode)) {
+      hh_log("probe: %*s%s/", depth * 2, "", sub);
+      if (depth < maxdepth) probe_walk(sub, depth + 1, budget, maxdepth, maxper);
+    } else {
+      hh_log("probe: %*s%s  %lld bytes", depth * 2, "", sub, (long long)sb.st_size);
+    }
+  }
+  closedir(d);
+  if (total > shown) hh_log("probe: %*s%s: %d more entries not listed", depth * 2, "", path, total - shown);
+}
+
+static void probe_system_art(void) {
+  if (getenv("HH_NO_PROBE")) return;
+  static const struct { const char *path; int depth, per; } roots[] = {
+      {"/system_ex/vsh_asset", 3, 200},
+      {"/mnt/rnps/apps", 3, 4},
+      {"/system_ex/rnps/apps", 4, 4},
+      {"/user/appmeta", 2, 4},
+  };
+  hh_log("probe: read-only look at the system picture folders starts");
+  for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+    int budget = i == 0 ? 300 : 120;
+    hh_log("probe: ---- %s", roots[i].path);
+    probe_walk(roots[i].path, 1, &budget, roots[i].depth, roots[i].per);
+  }
+  /* every system app folder: which of the picture files it has (one short line each) */
+  {
+    DIR *d = opendir("/system_ex/rnps/apps");
+    struct dirent *e;
+    hh_log("probe: ---- picture files per system app (/system_ex/rnps/apps/<id>)");
+    while (d && (e = readdir(d))) {
+      if (e->d_name[0] == '.') continue;
+      char p1[600], p2[600], p3[600];
+      struct stat sb;
+      snprintf(p1, sizeof(p1), "/system_ex/rnps/apps/%s/icon0.png", e->d_name);
+      snprintf(p2, sizeof(p2), "/system_ex/rnps/apps/%s/pic0.dds", e->d_name);
+      snprintf(p3, sizeof(p3), "/system_ex/rnps/apps/%s/sce_sys", e->d_name);
+      hh_log("probe:   %s icon0.png=%s pic0.dds=%s sce_sys=%s", e->d_name, stat(p1, &sb) == 0 ? "yes" : "no",
+             stat(p2, &sb) == 0 ? "yes" : "no", stat(p3, &sb) == 0 ? "yes" : "no");
+    }
+    if (d) closedir(d);
+  }
+  /* the 13 system tile backgrounds: tile name, and what is inside the zstd file (read-only) */
+  {
+    char mnt[300];
+    plat_describe_mount("/system_ex/vsh_asset", mnt, sizeof(mnt));
+    hh_log("probe: /system_ex/vsh_asset is on: %s", mnt);
+    hh_t ph;
+    int have_db = hh_open(&ph, g_app_db, g_state_db) == 0;
+    DIR *d = opendir("/system_ex/vsh_asset");
+    struct dirent *e;
+    hh_log("probe: ---- system tile backgrounds (bg_NPXS*.dds.zst)");
+    while (d && (e = readdir(d))) {
+      if (strncmp(e->d_name, "bg_NPXS", 7) != 0) continue;
+      char path[600], tid[16] = "", name[200] = "";
+      snprintf(path, sizeof(path), "/system_ex/vsh_asset/%s", e->d_name);
+      snprintf(tid, sizeof(tid), "%.9s", e->d_name + 3);
+      if (have_db) hh_title_name(&ph, tid, name, sizeof(name));
+      unsigned char b[18];
+      FILE *f = fopen(path, "rb");
+      size_t got = f ? fread(b, 1, sizeof(b), f) : 0;
+      if (f) fclose(f);
+      char what[160] = "cannot read";
+      if (got >= 6 && b[0] == 0x28 && b[1] == 0xB5 && b[2] == 0x2F && b[3] == 0xFD) {
+        int desc = b[4], fcs = desc >> 6, single = (desc >> 5) & 1, dict = desc & 3;
+        size_t at = 5 + (single ? 0 : 1) + (dict == 3 ? 4 : dict);
+        int fcs_len = fcs == 0 ? (single ? 1 : 0) : (fcs == 1 ? 2 : fcs == 2 ? 4 : 8);
+        unsigned long long size = 0;
+        if (fcs_len && at + fcs_len <= got) {
+          for (int k = fcs_len - 1; k >= 0; k--) size = size << 8 | b[at + k];
+          if (fcs_len == 2) size += 256;
+          snprintf(what, sizeof(what), "zstd frame, content size %llu bytes", size);
+        } else {
+          snprintf(what, sizeof(what), "zstd frame, content size not stored");
+        }
+      } else if (got >= 4) {
+        snprintf(what, sizeof(what), "not a zstd file (starts %02x %02x %02x %02x)", b[0], b[1], b[2], b[3]);
+      }
+      hh_log("probe:   %s  \"%s\"  %s", tid, name[0] ? name : "(no tile name)", what);
+    }
+    if (d) closedir(d);
+    if (have_db) hh_close(&ph);
+  }
+  hh_log("probe: done");
+}
+
 static unsigned long long appmeta_free(void) {
   const char *ff = getenv("HH_TEST_FREE_FILE");
   if (ff) {
@@ -1993,6 +2095,7 @@ static void handle_bulk_rename(int fd, http_req_t *r) {
         sb_json_str(&fails, h.err);
         sb_puts(&fails, "}");
       }
+      hh_log("bulk names: %s was not renamed: %s", id, h.err);
       failed++;
     }
   }
@@ -2166,7 +2269,20 @@ static void *bulk_bg_worker(void *arg) {
         continue;
       }
       if (!custom_can_bg(&h, id)) {
-        no_entry++;
+        /* a game or app without a background entry: fill the empty slots of the database (the system
+           tiles are left out, the home screen doesn't keep a background written for them) */
+        if (!strncmp(id, "NPXS", 4)) {
+          no_entry++;
+          continue;
+        }
+        int rc = custom_try_bg(&h, id, jpg, jl, path, 1);
+        if (rc == 0) applied++;
+        else if (rc == -2) no_entry++;
+        else {
+          if (!failed) snprintf(first_err, sizeof(first_err), "%s: %.200s", id, h.err);
+          hh_log("bulk background: %s failed: %.200s", id, h.err);
+          failed++;
+        }
         continue;
       }
       if (!j->overwrite && custom_has_bg(&h, id)) {
@@ -2176,6 +2292,7 @@ static void *bulk_bg_worker(void *arg) {
       if (custom_set_bg_prepared(&h, id, jpg, jl, path) == 0) applied++;
       else {
         if (!failed) snprintf(first_err, sizeof(first_err), "%s: %.200s", id, h.err);
+        hh_log("bulk background: %s failed: %.200s", id, h.err);
         failed++;
       }
     }
@@ -2378,6 +2495,118 @@ static void handle_bulk_bg_undo(int fd, http_req_t *r) {
   sb_free(&sb);
 }
 
+/* ---- undo everything Home Screen Manager changed (More & troubleshooting) ----
+ * Takes back, one by one, only what this tool did: folders, tab moves, order, hidden tiles, pictures,
+ * backgrounds and names. The rest of the database is not touched, so games installed or deleted since
+ * the first backup stay exactly as the console has them (unlike "Restore original backup"). */
+static void bk_step(const char *what, int i, int n) {
+  g_bk.i = i;
+  g_bk.n = n;
+  snprintf(g_bk.phase, sizeof(g_bk.phase), "%s", what);
+}
+
+static void *undo_everything_worker(void *arg) {
+  (void)arg;
+  hh_t h;
+  int folders = 0, tabs = 0, order = 0, shown = 0, pics = 0, bgs = 0, names = 0, failed = 0;
+  long t0 = bk_now_ms();
+  char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
+  if (ids && hh_open(&h, g_app_db, g_state_db) == 0) {
+    folders_hold(1);
+    custom_gc_defer(1);
+    int n = folders_ids(&h, ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      bk_step("Removing the folders…", i + 1, n);
+      if (folders_delete(&h, ids[i]) == 0) folders++;
+      else failed++;
+    }
+    n = tabs_moved_ids(&h, ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      bk_step("Putting moved tiles back on their tab…", i + 1, n);
+      if (tabs_reset(&h, ids[i]) == 0) tabs++;
+      else failed++;
+    }
+    bk_step("Putting the home screen order back…", 0, 0);
+    int had_order = 0;
+    sqlite3_stmt *as = NULL;
+    if (sqlite3_prepare_v2(h.db, "SELECT count(*) FROM hh.arranged", -1, &as, NULL) == SQLITE_OK) {
+      if (sqlite3_step(as) == SQLITE_ROW) had_order = sqlite3_column_int(as, 0) > 0;
+      sqlite3_finalize(as);
+    }
+    if (arrange_clear(&h) == 0) order = had_order;
+    else failed++;
+    bk_step("Showing hidden tiles again…", 0, 0);
+    if (hh_unhide_all(&h, &shown)) failed++;
+    n = custom_icon_ids(&h, ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      bk_step("Putting the original pictures back…", i + 1, n);
+      if (custom_set_icon(&h, ids[i], NULL, 0, 0) == 0) pics++;
+      else failed++;
+    }
+    n = custom_bg_ids(&h, ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      bk_step("Putting the original backgrounds back…", i + 1, n);
+      if (custom_set_bg(&h, ids[i], NULL, 0) == 0) bgs++;
+      else failed++;
+    }
+    n = custom_renamed_ids(&h, ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      bk_step("Putting the original names back…", i + 1, n);
+      if (custom_set_name(&h, ids[i], NULL) == 0) names++;
+      else failed++;
+    }
+    bk_step("Cleaning up…", 0, 0);
+    custom_gc_defer(0);
+    custom_shared_gc(&h);
+    folders_hold(0);
+    hh_close(&h);
+  } else {
+    failed = 1;
+  }
+  free(ids);
+  hh_log("undo everything: %d folder(s), %d moved tile(s), order %s, %d tile(s) shown, %d picture(s), %d background(s), "
+         "%d name(s), %d failed, %ld ms",
+         folders, tabs, order ? "cleared" : "unchanged", shown, pics, bgs, names, failed, bk_now_ms() - t0);
+  snprintf(g_bk.result, sizeof(g_bk.result),
+           "{\"ok\":true,\"folders\":%d,\"tabs\":%d,\"order\":%d,\"shown\":%d,\"pics\":%d,\"bgs\":%d,\"names\":%d,"
+           "\"failed\":%d,\"ms\":%ld}",
+           folders, tabs, order, shown, pics, bgs, names, failed, bk_now_ms() - t0);
+  request_home_refresh_quick();
+  g_bk.done = 1;
+  g_import_running = 0;
+  return NULL;
+}
+
+static void handle_undo_everything(int fd, http_req_t *r) {
+  http_drain(fd, r);
+  if (g_import_running || folders_busy()) {
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  bulk_backup();
+  g_bk.job++;
+  g_bk.done = 0;
+  g_bk.i = 0;
+  g_bk.n = 0;
+  g_bk.result[0] = '\0';
+  g_bk.t0 = time(NULL);
+  snprintf(g_bk.phase, sizeof(g_bk.phase), "Starting…");
+  g_import_running = 1;
+  hh_log("undo everything: starting");
+  pthread_t th;
+  if (create_big_thread(&th, undo_everything_worker, NULL) != 0) {
+    g_import_running = 0;
+    send_error(fd, 500, "Couldn't start the job.");
+    return;
+  }
+  pthread_detach(th);
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"job\":%d}", g_bk.job);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
 static void handle_bulk_bg_try(int fd, http_req_t *r) {
   unsigned char *buf;
   size_t len;
@@ -2397,6 +2626,7 @@ static void handle_bulk_bg_try(int fd, http_req_t *r) {
     send_error(fd, 400, "Send the title id of the tile.");
     return;
   }
+  int report = json_flag((const char *)buf, t, nt, "report"); /* only look, write nothing */
   free(buf);
   free(t);
   bulk_prep_path(path, sizeof(path));
@@ -2425,7 +2655,7 @@ static void handle_bulk_bg_try(int fd, http_req_t *r) {
     return;
   }
   bulk_backup();
-  int write = strncmp(id, "NPXS", 4) != 0; /* system tiles: a report only */
+  int write = !report;
   int rc = custom_try_bg(&h, id, jpg, jl, path, write);
   strbuf_t sb;
   sb_init(&sb);
@@ -2495,10 +2725,14 @@ static void handle_client(int fd) {
     handle_folders(fd);
   } else if (!strcmp(p, "/api/folder")) {
     handle_folder(fd, r.query);
+  } else if (!strcmp(p, "/api/folder_preview")) {
+    handle_folder_preview(fd, r.query);
   } else if (!strcmp(p, "/api/folder_icon")) {
     handle_folder_icon(fd, r.query);
   } else if (!strcmp(p, "/api/usb_images")) {
     handle_usb_images(fd);
+  } else if (!strcmp(p, "/api/usb_pic")) {
+    handle_usb_pic(fd, r.query);
   } else if (!strcmp(p, "/api/usb_thumb")) {
     handle_usb_thumb(fd, r.query);
   } else if (!strcmp(p, "/api/list")) {
@@ -2519,10 +2753,6 @@ static void handle_client(int fd) {
     handle_arrange(fd);
   } else if (!strcmp(p, "/api/tabs")) {
     handle_tabs_moved(fd);
-  } else if (!strcmp(p, "/api/live")) {
-    handle_live(fd);
-  } else if (!strcmp(p, "/api/live/thumb")) {
-    handle_live_thumb(fd, r.query);
   } else if (!strcmp(p, "/api/launch_status")) {
     handle_launch_status(fd, r.query);
   } else if (!strcmp(p, "/api/folders/job")) {
@@ -2608,20 +2838,18 @@ static void handle_client(int fd) {
     handle_arrange_clear(fd);
   } else if (!strcmp(p, "/api/tab")) {
     handle_tab_move(fd, r.query);
-  } else if (!strcmp(p, "/api/live/power")) {
-    handle_live_power(fd, r.query);
-  } else if (!strcmp(p, "/api/live/select")) {
-    handle_live_video(fd, r.query, "select");
-  } else if (!strcmp(p, "/api/live/delete")) {
-    handle_live_video(fd, r.query, "delete");
   } else if (!strcmp(p, "/api/unhide_all")) {
     handle_unhide_all(fd);
   } else if (!strcmp(p, "/api/settings")) {
     handle_settings(fd, r.query);
+  } else if (post && !strcmp(p, "/api/undo_everything")) {
+    handle_undo_everything(fd, &r);
   } else if (!strcmp(p, "/api/restore")) {
     handle_restore(fd);
   } else if (!strcmp(p, "/api/reload_shell")) {
     handle_reload(fd);
+  } else if (!strcmp(p, "/api/open_menu")) {
+    handle_open_menu(fd, r.query);
   } else if (!strcmp(p, "/api/quit")) {
     send_ok(fd, "bye");
     g_running = 0;
@@ -2729,6 +2957,7 @@ static long ms_since(const struct timespec *t0) {
  * checked when the home screen database has changed, and right after a game closes. */
 static volatile int g_force_custom;
 static long long g_custom_stamp = -1;
+static time_t g_db_activity; /* last time something other than us wrote to the home screen database */
 static long long db_stamp(void) {
   struct stat st;
   if (stat(g_app_db, &st) != 0) return -1;
@@ -2752,14 +2981,35 @@ static void watchdog_pass(hh_t *h) {
   if (h->nusers == 0) return;
   int rehidden = 0, folders = 0, arranged = 0;
   if (g_cfg.reapply) rehide_now(h, &rehidden);
-  folders_reapply(h, &folders);
+  if (db_stamp() != g_custom_stamp) g_db_activity = time(NULL);
+  folders_reapply_patient(h, &folders, g_db_activity ? (long)(time(NULL) - g_db_activity) : 1000000L);
+  int orphans = 0;
+  {
+    /* Leftover folder tiles show up after another tool registered games. So look at start-up, again when
+     * the database has been busy with someone else and has calmed down, and now and then in any case. This
+     * also keeps the few small reads of the databases away from a folder being saved. */
+    static time_t sweep_last, sweep_seen;
+    long calm = 15, every = 600;
+    const char *e1 = getenv("HH_SWEEP_QUIET"), *e2 = getenv("HH_SWEEP_EVERY");
+    if (e1 && *e1) calm = atol(e1);
+    if (e2 && *e2) every = atol(e2);
+    time_t now = time(NULL);
+    int due = !sweep_last || now - sweep_last >= every ||
+              (g_db_activity > sweep_seen && now - g_db_activity >= calm);
+    if (due && !folders_busy() && !g_import_running) {
+      sweep_last = now;
+      sweep_seen = g_db_activity;
+      folders_sweep_orphans(h, &orphans);
+      if (folders_sweep_tiles_removed() > 0) request_home_refresh(); /* a leftover tile was shown: restart so it goes */
+    }
+  }
   int fronted = 0;
   if (g_cfg.folders_first) folders_front_apply(h, &fronted);
   arrange_apply(h, &arranged);
   int tabbed = 0;
   tabs_apply(h, &tabbed);
   custom_repair(h);
-  if (rehidden || folders || arranged || tabbed || fronted)
+  if (rehidden || folders || arranged || tabbed || fronted || orphans)
     hh_log("auto re-hide: %d tile(s), %d folder(s), %d arranged, %d tab-moved, %d kept first — the home screen heals itself",
            rehidden, folders, arranged, tabbed, fronted);
 }
@@ -2799,6 +3049,7 @@ static void *rehide_watchdog(void *arg) {
       snprintf(prev, sizeof(prev), "%s", now);
       if (g_refresh_request) refresh = 1; /* a folder was created or changed */
       static time_t quick_last;
+      if (db_stamp() != g_custom_stamp) g_db_activity = time(NULL);
       if (!g_import_running && !g_refresh_request && time(NULL) != quick_last && db_stamp() != g_custom_stamp) {
         quick_last = time(NULL); /* at most once a second, so a busy database never costs a game any speed */
         /* the PS5 wrote to the database (for example a game's own name when it starts): put custom
@@ -2812,6 +3063,20 @@ static void *rehide_watchdog(void *arg) {
       if (closed || refresh) break;
     }
     if (!g_running) break;
+    if (refresh && g_refresh_quick && !closed) {
+      /* A bulk run is finished: restart the home screen at once. Nothing here opens the database (a
+       * lock held by the console could make that wait for up to 10 seconds); the normal checks run
+       * again right after the restart. */
+      g_refresh_hold = 1;
+      g_refresh_quick = 0;
+      g_refresh_full = 0;
+      g_refresh_request = 0;
+      hh_log("home screen refresh: the change is done, restarting right away");
+      int rc = plat_reload_shellui();
+      hh_log("home screen refresh: restarting the home screen process%s", rc ? " (the process wasn't found)" : "");
+      g_refresh_hold = 0;
+      continue;
+    }
     hh_t h;
     if (hh_open(&h, g_app_db, g_state_db) != 0) continue;
     g_refresh_hold = refresh; /* a refresh comes first: the repair of custom names waits for it */
@@ -2841,6 +3106,7 @@ static void *rehide_watchdog(void *arg) {
        * right again, and only then restart the home screen, so that it reads the right layout. */
       int quick = g_refresh_quick;
       g_refresh_quick = 0;
+      g_refresh_full = 0;
       g_refresh_request = 0;
       if (quick) {
         hh_log("home screen refresh: the change is done, restarting right away");
@@ -2848,6 +3114,14 @@ static void *rehide_watchdog(void *arg) {
         hh_log("home screen refresh: the folder change is done, putting the tile positions right first");
         for (int i = 0; i < 8 && g_running; i++) usleep(250000);
         watchdog_pass(&h);
+        if (!folders_busy() && !g_import_running) { /* a deleted folder's tile can still be in the database: take it away now, so that one restart is enough */
+          int left = 0;
+          folders_sweep_orphans(&h, &left);
+          if (left) {
+            hh_log("home screen refresh: %d leftover folder tile(s) taken away before the restart", left);
+            folders_sweep_tiles_removed();
+          }
+        }
       }
       hh_close(&h);
       int rc = plat_reload_shellui();
@@ -2885,6 +3159,7 @@ static void wait_previous_instance_gone(void) {
 int main(void) {
   signal(SIGPIPE, SIG_IGN);
   plat_init();
+  plat_set_process_name("HomeScreenManager");
   int was_running = stop_previous_instance(); /* first: the data folder may be moved next */
   if (was_running) wait_previous_instance_gone();
   setup_paths();
@@ -2908,18 +3183,19 @@ int main(void) {
   }
   folders_cfg_t fcfg = {g_data_dir, g_app_dir, HH_PORT};
   folders_init(&fcfg);
+  folders_set_appmeta_dir(g_appmeta_dir);
+  folders_set_db_path(g_app_db);
+  {
+    char sd[320];
+    snprintf(sd, sizeof(sd), "%s/stage", g_data_dir);
+    plat_set_stage_dir(sd);
+    plat_unmask_leftover();
+  }
+  probe_system_art();
   launch_cfg_t lcfg = {g_app_dir, g_appmeta_dir};
   launch_init(&lcfg);
   custom_cfg_t ccfg = {g_data_dir, g_appmeta_dir};
   custom_init(&ccfg);
-  {
-    live_cfg_t lv = {g_loader_port, 9050};
-#ifdef HH_HOST
-    if (getenv("HH_LIVESHELL_PORT")) lv.api_port = atoi(getenv("HH_LIVESHELL_PORT"));
-#endif
-    live_init(&lv);
-  }
-
   /* safety copies of the home screen database */
   char err[256] = "";
   if (!file_exists(g_backup_orig) && hh_copy_db(g_app_db, g_backup_orig, err, sizeof(err)))
@@ -2980,11 +3256,6 @@ int main(void) {
     plat_notify("Home Screen Manager %s running on port %d", HH_VERSION, HH_PORT);
 
   if (g_cfg.auto_check && !just_updated) upd_start_check(g_cfg.repo[0] != '\0', 1, 1);
-
-  /* live wallpaper: start the built-in LiveShell unless it is already running.
-   * A short wait lets the ELF loader settle at boot; the rest of the time to
-   * a visible wallpaper is LiveShell's own ShellUI setup. */
-  if (g_cfg.live) live_start_async(just_updated ? 0 : 1);
 
   int first_boot_start = first_start_since_boot();
   int open_menu = !just_updated &&

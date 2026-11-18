@@ -25,3 +25,4 @@ int  tabs_reset(hh_t *h, const char *tid);
 int  tabs_apply(hh_t *h, int *fixed);
 /* JSON: [{"id","dest"}...] of tiles Home Screen Manager has moved. */
 int  tabs_moved_json(hh_t *h, strbuf_t *sb);
+int  tabs_moved_ids(hh_t *h, char (*ids)[16], int max);

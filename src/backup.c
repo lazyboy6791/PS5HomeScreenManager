@@ -212,7 +212,7 @@ int backup_export(hh_t *h, const char *settings_path, strbuf_t *out) {
   /* folders, with their games in order and their own picture and background */
   sb_init(&sb);
   sb_puts(&sb, "[");
-  sqlite3_stmt *st = prep(h, "SELECT title_id, name, tab, color, custom_icon FROM hh.folders ORDER BY title_id");
+  sqlite3_stmt *st = prep(h, "SELECT title_id, name, tab, color, custom_icon, style FROM hh.folders ORDER BY title_id");
   while (st && sqlite3_step(st) == SQLITE_ROW) {
     const char *id = col(st, 0);
     int icon = 0, bg = 0;
@@ -238,7 +238,7 @@ int backup_export(hh_t *h, const char *settings_path, strbuf_t *out) {
     sb_json_str(&sb, col(st, 2));
     sb_puts(&sb, ",\"color\":");
     sb_json_str(&sb, col(st, 3));
-    sb_printf(&sb, ",\"icon\":%s,\"bg\":%s,\"items\":[", icon ? "true" : "false", bg ? "true" : "false");
+    sb_printf(&sb, ",\"style\":%d,\"icon\":%s,\"bg\":%s,\"items\":[", sqlite3_column_int(st, 5), icon ? "true" : "false", bg ? "true" : "false");
     sqlite3_stmt *it = prep(h, "SELECT title_id, was_hidden FROM hh.folder_items WHERE folder=?1 ORDER BY pos");
     if (it) {
       sqlite3_bind_text(it, 1, id, -1, SQLITE_TRANSIENT);
@@ -277,7 +277,7 @@ int backup_export(hh_t *h, const char *settings_path, strbuf_t *out) {
   /* custom names, pictures and backgrounds of ordinary tiles */
   sb_init(&sb);
   sb_puts(&sb, "[");
-  st = prep(h, "SELECT title_id, name, icon_file IS NOT NULL, bg_file IS NOT NULL FROM hh.custom "
+  st = prep(h, "SELECT title_id, name, icon_file IS NOT NULL, bg_file IS NOT NULL, name_src, name_before FROM hh.custom "
                "WHERE title_id NOT LIKE 'HHFD%' ORDER BY title_id");
   while (st && sqlite3_step(st) == SQLITE_ROW) {
     const char *id = col(st, 0);
@@ -304,6 +304,14 @@ int backup_export(hh_t *h, const char *settings_path, strbuf_t *out) {
     sb_json_str(&sb, id);
     sb_puts(&sb, ",\"name\":");
     sb_json_str(&sb, has_name ? col(st, 1) : NULL);
+    /* where the name came from: Clean Up Game Names ("tool"), and the name you gave by hand before it */
+    if (has_name && !strcmp(col(st, 4), "tool")) {
+      sb_puts(&sb, ",\"name_src\":\"tool\"");
+      if (col(st, 5)[0]) {
+        sb_puts(&sb, ",\"name_before\":");
+        sb_json_str(&sb, col(st, 5));
+      }
+    }
     sb_printf(&sb, ",\"icon\":%s,\"bg\":%s}", icon ? "true" : "false", bg ? "true" : "false");
     n_cus++;
   }
@@ -684,11 +692,15 @@ int backup_apply(hh_t *h, backup_t *b, backup_progress_t *p, int (*apply_setting
     int total = 0;
     while (json_at(d.t, d.n, 0, total) >= 0 && total < BK_MAX_FOLDERS) total++;
     p->folder_n = total;
+    folders_defer_install(1); /* the files first, one install for all folders afterwards */
     for (int i = 0, fo; i < total && (fo = json_at(d.t, d.n, 0, i)) >= 0; i++) {
       char name[100], tab[16], color[16], oldid[32];
       jstr(&d, fo, "name", name, sizeof(name));
       jstr(&d, fo, "tab", tab, sizeof(tab));
       jstr(&d, fo, "color", color, sizeof(color));
+      char stv[8] = "";
+      jstr(&d, fo, "style", stv, sizeof(stv));
+      int style = stv[0] ? atoi(stv) : 0;
       jstr(&d, fo, "id", oldid, sizeof(oldid));
       p->folder_i = i + 1;
       strbuf_t csv;
@@ -710,7 +722,7 @@ int backup_apply(hh_t *h, backup_t *b, backup_progress_t *p, int (*apply_setting
       snprintf(p->phase, sizeof(p->phase), "Creating folder \"%s\" (%d of %d)…", name, i + 1, total);
       char out_id[16] = "", note[200] = "";
       int changed = 1;
-      if (folders_save(h, "", name, tab, color, csv.data, out_id, note, sizeof(note), &changed) != 0) {
+      if (folders_save(h, "", name, tab, color, style, csv.data, out_id, note, sizeof(note), &changed) != 0) {
         problem(p, "folder \"%s\": %s", name, h->err);
         sb_free(&csv);
         continue;
@@ -741,6 +753,15 @@ int backup_apply(hh_t *h, backup_t *b, backup_progress_t *p, int (*apply_setting
     jdoc_close(&d);
   }
 
+  folders_defer_install(0);
+  if (p->folders_made) {
+    snprintf(p->phase, sizeof(p->phase),
+             "Registering %d folder%s with the console (one install for all, about 1½ minutes)…", p->folders_made,
+             p->folders_made == 1 ? "" : "s");
+    int bad = folders_install_pending(h);
+    if (bad) problem(p, "%d folder tile(s) did not show up after the install; restart the PS5 if they are missing", bad);
+  }
+
   /* 3. tiles you hid */
   if (jdoc_open(b, "hidden.json", JSON_ARR, &d) == 0) {
     snprintf(p->phase, sizeof(p->phase), "Hiding your hidden tiles…");
@@ -764,7 +785,19 @@ int backup_apply(hh_t *h, backup_t *b, backup_progress_t *p, int (*apply_setting
       if (!present(h, tid)) continue;
       int did = 0;
       if (jstr(&d, co, "name", name, sizeof(name)) == 0 && name[0]) {
-        if (custom_set_name(h, tid, name) == 0) did = 1;
+        char src[16] = "", before[100] = "";
+        jstr(&d, co, "name_src", src, sizeof(src));
+        jstr(&d, co, "name_before", before, sizeof(before));
+        int rc;
+        if (!strcmp(src, "tool")) {
+          /* a name from Clean Up Game Names stays one (so it is not taken for a name by hand), and the name
+           * you gave by hand before the cleanup is remembered again */
+          rc = before[0] ? custom_set_name(h, tid, before) : 0;
+          if (rc == 0) rc = custom_set_name_tool(h, tid, name);
+        } else {
+          rc = custom_set_name(h, tid, name);
+        }
+        if (rc == 0) did = 1;
         else problem(p, "%s: its name: %s", tid, h->err);
       }
       if (jbool(&d, co, "icon")) {
@@ -777,7 +810,7 @@ int backup_apply(hh_t *h, backup_t *b, backup_progress_t *p, int (*apply_setting
       if (jbool(&d, co, "bg")) {
         snprintf(zn, sizeof(zn), "backgrounds/%s.jpg", tid);
         if (bk_find(b, zn, &data, &len) == 0) {
-          if (custom_set_bg(h, tid, data, len) == 0) did = 1;
+          if (custom_set_bg_fill(h, tid, data, len) == 0) did = 1;
           else problem(p, "%s: its background: %s", tid, h->err);
         }
       }

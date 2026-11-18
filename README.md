@@ -1,24 +1,22 @@
 <div align="center">
 
+<img src="assets/icon0.png" width="128" alt="Home Screen Manager icon">
+
 # PS5 Home Screen Manager
 
-**Make the PS5 home screen yours. One payload for all of it.**
-Hide tiles, group games into folders, give any tile a new name, picture or background, and play a video as your wallpaper.
+**It only does everything you want with your PS5 home screen.**
+Create Folders, Wallpapers, Edit & Modify App/Game Icons & Backgrounds, Change App/Game Names, Hide Apps/Games, Rearrange Tiles and much more...
 
-![PS5 payload](https://img.shields.io/badge/PS5-payload-0070d1)
-![Tested on FW 4.51](https://img.shields.io/badge/tested-FW%204.51-2ea44f)
-![Version 2.2.0](https://img.shields.io/badge/version-2.2.0-7a4bf2)
+![Tested on FW 13.60](https://img.shields.io/badge/tested-FW%2013.60-2ea44f)
+![Version 2.2.2](https://img.shields.io/badge/version-2.2.2-7a4bf2)
 ![License GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-555)
-![Runs with Payload Manager](https://img.shields.io/badge/runs%20with-Payload%20Manager-555)
 
 </div>
 
 ---
 
-Home Screen Manager is a payload (`.elf`) for jailbroken PS5 consoles. Start it from **Payload Manager**, and its menu opens in the PS5 browser, or on your phone or PC.
-
-> [!IMPORTANT]
-> **Your changes stay in place even when the PS5 isn't jailbroken.** Home Screen Manager writes them into the console's own home-screen database, so they survive restarts and normal boots. You only need the jailbreak to open Home Screen Manager and make changes.
+> [!CAUTION]
+> Your changes to the home screen stay in place even when the PS5 isn't jailbroken. Home Screen Manager writes them into the console's own home screen database, so they survive restarts and normal boots. Some features like opening folders and others will not work unless the HomeScreenManager.elf is loaded either through the tile in the media tab or a payload manager. Please add the HomeScreenManager.elf to your autoloader or launch it through its tile in the media tab after the jailbreak.
 
 Nothing is ever deleted. Hidden games still work, and every change can be undone.
 
@@ -42,7 +40,7 @@ Nothing is ever deleted. Hidden games still work, and every change can be undone
 
 ## Requirements
 
-- A jailbroken PS5 (tested on firmware **4.51**)
+- A jailbroken PS5 (tested on firmware **13.60**)
 - [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) by itsPLK, with its ELF loader
 - `HomeScreenManager.elf` from the [Releases](../../releases) page
 
@@ -250,6 +248,10 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 **Can I use it from my phone?** Yes. Open `http://<PS5-IP>:8090` on any device on the same network.
 
 </details>
+
+## Native app (experimental)
+
+The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). After an update from GitHub or USB, the tile starts the updated copy (kept in `/data/homescreenmanager`) when it is newer than the one bundled in the app.
 
 ## Building from source
 

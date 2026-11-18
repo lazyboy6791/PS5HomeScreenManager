@@ -73,6 +73,7 @@ void custom_forget_all(hh_t *h);
 int  custom_has_bg(hh_t *h, const char *tid);
 int  custom_renamed_ids(hh_t *h, char (*ids)[16], int max);
 int  custom_bg_ids(hh_t *h, char (*ids)[16], int max);
+int  custom_icon_ids(hh_t *h, char (*ids)[16], int max);
 
 /* A name from Clean Up Game Names (remembers that it did not come from the tile editor). */
 int  custom_set_name_tool(hh_t *h, const char *tid, const char *name);
@@ -80,4 +81,5 @@ int  custom_set_name_tool(hh_t *h, const char *tid, const char *name);
 int  custom_undo_names(hh_t *h, const char *tid, int hand_too);
 /* The experiment: fill the empty background slots of a tile that has none. write = 0 only reports.
  * 0 = done, 1 = only a report was made, -1 = error (text in h->err). */
+int  custom_set_bg_fill(hh_t *h, const char *tid, const unsigned char *img, size_t len);
 int  custom_try_bg(hh_t *h, const char *tid, const unsigned char *jpg, size_t len, const char *prepared_path, int write);

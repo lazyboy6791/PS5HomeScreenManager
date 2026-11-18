@@ -243,6 +243,18 @@ int tabs_apply(hh_t *h, int *fixed) {
   return rc;
 }
 
+/* Title ids of the tiles moved to the other tab. Returns how many were put in ids. */
+int tabs_moved_ids(hh_t *h, char (*ids)[16], int max) {
+  sqlite3_stmt *st = prep(h, "SELECT title_id FROM hh.tab_moved");
+  int n = 0;
+  while (st && n < max && sqlite3_step(st) == SQLITE_ROW) {
+    const char *v = (const char *)sqlite3_column_text(st, 0);
+    if (v && hh_valid_tid(v)) snprintf(ids[n++], 16, "%.15s", v);
+  }
+  if (st) sqlite3_finalize(st);
+  return n;
+}
+
 int tabs_moved_json(hh_t *h, strbuf_t *sb) {
   sb_puts(sb, "[");
   sqlite3_stmt *st = prep(h, "SELECT title_id, dest FROM hh.tab_moved");

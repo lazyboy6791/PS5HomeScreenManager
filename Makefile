@@ -18,9 +18,9 @@ BUILD   := build
 HH_GITHUB_REPO ?= lazyboy6791/PS5HomeScreenManager
 
 SRCS    := src/main.c src/hider.c src/http.c src/strbuf.c src/updater.c src/json.c src/sha256.c \
-           src/folders.c src/icons.c src/log.c src/datadir.c src/backup.c src/usbpics.c src/launch.c src/custom.c src/texture.c src/liveshell.c src/arrange.c src/tabs.c
+           src/folders.c src/icons.c src/log.c src/datadir.c src/backup.c src/usbpics.c src/launch.c src/custom.c src/texture.c src/arrange.c src/tabs.c
 HEADERS := src/hider.h src/datadir.h src/backup.h src/http.h src/strbuf.h src/platform.h src/updater.h src/json.h \
-           src/sha256.h src/folders.h src/icons.h src/log.h src/usbpics.h src/launch.h src/custom.h src/texture.h src/liveshell.h src/liveshell_elf.h src/arrange.h src/tabs.h third_party/stb/stb_image.h third_party/stb/stb_image_write.h src/webui_html.h src/folder_html.h
+           src/sha256.h src/folders.h src/icons.h src/log.h src/usbpics.h src/launch.h src/custom.h src/texture.h src/arrange.h src/tabs.h third_party/stb/stb_image.h third_party/stb/stb_image_write.h src/webui_html.h src/folder_html.h
 DEFS    := -DHH_DEFAULT_REPO='"$(HH_GITHUB_REPO)"'
 
 WARN    := -Wall -Wextra -Wno-unused-parameter
@@ -35,10 +35,6 @@ src/webui_html.h: web/index.html tools/embed.py
 
 src/folder_html.h: web/folder.html tools/embed.py
 	python3 tools/embed.py $< $@ FOLDER_HTML
-
-# LiveShell Engine by ZiZc3 (GPL-3.0), unchanged, carried inside Home Screen Manager
-src/liveshell_elf.h: third_party/liveshell/liveshell.elf tools/embed.py
-	python3 tools/embed.py $< $@ LIVESHELL_ELF
 
 # ---- PS5 build --------------------------------------------------------------
 PS5_CC := $(PS5_PAYLOAD_SDK)/bin/prospero-clang

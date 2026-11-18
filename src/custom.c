@@ -521,7 +521,11 @@ static int set_name_impl(hh_t *h, const char *tid, const char *name_in, int tool
 
   if (run(h, "BEGIN IMMEDIATE", NULL, NULL, NULL, NULL) < 0) return -1;
   int rc, changed = 0;
-  if (!name[0] || !strcmp(name, orig)) {
+  /* A tidy name that is the same as the original, for a game that had a name you gave by hand: the hand
+   * name must not be lost, so the tidy name is stored (it looks the same as the original) with the hand
+   * name remembered, and undoing the cleanup gives your name back. */
+  int keep_hand = tool && name[0] && !strcmp(name, orig) && new_before && new_before[0];
+  if (!name[0] || (!strcmp(name, orig) && !keep_hand)) {
     rc = reset_name(h, tid);
   } else {
     rc = apply_name(h, tid, name, &changed);
@@ -927,6 +931,16 @@ static int apply_bg_locked(hh_t *h, const char *tid, const unsigned char *img, s
         }
         if (orig[i][0]) save_orig(h, tid, "bg", &cells[i], orig[i], 0);
       }
+      if (!orig[i][0]) {
+        /* nobody saved an original for this cell (an older build left a file of ours in it): the first
+           backup still has the console's own value */
+        char good[512];
+        if (backup_orig(&cells[i], good, sizeof(good))) {
+          hh_log("background %s: no saved original for %s.%s; using the first backup's value", tid, cells[i].tbl, cells[i].col);
+          snprintf(orig[i], 512, "%s", good);
+          save_orig(h, tid, "bg", &cells[i], good, 0);
+        }
+      }
     } else snprintf(orig[i], 512, "%s", cells[i].value);
     which[i] = -1;
     tex_fmt_t f;
@@ -1293,7 +1307,15 @@ static int bg_needs_fix(hh_t *h, const char *tid) {
   for (int i = 0; i < n; i++) {
     const char *why = NULL;
     if (bg_is_ours(cells[i].value, pre)) {
-      if (!file_exists(cells[i].value)) why = "our file is missing";
+      if (!file_exists(cells[i].value)) {
+        char o[512], good[512];
+        int nul = 0;
+        /* a file of ours that is gone, in a cell nothing can be restored for, is left alone: fixing it would
+           only be tried (and logged) again at every start */
+        if (!strncmp(cells[i].value, pre, strlen(pre)) || bg_is_shared(cells[i].value) ||
+            saved_orig_row(h, tid, "bg", &cells[i], o, sizeof(o), &nul) || backup_orig(&cells[i], good, sizeof(good)))
+          why = "our file is missing";
+      }
     } else {
       tex_fmt_t f;
       if (tex_probe(cells[i].value, &f) == 0) why = "it holds a file that isn't ours (the console put its own back)";
@@ -1493,8 +1515,15 @@ void custom_bulk_info_json(hh_t *h, char (*ids)[16], int n, strbuf_t *sb) {
     char cname[256] = "", src[16] = "";
     text1(h, "SELECT name FROM hh.custom WHERE title_id=?1", ids[i], cname, sizeof(cname));
     text1(h, "SELECT name_src FROM hh.custom WHERE title_id=?1", ids[i], src, sizeof(src));
-    sb_printf(sb, "%s{\"id\":\"%s\",\"can_bg\":%s,\"can_rename\":%s,\"by\":\"%s\",\"orig_name\":", i ? "," : "", ids[i], bg ? "true" : "false",
-              rn ? "true" : "false", cname[0] ? (!strcmp(src, "tool") ? "tool" : "hand") : "");
+    /* a tile that has no wallpaper of its own: no entry at all, or only ours (the original was empty) */
+    int no_own = !bg;
+    if (bg && custom_has_bg(h, ids[i])) {
+      char cnt[16] = "";
+      text1(h, "SELECT count(*) FROM hh.custom_cells WHERE title_id=?1 AND kind='bg' AND orig IS NOT NULL AND orig<>''", ids[i], cnt, sizeof(cnt));
+      no_own = atoi(cnt) == 0;
+    }
+    sb_printf(sb, "%s{\"id\":\"%s\",\"can_bg\":%s,\"no_own\":%s,\"can_rename\":%s,\"by\":\"%s\",\"orig_name\":", i ? "," : "", ids[i], bg ? "true" : "false",
+              no_own ? "true" : "false", rn ? "true" : "false", cname[0] ? (!strcmp(src, "tool") ? "tool" : "hand") : "");
     sb_json_str(sb, orig[0] ? orig : name);
     sb_puts(sb, "}");
   }
@@ -1529,6 +1558,9 @@ static int ids_where(hh_t *h, const char *sql, char (*ids)[16], int max) {
 }
 int custom_renamed_ids(hh_t *h, char (*ids)[16], int max) {
   return ids_where(h, "SELECT title_id FROM hh.custom WHERE name IS NOT NULL AND name<>'' ORDER BY title_id", ids, max);
+}
+int custom_icon_ids(hh_t *h, char (*ids)[16], int max) {
+  return ids_where(h, "SELECT title_id FROM hh.custom WHERE icon_file IS NOT NULL AND icon_file<>'' ORDER BY title_id", ids, max);
 }
 int custom_bg_ids(hh_t *h, char (*ids)[16], int max) {
   return ids_where(h, "SELECT title_id FROM hh.custom WHERE bg_file IS NOT NULL AND bg_file<>'' ORDER BY title_id", ids, max);
@@ -1633,6 +1665,25 @@ static void guess_bg_format(hh_t *h, const slot_t *s, const char *tid, tex_fmt_t
 
 /* Fills the empty background slots of a tile with a picture of ours. write = 0 only reports (system tiles).
  * Returns 0 when done, 1 when only a report was made, -1 on an error (the text is in h->err). */
+/* A background from a backup: a tile that has a background entry takes it the normal way; a tile that has
+ * none (a game without art of its own) gets its empty background cells filled, like the bulk job does. */
+int custom_set_bg_fill(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
+  cell_t one;
+  if (find_cells(h, tid, K_BG, &one, 1) > 0) return custom_set_bg(h, tid, img, len);
+  char tmp[420], dir[400];
+  snprintf(dir, sizeof(dir), "%s/backgrounds", C.data_dir);
+  mkdirs(dir);
+  snprintf(tmp, sizeof(tmp), "%s/import_%s.tmp", dir, tid);
+  if (write_file(tmp, img, len)) {
+    cerr(h, "Couldn't save the background.");
+    return -1;
+  }
+  int rc = custom_try_bg(h, tid, img, len, tmp, 1);
+  unlink(tmp);
+  if (rc == -2) cerr(h, "This tile has no background in the home screen database, so Home Screen Manager can't change it.");
+  return rc == 0 ? 0 : -1;
+}
+
 int custom_try_bg(hh_t *h, const char *tid, const unsigned char *jpg, size_t len, const char *prepared_path, int write) {
   if (!can_customize(h, tid)) return -1;
   cell_t one;
@@ -1650,11 +1701,11 @@ int custom_try_bg(hh_t *h, const char *tid, const unsigned char *jpg, size_t len
   if (!ns || !filled_slots) {
     hh_log("experiment %s: %s", tid, ns ? "every slot has a value that isn't text" : "no table with a background column has a row for this tile");
     cerr(h, "The home screen database has no background slot at all for this tile, so there is nothing to fill in. The log has the details.");
-    return -1;
+    return -2; /* nothing to fill in (the bulk run counts these as having no entry) */
   }
   if (!write) {
-    hh_log("experiment %s: a system tile, report only (%d slot(s) found)", tid, filled_slots);
-    snprintf(h->err, sizeof(h->err), "%d empty background slot(s) found for this tile. Nothing was written: system tiles are report only. The log has the details.", filled_slots);
+    hh_log("experiment %s: report only (%d slot(s) found)", tid, filled_slots);
+    snprintf(h->err, sizeof(h->err), "%d empty background slot(s) found for this tile. Nothing was written, this was a check only. The log has the details.", filled_slots);
     return 1;
   }
   tex_fmt_t fmts[BG_FILES];

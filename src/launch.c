@@ -205,6 +205,22 @@ static void *worker(void *arg) {
     finish("error", NULL, msg, (unsigned)rc, NULL);
     return NULL;
   }
+  /* What the console says about this title right now, for the log: its app id (if it knows one) and the game
+   * that is running. A code that ends in 000C with another top half than "already running" is checked: if
+   * this very game is the one running, the start counts as a switch to it. */
+  {
+    uint32_t known = 0, rid = 0;
+    char rt[64] = "";
+    int ar = plat_app_id(a.tid, &known);
+    int rr = plat_running_game(rt, sizeof(rt), &rid);
+    hh_log("launch %s failed with 0x%08X: console app id %08x (lookup %d), running game: %s", a.tid, (unsigned)rc, known, ar,
+           rr == 0 ? rt : "none");
+    if (((unsigned)rc & 0xFFFF) == 0x000C && rr == 0 && strcmp(rt, a.tid) == 0) {
+      snprintf(msg, sizeof(msg), "Switching to %s", a.name);
+      finish("ok", msg, NULL, (unsigned)rc, NULL);
+      return NULL;
+    }
+  }
   snprintf(msg, sizeof(msg), "%s (error 0x%08X)", launch_error_text(rc), (unsigned)rc);
   finish("error", NULL, msg, (unsigned)rc, NULL);
   return NULL;

@@ -32,7 +32,7 @@ typedef struct {
   volatile int folder_i, folder_n; /* "folder 3 of 7" */
   char phase[200];                 /* what is going on right now */
   int folders_made, folders_skipped, hidden_done, custom_done, order_done, settings_done, problems;
-  char notes[600];                 /* the first problems, for the result */
+  char notes[1200];                /* the first problems, for the result */
 } backup_progress_t;
 
 /* Applies the backup: settings, folders, hidden tiles, custom names/pictures/backgrounds, order.

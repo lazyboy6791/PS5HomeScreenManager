@@ -140,7 +140,7 @@ SAFE_ENV = {"HH_PLDMGR_DIR": "/nonexistent/pldmgr", "HH_USB_FMT": "/nonexistent/
 class Server:
     def __init__(self, appdb, datadir, env_extra=None, wait=True):
         env = dict(os.environ, HH_APP_DB=appdb, HH_DATA_DIR=datadir,
-                   ASAN_OPTIONS="detect_leaks=1", **SAFE_ENV)
+                   ASAN_OPTIONS="detect_leaks=1", HH_REPAIR_GRACE="1", HH_REPAIR_QUIET="0", HH_SWEEP_EVERY="3600", HH_SWEEP_QUIET="1", HH_NO_QUIET_WAIT="1", HH_NO_PROBE="1", **SAFE_ENV)
         env.update(env_extra or {})
         self.p = subprocess.Popen([BIN], env=env, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True)
@@ -913,6 +913,13 @@ def picture_tests(tmp):
         code, body = http("GET", "/api/usb_thumb?path=" + urllib.parse.quote(bad), raw=True)
         check(code == 404, "preview refused: %s" % (os.path.relpath(bad, tmp) if bad else "(empty)"))
 
+    code, full = http("GET", "/api/usb_pic?path=" + urllib.parse.quote(cover), raw=True)
+    check(code == 200 and full[:8] == b"\x89PNG\r\n\x1a\n" and open(cover, "rb").read() == full,
+          "the whole picture is served for the crop window")
+    for bad in ["/etc/passwd", os.path.join(outside, "secret.png"), os.path.join(usb0, "notes.txt"), ""]:
+        code, body = http("GET", "/api/usb_pic?path=" + urllib.parse.quote(bad), raw=True)
+        check(code == 404, "whole picture refused: %s" % (os.path.relpath(bad, tmp) if bad else "(empty)"))
+
     print("  set a folder picture from USB")
     code, r = form("/api/folders/save", {"name": "Shots", "items": "PPSA01325"})
     fid = r["id"]
@@ -1062,10 +1069,14 @@ def startup_mode_tests(tmp):
     a = m.index("function saveFolder(btn)")
     save_js = m[a:m.index("\nfunction ", a + 10)]
     check("/api/folders/save?async=1" in save_js and "folderJob(" in m, "the folder save runs as a background job")
+    check("b.className = 'danger small'" in m, "the refresh button inside a pop-up is red")
     check("startSaveTimer(creating ? 'Creating folder' : 'Saving folder')" in save_js and "This can take about 90 seconds depending on your firmware" in m
           and "Still working: the console" in m and "function fmtElapsed" in m,
           "it says 'Creating folder… <time>. This can take about 90 seconds depending on your firmware', with a running timer")
-    check("Refresh home screen now" in save_js, "a failed later step still offers a Refresh home screen now button")
+    check('Refresh the home screen, or open and close any game or app, to see it.\', REFRESH_ACT' in save_js and 'id="refreshTop"' in m and "function ask(" in m and "function bar(" in m,
+          "a failed later step comes with a Refresh home screen button in the pop-up, and the one above the list is always there")
+    check('onclick="hideBanner()"' not in m and m.count(" bar('") == 1 and "notice('err'" in m,
+          "the messages after an action are pop-ups at the bottom, the bar stays for the database error only")
     check("&refresh=1" in save_js and "Nothing was changed." in save_js and "is refreshing to show the result" in save_js,
           "the save asks Home Screen Manager to restart the home screen after the last step, and says so (or says nothing changed)")
     attn_new = "!ATTENTION!</b> Creating a folder can take up to 90 seconds depending on your firmware. Please do not open any apps or games during the folder creation process. There will be tile movement on the homescreen until the process is finished. Once the folder is created the homescreen will automatically refresh to show the results."
@@ -1515,67 +1526,6 @@ def background_tests(tmp):
     s.stop()
 
 
-class FakeLiveShell:
-    """Plays LiveShell's web API (port 9050 on the console)."""
-
-    def __init__(self, port):
-        self.port = port
-        self.calls = []
-        self.videos = [
-            {"name": "ocean.mp4", "where": "Internal", "path": "/data/LiveShell/video/ocean.mp4", "res": "FHD",
-             "snd": False, "why": "", "size": 1000, "thumb": True, "fav": False, "k4": False},
-            {"name": "city night.mp4", "where": "USB 1", "path": "/mnt/usb0/liveshell/city night.mp4", "res": "4K",
-             "snd": True, "why": "", "size": 2000, "thumb": False, "fav": False, "k4": True},
-        ]
-        self.current = self.videos[0]["path"]
-        outer = self
-
-        class H(httpserver.BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def reply(self, code, body, ctype="application/json"):
-                b = body if isinstance(body, bytes) else body.encode()
-                self.send_response(code)
-                self.send_header("Content-Type", ctype)
-                self.send_header("Content-Length", str(len(b)))
-                self.end_headers()
-                self.wfile.write(b)
-
-            def do_GET(self):
-                path, _, query = self.path.partition("?")
-                qs = urllib.parse.parse_qs(query)
-                i = int(qs.get("i", ["-1"])[0])
-                outer.calls.append(self.path)
-                if path == "/api/state":
-                    self.reply(200, json.dumps({"enabled": True, "status": "playing", "ip": "192.168.1.50",
-                                                "port": 9050, "current": outer.current, "videos": outer.videos}))
-                elif path == "/api/select" and 0 <= i < len(outer.videos):
-                    outer.current = outer.videos[i]["path"]
-                    self.reply(200, '{"ok":true}')
-                elif path == "/api/delete" and 0 <= i < len(outer.videos):
-                    if outer.videos[i]["where"] != "Internal":
-                        self.reply(200, '{"ok":false,"error":"Videos on USB are deleted on the drive"}')
-                    else:
-                        outer.videos.pop(i)
-                        self.reply(200, '{"ok":true}')
-                elif path == "/thumb" and i == 0:
-                    self.reply(200, tiny_png(16, 9, (10, 120, 200)), "image/png")
-                elif path == "/api/shutdown":
-                    self.reply(200, '{"ok":true}')
-                    threading.Thread(target=outer.stop, daemon=True).start()
-                else:
-                    self.reply(404, "")
-
-        socketserver.TCPServer.allow_reuse_address = True
-        self.srv = socketserver.ThreadingTCPServer(("127.0.0.1", port), H)
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-
-    def stop(self):
-        self.srv.shutdown()
-        self.srv.server_close()
-
-
 class RecordingLoader:
     """An ELF loader that only records what it is sent."""
 
@@ -1604,6 +1554,145 @@ class RecordingLoader:
 
     def close(self):
         self.sock.close()
+
+
+def watchdog_folder_tab_tests(tmp):
+    print("a folder tile that another tool moved to the wrong tab is put back by the watchdog")
+    appdb = os.path.join(tmp, "wdt.db")
+    data = os.path.join(tmp, "wdt-data")
+    apps = os.path.join(tmp, "wdt-apps")
+    make_db(appdb)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps})
+    code, r = form("/api/folders/save", {"name": "Tabbed", "tab": "games", "items": "PPSA01325"})
+    fid = r["id"]
+
+    def tabs_of():
+        return [qx(appdb, f'SELECT dispLocation FROM "tbl_iconinfo_{u}" WHERE titleId=?', fid) for u in USERS]
+
+    def disp_now():
+        import sqlite3
+        c = sqlite3.connect(appdb)
+        try:
+            return [c.execute(f'SELECT dispLocation FROM "tbl_iconinfo_{u}" WHERE titleId=?', (fid,)).fetchone()[0] for u in USERS]
+        finally:
+            c.close()
+
+    check(all((d & 2) and not (d & 4) for d in disp_now()), "folder tile starts on the Games tab")
+    for u in USERS:
+        qx(appdb, f'UPDATE "tbl_iconinfo_{u}" SET dispLocation=(dispLocation | 4) & ~2 WHERE titleId=?', fid)
+    check(all((d & 4) and not (d & 2) for d in disp_now()), "set up: something else moved it to Media")
+    check(wait_for(lambda: all((d & 2) and not (d & 4) for d in disp_now()), 20),
+          "the watchdog moved it back to its own tab")
+    s.stop()
+
+
+def thumbs_prune_tests(tmp):
+    print("the preview cache drops the oldest previews, not all of them")
+    appdb = os.path.join(tmp, "thp.db")
+    data = os.path.join(tmp, "thp-data")
+    make_db(appdb)
+    td = os.path.join(data, "thumbs")
+    os.makedirs(td)
+    now = time.time()
+    for i in range(700):
+        fp = os.path.join(td, "t%04d.png" % i)
+        open(fp, "wb").write(b"x" * 100)
+        os.utime(fp, (now - 10000 + i, now - 10000 + i))  # t0000 is the oldest
+    s = Server(appdb, data, {})
+    left = sorted(os.listdir(td))
+    check(len(left) == 450, "down to 75%% of the limit (%d left)" % len(left))
+    check("t0699.png" in left and "t0250.png" in left and "t0249.png" not in left and "t0000.png" not in left,
+          "the oldest went, the newest stayed")
+    s.stop()
+
+
+def folder_style_tests(tmp):
+    print("collage styles of the folder picture")
+    import hashlib
+    appdb = os.path.join(tmp, "sty.db")
+    make_db(appdb)
+    s = Server(appdb, os.path.join(tmp, "sty-data"), {"HH_USER_APP_DIR": os.path.join(tmp, "sty-apps")})
+    items = "PPSA01325,CUSA00900,PPSA04288,CUSA00363,PPSA03952,CUSA00010"
+    hashes = []
+    for st in range(5):
+        code, png = http("GET", "/api/folder_preview?items=%s&color=blue&style=%d" % (items, st), raw=True)
+        check(code == 200 and png[:8] == b"\x89PNG\r\n\x1a\n", "preview of style %d is a PNG" % st)
+        w, h = struct.unpack(">II", png[16:24])
+        check((w, h) == (512, 512), "and 512x512")
+        hashes.append(hashlib.sha1(png).hexdigest())
+    check(len(set(hashes)) == 5, "the five styles look different")
+    code, r = form("/api/folders/save", {"name": "Styled", "tab": "games", "color": "blue", "style": "1", "items": "PPSA01325,CUSA00900"})
+    check(code == 200 and r.get("ok"), "a folder saves with a style")
+    fid = r["id"]
+    code, j = http("GET", "/api/folder?id=" + fid)
+    check(j["folder"].get("style") == 1, "and the style is remembered")
+    code, r = form("/api/folders/save", {"id": fid, "name": "Styled", "tab": "games", "color": "blue", "items": "PPSA01325,CUSA00900"})
+    code, j = http("GET", "/api/folder?id=" + fid)
+    check(j["folder"].get("style") == 1, "saving without a style keeps it")
+    code, r = form("/api/folders/save", {"id": fid, "name": "Styled", "tab": "games", "color": "blue", "style": "3", "items": "PPSA01325,CUSA00900"})
+    check(r.get("ok") and r.get("changed") is not False, "a changed style counts as a change")
+    code, j = http("GET", "/api/folder?id=" + fid)
+    check(j["folder"].get("style") == 3, "and is saved")
+    code, png = http("GET", "/api/folder_icon?id=" + fid, raw=True)
+    check(code == 200 and hashlib.sha1(png).hexdigest() != hashes[1], "the folder's picture was drawn again")
+    # a new folder with a picture and a background is installed once, in the last step
+    def lg():
+        return http("GET", "/api/log", raw=True)[1].decode()
+    code, r = form("/api/folders/save?later=1", {"name": "Once", "tab": "games", "color": "blue", "items": "PPSA01325,CUSA00900"})
+    check(code == 200 and r.get("ok"), "save with later=1 works")
+    oid = r["id"]
+    check(lg().count("folder %s: app install returned" % oid) == 0, "later=1: the tile is not installed yet")
+    code, r = post_bytes("/api/folders/icon?id=%s&later=1" % oid, tiny_png(300, 300, (10, 200, 30)))
+    check(code == 200 and r.get("ok") and lg().count("folder %s: app install returned" % oid) == 0, "the picture step does not install either")
+    code, r = post_bytes("/api/folders/bg?id=%s" % oid, tiny_png(1600, 900, (90, 20, 30)))
+    check(code == 200 and r.get("ok"), "the last step works")
+    check(lg().count("folder %s: app install returned" % oid) == 1, "and installs the tile exactly once")
+    s.stop()
+    # waiting for other tools: the database keeps changing, then goes still
+    s = Server(appdb, os.path.join(tmp, "sty-data"), {"HH_USER_APP_DIR": os.path.join(tmp, "sty-apps"), "HH_NO_QUIET_WAIT": ""})
+    stop_noise = threading.Event()
+    def noise():
+        end = time.time() + 4
+        while time.time() < end and not stop_noise.is_set():
+            qx(appdb, 'CREATE TABLE IF NOT EXISTS zz_noise(x)')
+            qx(appdb, 'INSERT INTO zz_noise VALUES (1)')
+            time.sleep(0.2)
+    th = threading.Thread(target=noise, daemon=True)
+    th.start()
+    time.sleep(0.3)
+    t = time.time()
+    code, r = form("/api/folders/save", {"name": "Waits", "tab": "games", "color": "blue", "items": "PPSA01325,CUSA00900"})
+    took = time.time() - t
+    th.join()
+    check(code == 200 and r.get("ok"), "a folder saves while another tool writes to the database")
+    check("another tool is writing to the home screen database" in lg() and took >= 4.0, "the install waited for the other tool")
+    check("quiet again after" in lg(), "and went ahead once it was quiet")
+    check("install check HHFD" in lg() and "tile in app.db before:" in lg(), "and the log says what the console could see of the tile before the install")
+    t = time.time()
+    code, r = form("/api/folders/save", {"name": "No wait", "tab": "games", "color": "blue", "items": "PPSA01325,CUSA00900"})
+    check(code == 200 and time.time() - t < 3.5, "with nothing going on, it is only one second slower")
+    s.stop()
+    s = Server(appdb, os.path.join(tmp, "sty-data"), {"HH_USER_APP_DIR": os.path.join(tmp, "sty-apps")})
+    # deleting a folder restarts the home screen so that the tile goes
+    code, r = form("/api/folders/save", {"name": "Delete me", "tab": "games", "color": "red", "items": "PPSA01325,CUSA00900"})
+    code, lst = http("GET", "/api/folders")
+    n_restart = lg().count("restarting the home screen process")
+    did = [f["id"] for f in lst.get("folders", []) if f.get("name") == "Delete me"]
+    check(len(did) == 1, "a folder to delete exists")
+    code, r = http("POST", "/api/folders/delete?id=" + did[0])
+    check(code == 200, "a folder can be deleted")
+    deadline = time.time() + 30
+    while time.time() < deadline and lg().count("restarting the home screen process") == n_restart:
+        time.sleep(0.5)
+    check(lg().count("restarting the home screen process") == n_restart + 1, "and the home screen is restarted so the tile goes")
+    # the launcher app asks HSM to open its menu after the app has closed
+    code, r = http("POST", "/api/open_menu?delay=0")
+    check(code == 200, "the launcher can ask HSM to open the menu")
+    deadline = time.time() + 10
+    while time.time() < deadline and "open menu:" not in lg():
+        time.sleep(0.2)
+    check("open menu: the menu was opened" in lg(), "and HSM opens it")
+    s.stop()
 
 
 def watchdog_multi_folder_tests(tmp):
@@ -1682,6 +1771,60 @@ def watchdog_tests(tmp):
            "PPSA01325", "CUSA00900")
     check(wait_for(lambda: vis(appdb, "PPSA01325") == [0, 0] and vis(appdb, "CUSA00900") == [0, 0], 12),
           "a game in two folders is hidden again on its own")
+
+    # a folder tile that goes missing is only reinstalled after a wait, and only when the database has been
+    # quiet: another tool (PS4 Mount) registering games, one after the other, hides the tiles for as long
+    # as it works, and a second install of ours in the middle of it would collide
+    s.stop()
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_REPAIR_GRACE": "6", "HH_REPAIR_QUIET": "9"})
+    for u in USERS:
+        qx(appdb, f'DELETE FROM "tbl_iconinfo_{u}" WHERE titleId=?', "HHFD00002")
+    end = time.time() + 20  # "the other tool" keeps writing for 20 seconds, well past the wait
+    while time.time() < end:
+        qx(appdb, "CREATE TABLE IF NOT EXISTS zz_other_tool(x)")
+        qx(appdb, "INSERT INTO zz_other_tool VALUES(?)", time.time())
+        time.sleep(1)
+    check(not all(tile_rows(appdb, "HHFD00002")), "a missing folder tile is not reinstalled while the database stays busy")
+    check("waiting in case another tool" in http("GET", "/api/diag", raw=True)[1].decode(), "the repair says it is waiting")
+    check(wait_for(lambda: all(tile_rows(appdb, "HHFD00002")), 40), "and it is reinstalled once things are quiet")
+    s.stop()
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons})
+
+    # a folder tile left behind (deleted earlier, or from an older version) is swept away, files and all,
+    # so another tool re-registering the games cannot bring it back; real folders stay
+    s.stop()
+    metadir = os.path.join(tmp, "wd-appmeta")
+    os.makedirs(metadir, exist_ok=True)
+    s = Server(appdb, data, {"HH_USER_APP_DIR": apps, "HH_ICON_DIR": icons, "HH_APPMETA_DIR": metadir})
+    time.sleep(8)  # the look at start-up is over
+    left = os.path.join(apps, "HHFD00099")
+    os.makedirs(os.path.join(left, "sce_sys"))
+    open(os.path.join(left, "sce_sys", "param.json"), "w").write("{}")
+    open(os.path.join(left, "sce_sys", "other.bin"), "wb").write(b"x")
+    meta_left = os.path.join(metadir, "HHFD00099")  # the console's own copy under appmeta
+    os.makedirs(meta_left)
+    open(os.path.join(meta_left, "icon0.png"), "wb").write(b"x")
+    time.sleep(8)
+    check(os.path.exists(left), "a leftover is not looked for while nothing else is going on")
+    # the rows the console keeps for it in the home screen database (its uninstall leaves them behind)
+    for u in USERS:
+        qx(appdb, f'INSERT INTO "tbl_iconinfo_{u}"(titleId, titleName) VALUES(?, ?)', "HHFD00099", "whatever")
+    qx(appdb, "INSERT INTO tbl_contentinfo(titleId, titleName) VALUES(?, ?)", "HHFD00099", "whatever")
+    qx(appdb, "CREATE TABLE IF NOT EXISTS zz_other_tool(x)")  # another tool registers games...
+    qx(appdb, "INSERT INTO zz_other_tool VALUES(?)", time.time())
+    check(wait_for(lambda: not os.path.exists(left), 30), "the leftover folder tile directory is removed once the other tool is done")
+    check(not os.path.exists(meta_left), "and so is the copy the console keeps under appmeta")
+    check(not any(tile_rows(appdb, "HHFD00099")) and not qx(appdb, "SELECT 1 FROM tbl_contentinfo WHERE titleId=?", "HHFD00099"),
+          "and so are its rows in the home screen database")
+    check(os.path.isdir(os.path.join(apps, "HHFD00001", "sce_sys")) and
+          os.path.isdir(os.path.join(apps, "HHFD00002", "sce_sys")), "folders that exist are left alone")
+    check("no folder of ours behind this tile" in http("GET", "/api/diag", raw=True)[1].decode(),
+          "the sweep logged the leftover tile")
+    dg = http("GET", "/api/diag", raw=True)[1].decode()
+    check("Tiles that are not games" in dg and "HHFD00001" in dg.split("Tiles that are not games")[1].split("\n\n")[0],
+          "the diagnostics list the tiles that are not games")
+    check("that are not games: name, param.json" in dg and "HHFD00001/  param.json: yes  (HHFD folder tile)" in dg,
+          "and the directories that are not games")
 
     # with the setting off, Home Screen Manager leaves the PS5's change alone
     http("POST", "/api/settings?reapply=0")
@@ -1830,84 +1973,6 @@ def folder_move_tests(tmp):
     check(vis(appdb, "CUSA00900") == [1, 1], "the last app is shown again")
     check(all(r_ == [] for r_ in tile_rows(appdb, fid)), "the folder tile is uninstalled")
     s.stop()
-
-
-def live_tests(tmp):
-    print("live wallpaper (built-in LiveShell Engine)")
-    appdb = os.path.join(tmp, "live.db")
-    data = os.path.join(tmp, "live-data")
-    make_db(appdb)
-    elf = open(os.path.join(os.path.dirname(BIN), "..", "..", "third_party", "liveshell", "liveshell.elf"), "rb").read()
-    lport, aport = 19121, 19050
-    loader = RecordingLoader(lport)
-    env = {"HH_LOADER_PORT": str(lport), "HH_LIVESHELL_PORT": str(aport)}
-
-    s = Server(appdb, data, env)
-    code, j = http("GET", "/api/live")
-    check(code == 200 and not j["enabled"] and not j["running"] and j["version"] == "1.5.2", "off by default")
-    time.sleep(0.5)
-    check(loader.received == [], "LiveShell not started while it's off")
-    d = http("GET", "/api/diag", raw=True)[1].decode()
-    check("LiveShell 1.5.2 built in: %d bytes, sha256 %s" % (len(elf), hashlib.sha256(elf).hexdigest()) in d,
-          "Diagnostics names the built-in LiveShell and its checksum")
-
-    print("  turning it on starts the built-in LiveShell")
-    code, r = http("POST", "/api/live/power?on=1")
-    check(code == 200 and "Starting" in r["note"], "switched on")
-    check(wait_for(lambda: len(loader.received) == 1), "liveshell.elf handed to the ELF loader")
-    check(loader.received[0] == elf, "byte for byte the original liveshell.elf")
-    code, j = http("GET", "/api/live")
-    check(j["enabled"] and not j["running"] and j["state"] is None, "reported as starting until LiveShell answers")
-
-    print("  menu works through LiveShell's API")
-    fake = FakeLiveShell(aport)
-    code, j = http("GET", "/api/live")
-    check(j["running"] and j["state"]["current"] == "/data/LiveShell/video/ocean.mp4" and len(j["state"]["videos"]) == 2,
-          "status and videos come from LiveShell")
-    code, r = http("POST", "/api/live/select?path=" + urllib.parse.quote("/mnt/usb0/liveshell/city night.mp4"))
-    check(code == 200 and "/api/select?i=1" in fake.calls and fake.current.endswith("city night.mp4"),
-          "picking a video tells LiveShell (by its place in LiveShell's list)")
-    code, r = http("POST", "/api/live/select?path=" + urllib.parse.quote("/etc/passwd"))
-    check(code == 404 and not any("i=-1" in c for c in fake.calls), "unknown video refused, nothing sent")
-    code, png = http("GET", "/api/live/thumb?path=" + urllib.parse.quote("/data/LiveShell/video/ocean.mp4"), raw=True)
-    check(code == 200 and png[:4] == b"\x89PNG", "LiveShell's preview picture passed on")
-    code, png = http("GET", "/api/live/thumb?path=" + urllib.parse.quote("/mnt/usb0/liveshell/city night.mp4"), raw=True)
-    check(code == 404, "no preview -> 404")
-    code, r = http("POST", "/api/live/delete?path=" + urllib.parse.quote("/mnt/usb0/liveshell/city night.mp4"))
-    check(code == 409 and "USB" in r["error"], "LiveShell's own error passed on")
-    code, r = http("POST", "/api/live/delete?path=" + urllib.parse.quote("/data/LiveShell/video/ocean.mp4"))
-    check(code == 200 and len(fake.videos) == 1, "video deleted")
-    evil = urllib.request.Request(BASE + "/api/live/power?on=0", method="POST", data=b"",
-                                  headers={"Origin": "http://evil.example"})
-    try:
-        urllib.request.urlopen(evil, timeout=5)
-        code = 200
-    except urllib.error.HTTPError as e:
-        code = e.code
-    check(code == 403, "other web sites can't switch it")
-
-    print("  starts with Home Screen Manager, but never twice")
-    s.stop()
-    s = Server(appdb, data, env)
-    time.sleep(4.5)
-    check(len(loader.received) == 1, "already running: not loaded again")
-    s.stop()
-    fake.stop()
-    s = Server(appdb, data, env)
-    check(wait_for(lambda: len(loader.received) == 2, 10), "not running at start: started again (setting kept)")
-
-    print("  turning it off")
-    fake = FakeLiveShell(aport)
-    code, r = http("POST", "/api/live/power?on=0")
-    check(code == 200 and "/api/shutdown" in fake.calls, "LiveShell asked to stop")
-    check(not http("GET", "/api/live")[1]["enabled"], "setting off")
-    code, r = http("POST", "/api/live/select?path=x")
-    check(code in (404, 409), "nothing to pick while it's off")
-    menu = http("GET", "/", raw=True)[1]
-    check(b"LiveShell Engine" in menu and b"ZiZc3" in menu and b"github.com/ZiZc3/LiveShell" in menu,
-          "menu credits LiveShell and its author")
-    s.stop()
-    loader.close()
 
 
 def front_folders_tests(tmp):
@@ -2244,6 +2309,24 @@ def folder_page_options_tests(tmp):
     check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(False, False, True), "and the folder page gets them")
     http("POST", "/api/settings?folder_header=1&folder_bar=1&folder_edit=1")
     check(http("GET", "/api/folder?id=" + fid)[1]["page"] == page(True, True, True), "all can be changed in one go")
+
+    print("  the three views")
+    pg = http("GET", "/folder/" + fid, raw=True)[1].decode()
+    bar = pg[pg.index('id="bar"'):pg.index('id="grid"')]
+    check('id="sortBtn"' in bar and 'id="viewBtn"' in bar and bar.index('id="sortBtn"') < bar.index('id="viewBtn"'),
+          "the view picker sits in the count and sort row, next to Sort by")
+    check(all(('data-v="%s"' % v) in bar for v in ("grid", "compact", "list")) and ">Icon<" in bar and ">Compact<" in bar and ">List<" in bar and ">Grid<" not in bar,
+          "it offers an icon view, a compact view and a list")
+    check('id="optBtn"' in bar and bar.index('id="viewBtn"') < bar.index('id="optBtn"') and 'id="omenu"' in bar,
+          "a second menu (tiles per row or columns) sits to the right of the view picker")
+    check("hh_perrow" in pg and "hh_cols_compact" in pg and "hh_cols_list" in pg and "listCols = { compact: 1, list: 1 }" in pg and "Tiles per row" in pg,
+          "icons default to 6 per row (5 to 10 to choose), compact and list each to 1 column (1 to 3, set separately), all remembered")
+    check("document.getElementById('sortBtn').focus();" in pg.split("function toggleSort")[1].split("function openMenu")[0],
+          "after changing the sort the highlight stays on Sort by")
+    check("function marquee" in pg and "@keyframes mq" in pg and "minmax(0,1fr)" in pg,
+          "names wider than their tile or column slide back and forth, and columns keep their width")
+    check("hh_view" in pg and "grid list" not in pg.split("<script>")[0] and ".grid.list" in pg and ".grid.compact" in pg,
+          "the choice is remembered, and the page has styles for both new views")
     s.stop()
 
 
@@ -2333,7 +2416,7 @@ def folder_job_tests(tmp):
     check(wait_for(lambda: http("GET", "/api/folders/job?job=%d" % job)[1].get("done") is True, 40), "the job finishes")
     res = http("GET", "/api/folders/job?job=%d" % job)[1]["result"]
     check(res["ok"] and res["id"].startswith("HHFD") and res["folder"]["name"] == "Slow" and res["folder"]["color"] == "black",
-          "its answer is the one a normal save gives")
+          "its answer is the one a normal save gives (%s)" % res)
     fid = res["id"]
     lg = log()
     check(lg.count("folder %s: app install returned" % fid) == 1,
@@ -2726,6 +2809,10 @@ def backup_tests(tmp):
     check(post_bytes("/api/folders/bg?id=" + fid_sports, jpg)[0] == 200, "set up: a folder background")
     check(http("POST", "/api/hide?id=PPSA02000")[0] == 200, "set up: a hidden tile")
     check(form("/api/custom/name?id=CUSA01065", {"name": "My Media Game"})[0] == 200, "set up: a custom name")
+    form("/api/custom/name?id=CUSA00900", {"name": "Hand Name"})
+    post_bytes("/api/bulk/rename", json.dumps([{"id": "CUSA00900", "name": "Tidy Name"}]).encode())  # the cleanup, over a name by hand
+    bi = lambda t: {x["id"]: x for x in post_bytes("/api/bulk/info", json.dumps({"ids": [t]}).encode())[1]["tiles"]}[t]
+    check(bi("CUSA00900")["by"] == "tool", "set up: a name from the cleanup")
     check(post_bytes("/api/custom/icon?id=CUSA01065", tiny_png(300, 300, (10, 200, 10)))[0] == 200, "set up: a custom picture")
     check(post_bytes("/api/custom/bg?id=PPSA01325", jpg)[0] == 200, "set up: a custom background")
     check(form("/api/arrange/save", {"items": fid_media + "," + fid_sports + ",PPSA02000", "pinned": ""})[0] == 200, "set up: a saved order")
@@ -2752,6 +2839,8 @@ def backup_tests(tmp):
     check(json.loads(z.read("hidden.json")) == ["PPSA02000"], "only tiles hidden on their own are listed as hidden, not folder members")
     cj = {c["id"]: c for c in json.loads(z.read("custom.json"))}
     check(cj["CUSA01065"]["name"] == "My Media Game" and cj["CUSA01065"]["icon"] and cj["PPSA01325"]["bg"], "custom names, pictures and backgrounds are listed")
+    check(cj["CUSA00900"].get("name_src") == "tool" and cj["CUSA00900"].get("name_before") == "Hand Name" and "name_src" not in cj["CUSA01065"],
+          "the export says which name came from the cleanup, and keeps the name by hand from before it (%s)" % cj["CUSA00900"])
     check("show_running=1" in z.read("settings.txt").decode(), "the settings are in it")
     s.stop()
 
@@ -2765,7 +2854,12 @@ def backup_tests(tmp):
                 j = json.loads(data)
                 j[0]["items"].append({"id": "CUSA99999", "hidden": 0})
                 data = json.dumps(j).encode()
+            if i.filename == "custom.json":   # a game without a background entry of its own, with a background in the backup
+                j = json.loads(data)
+                j.append({"id": "CUSA00900", "bg": True})
+                data = json.dumps(j).encode()
             zo.writestr(i.filename, data)
+        zo.writestr("backgrounds/CUSA00900.jpg", jpg)
     backup = out.getvalue()
 
     b_dir, b_env, b_db = setup("b")
@@ -2801,8 +2895,10 @@ def backup_tests(tmp):
             break
         time.sleep(0.2)
     check(res is not None and res["ok"], "it finishes")
-    check(res["folders_made"] == 2 and res["folders_skipped"] == 0 and res["hidden"] == 1 and res["custom"] == 2 and res["settings"] is True and res["problems"] == 0,
-          "result: 2 folders made, 1 tile hidden, 2 custom tiles, settings restored, no problems (%s)" % res)
+    check(res["folders_made"] == 2 and res["folders_skipped"] == 0 and res["hidden"] == 1 and res["custom"] == 4 and res["settings"] is True and res["problems"] == 0,
+          "result: 2 folders made, 1 tile hidden, 4 custom tiles, settings restored, no problems (%s)" % res)
+    cell = q(b_db, 'SELECT pic0Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:CUSA00900")[0][0]
+    check(cell and "hh_bg_" in cell, "a game without a background entry gets its background from the backup too (%s)" % cell)
     code, fl = http("GET", "/api/folders")
     check("folders" in fl, "the folder list answers after the import: %s" % str(fl)[:200])
     by_name = {f["name"]: f for f in fl["folders"]}
@@ -2815,6 +2911,8 @@ def backup_tests(tmp):
     by_id, _ = listing()
     check(by_id["PPSA02000"]["hidden"], "the hidden tile is hidden")
     check(by_id["CUSA01065"]["name"] == "My Media Game", "the custom name is back")
+    check(bi("CUSA00900")["by"] == "tool" and bi("CUSA01065")["by"] == "hand",
+          "after the import the cleanup's names are still the cleanup's and the names by hand are still by hand")
     code, ar = http("GET", "/api/arrange")
     order = [i["id"] for i in ar["arrange"]["items"]]
     check(order == [media["id"], sports["id"], "PPSA02000"], "the order is back, with the folders under their new ids (%s)" % order)
@@ -2822,6 +2920,9 @@ def backup_tests(tmp):
     check(st["settings"]["show_running"] is True, "the setting is back")
     lg = http("GET", "/api/log", raw=True)[1].decode()
     check("import: 2 folder(s) made" in lg, "the log says what was done")
+    check("folders: registering 2 folder tile(s) with one install" in lg and "folders: 2 of 2 folder tile(s) registered" in lg,
+          "the folders are registered together, after their files are written")
+    check(lg.count("app install returned") == 1, "only the folder made before the import paid for its own install (%d)" % lg.count("app install returned"))
     check(wait_for(lambda: "home screen refresh: restarting the home screen process" in http("GET", "/api/log", raw=True)[1].decode(), 15), "and the home screen is restarted when it is done")
     code, r = http("POST", "/api/import/apply?token=%d" % token)
     check(code == 409, "the same file can't be applied twice by accident")
@@ -2869,6 +2970,27 @@ def backup_tests(tmp):
     outside = os.path.join(tmp, "outside.zip")
     open(outside, "wb").write(zbytes)
     check(http("POST", "/api/import/inspect?usb=" + urllib.parse.quote(outside))[0] == 400, "a file that is not on a USB drive is refused")
+    print("  importing on a console whose installer registers every folder at once")
+    s.stop()
+    c_dir, c_env, c_db = setup("c", "100")
+    c_env["HH_INSTALL_ALL"] = "1"
+    s = Server(c_db, os.path.join(c_dir, "data"), c_env)
+    code, r = post_bytes("/api/import/inspect", backup)
+    code, r = http("POST", "/api/import/apply?token=%d" % r["token"])
+    job = r["job"]
+    res = None
+    t0 = time.time()
+    while time.time() - t0 < 90:
+        code, j = http("GET", "/api/import/job?job=%d" % job)
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.2)
+    check(res is not None and res["ok"] and res["folders_made"] == 2 and res["problems"] == 0, "it finishes with both folders (%s)" % res)
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check(lg.count("host test build") == 1, "the installer is called once for two folders (%d call(s))" % lg.count("host test build"))
+    check("was not picked up" not in lg, "and no folder needed a second call")
+
     s.stop()
 
 
@@ -2888,7 +3010,7 @@ def menu_new_sections_tests(tmp):
                      "nmSec": "Clean Up Game Names", "startOpts": "Home Screen Manager Start-Up Options", "updSettings": "Update settings", "expImp": "Export &amp; Import",
                      "adv": "More &amp; troubleshooting"}, "the sections have the names we chose (%s)" % titles)
     check("<details open" not in m and 'id="bulk"' not in m, "every section is closed when the page opens, and Bulk changes is gone")
-    check("Take control of your PlayStation 5's home screen" in m and "Hide games, apps and system tiles from your home screen" not in m, "the line under the header is the new one")
+    check("It only does everything you want with your PS5 home screen." in m and "Hide games, apps and system tiles from your home screen" not in m, "the line under the header is the new one")
     main = m[m.index('id="mainSec"'):m.index('id="hideOpts"')]
     fo = main[main.index('id="folderOpts"'):main.index('id="q"')]
     check("+ New folder" in main and 'id="tcount"' in main and main.index('id="folderOpts"') < main.index('id="q"') < main.index('id="list"'),
@@ -2903,12 +3025,17 @@ def menu_new_sections_tests(tmp):
           "the amber message covers applying and undoing, and says the home screen refreshes by itself")
     check(bg.index('id="bgAttn"') < bg.index('id="bgApplyBtn"') and "display:none" not in bg[bg.index('id="bgAttn"'):bg.index('id="bgAttn"') + 60], "and it is always shown, above Apply and Use the original for all")
     check("Overwrite backgrounds I've already set" in bg and bg.index('id="bgOverwrite"') < bg.index('id="bgApplyBtn"'), "and has the tick box for backgrounds you set yourself")
-    check("Use the original for all" in bg and bg.index('id="bgApplyBtn"') < bg.index('id="sw_live"') and 'id="live"' in bg and "Live wallpaper" in bg,
-          "Live wallpaper is at the bottom of the wallpapers section")
+    check("Use the original for all" in bg and "sw_live" not in m and "Live wallpaper" not in m and "LiveShell" not in bg,
+          "the live wallpaper section is gone from the wallpapers section")
     nm = m[m.index('id="nmSec"'):m.index('id="startOpts"')]
     check("Tidy names" not in nm and "Remove &trade;, &reg; and &copy;" in nm and "Remove platform tags such as (PS4) and (PS5)" in nm and "Clean up spaces" in nm and 'id="nmWordIn"' in nm and "nmAdd()" in nm,
           "Clean Up Game Names has no inner title, the three rules and a field for your own words")
-    check('id="nmSel"' in nm and 'id="nmDone"' in nm and nm.index('id="nmApplyBtn"') < nm.index('id="nmDone"'), "and a place for the select buttons, and for the list of names you've changed below Apply")
+    check('id="nmSel"' in nm and 'id="nmDone"' in nm and nm.index('id="nmDone"') < nm.index('id="nmApplyBtn"'), "and a place for the select buttons, and for the list of names you've changed above Apply")
+    check(nm.index('id="nmUndoInfo"') < nm.index('id="nmDone"') < nm.index('id="nmAttn"') < nm.index('id="nmApplyBtn"') < nm.index("nmUndo(this)") < nm.index('id="nmHand"') < nm.index('id="nmMsg"'),
+          "the changed names come first, then the attention message, then Apply, Use the original names and the hand-names tick box together")
+    check(nm.index('<div class="subhead">Games</div>') < nm.index('id="nmUndoInfo"') and nm.index('id="nmSummary"') < nm.index('<div class="subhead">Games</div>'),
+          "a Games header sits above the changed names (and above \"No names are changed.\")")
+    check('<div class="subhead">Keep name as intended.</div>' in nm, "Keep name as intended is a header")
     check("'Remastered', 'Definitive Edition', 'Deluxe Edition', 'Game of the Year Edition', 'Complete Edition', 'Director\\'s Cut'" in m, "with the suggestions to add with one tap")
     check("Shorten" not in nm and "subtitle" not in nm.lower(), "and no rule that shortens names")
     check(">Select all</button>" in m and ">Select none</button>" in m and "function nmSetAll" in m and "function bgSetAll" in m, "both lists have Select all and Select none")
@@ -2979,7 +3106,7 @@ def release_tests(tmp):
     check(open(os.path.join(out, "HomeScreenManager.elf.sha256")).read() == "%s  HomeScreenManager.elf\n" % digest, "the checksum file is in the format sha256sum -c reads")
     check(open(os.path.join(out, "HomeScreenManager.elf"), "rb").read() == open(elf, "rb").read(), "the file is the build")
     notes = open(os.path.join(out, "RELEASE_NOTES.md"), encoding="utf-8").read()
-    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Renamed to Home Screen Manager" in notes,
+    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Menu and README wording" in notes,
           "the note has the title, the changelog entry and the checksum")
     r = run(elf, "--out", out, "--version", "9.9.9")
     check(r.returncode != 0 and "not version 9.9.9" in r.stderr, "it stops if the build isn't the version it is releasing")
@@ -3108,7 +3235,7 @@ def bulk_tests(tmp):
     print("  applying to many games")
     # one game already has a background of its own
     check(post_bytes("/api/custom/bg?id=CUSA90005", png)[0] == 200, "set up: one game with its own background")
-    chosen = ["PPSA01325", "CUSA00900", "CUSA01065"] + ["CUSA9%04d" % i for i in range(40)] + ["HHFD00001"]
+    chosen = ["PPSA01325", "CUSA00900", "CUSA01065"] + ["CUSA9%04d" % i for i in range(40)] + ["HHFD00001", "NPXS40047"]
     code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": chosen, "overwrite": False}))
     check(code == 200 and r["ok"] and r["job"], "the job starts")
     job = r["job"]
@@ -3124,10 +3251,10 @@ def bulk_tests(tmp):
             break
         time.sleep(0.3)
     check(res is not None and res["ok"], "it finishes")
-    check(res["applied"] == 41 and res["no_entry"] == 1 and res["already_set"] == 1 and res["failed"] == 0 and res["folders"] == 1,
-          "41 games done; 1 without a background entry, 1 already set by you, and the folder tile left out (%s)" % res)
+    check(res["applied"] == 42 and res["no_entry"] == 1 and res["already_set"] == 1 and res["failed"] == 0 and res["folders"] == 1,
+          "42 done (a game without a background entry is filled in too); the system tile is left out, 1 already set by you, and the folder tile left out (%s)" % res)
     lg = log()
-    check("bulk background: 41 applied, 1 without a background entry, 1 already set by you, 0 failed, 1 folder(s) left out" in lg, "the log has the totals and the timing")
+    check("bulk background: 42 applied, 1 without a background entry, 1 already set by you, 0 failed, 1 folder(s) left out" in lg, "the log has the totals and the timing")
     check(lg.count("reused the converted file") >= 38, "the picture was converted once per file format, then reused (%d times)" % lg.count("reused the converted file"))
     check(res["linked"] + res["copied"] == res["reused"] and "(%d linked, %d copied)" % (res["linked"], res["copied"]) in lg, "the summary counts the files that were linked and the ones that were copied")
     check("hard links" not in lg, "and there is no link test any more")
@@ -3140,7 +3267,10 @@ def bulk_tests(tmp):
     check("hh_" in keep, "the game that already had its own background was left alone")
     check(wait_for(lambda: log().count("home screen refresh: restarting the home screen process") >= 2, 12), "the home screen is restarted at the end")
     by_id, _ = listing()
-    check(by_id["CUSA90010"]["custom_bg"] and not by_id["CUSA01065"]["custom_bg"], "the list shows who has a custom background now")
+    check(by_id["CUSA90010"]["custom_bg"] and by_id["CUSA01065"]["custom_bg"] and not by_id["NPXS40047"]["custom_bg"], "the list shows who has a custom background now, the filled-in game too, not the system tile")
+    inf = {t["id"]: t for t in post_bytes("/api/bulk/info", jbody({"ids": ["CUSA90010", "CUSA01065", "NPXS40047"]}))[1]["tiles"]}
+    check(inf["CUSA01065"]["no_own"] and not inf["CUSA90010"]["no_own"] and inf["NPXS40047"]["no_own"],
+          "a filled-in game is marked as having no wallpaper of its own, a game with an entry is not (%s)" % inf)
 
     print("  overwrite")
     code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": ["CUSA90005", "CUSA90010"], "overwrite": True}))
@@ -3174,9 +3304,9 @@ def bulk_tests(tmp):
     check(os.path.exists(other2), "and the files of the others are still there (the link was shared)")
     start, r = bg_undo({"all": True})
     by_id, _ = listing()
-    check(start["job"] and start["n"] == 41 and r["undo"] and r["changed"] == 41 and not any(t["custom_bg"] for t in by_id.values()),
-          "undo for all is a job with a count (41 games), and every background is the original again (%s)" % r)
-    check("bulk background: 41 original background(s) put back" in log(), "the log says how many were put back")
+    check(start["job"] and start["n"] == 42 and r["undo"] and r["changed"] == 42 and not any(t["custom_bg"] for t in by_id.values()),
+          "undo for all is a job with a count (42 games), and every background is the original again (%s)" % r)
+    check("bulk background: 42 original background(s) put back" in log(), "the log says how many were put back")
     start, r = bg_undo({"all": True})
     check(start["job"] == 0 and start["changed"] == 0, "with nothing to undo, no job is started")
     s.stop()
@@ -3404,6 +3534,16 @@ def names_source_tests(tmp):
     post_bytes("/api/bulk/rename_undo", jb({"all": True}))
     check(listing()[0]["CUSA90000"]["name"] == "Zero Hand", "cleaning up twice still remembers the name you gave by hand")
     check("[cleanup]" in http("GET", "/api/log", raw=True)[1].decode(), "the log marks the names that come from the cleanup")
+    form("/api/custom/name?id=CUSA90003", {"name": "Three Hand"})
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90003", "name": "Game 3"}]))   # the tidy name is the original one
+    i = info("CUSA90003")["CUSA90003"]
+    check(listing()[0]["CUSA90003"]["name"] == "Game 3" and i["by"] == "tool", "a tidy name equal to the original is kept as the cleanup's (%s)" % i)
+    code, r = post_bytes("/api/bulk/rename_undo", jb({"all": True}))
+    check(r["changed"] >= 1 and listing()[0]["CUSA90003"]["name"] == "Three Hand" and info("CUSA90003")["CUSA90003"]["by"] == "hand",
+          "undoing the cleanup gives the name you set by hand back, it is not lost")
+    post_bytes("/api/bulk/rename", jb([{"id": "CUSA90003", "name": "Game 3"}]))
+    post_bytes("/api/bulk/rename_undo", jb({"all": True, "hand": True}))
+    check(listing()[0]["CUSA90003"]["name"] == "Game 3" and not listing()[0]["CUSA90003"]["renamed"], "with the box ticked the original comes back")
     s.stop()
 
 
@@ -3454,10 +3594,15 @@ def experiment_tests(tmp):
         if http("GET", "/api/bulk/job?job=%d" % r["job"])[1].get("done"): break
         time.sleep(0.2)
     check(cells("CUSA01065") == (None, None), "the undo for all does the same")
+    code, r = post_bytes("/api/bulk/bg/try", jb({"id": "NPXS40047", "report": True}))
+    check(code == 200 and r["wrote"] is False and "check only" in r["message"] and cells("NPXS40047") == (None, None) and not os.path.isdir(d + "/meta/NPXS40047"),
+          "the check on a system tile writes nothing (%s)" % r.get("message"))
+    check("experiment NPXS40047: report only" in log(), "and the log has the report")
     code, r = post_bytes("/api/bulk/bg/try", jb({"id": "NPXS40047"}))
-    check(code == 200 and r["wrote"] is False and "report only" in r["message"] and cells("NPXS40047") == (None, None) and not os.path.isdir(d + "/meta/NPXS40047"),
-          "a system tile is only checked: nothing is written (%s)" % r.get("message"))
-    check("experiment NPXS40047: a system tile, report only" in log(), "and the log has the report")
+    c = cells("NPXS40047")
+    check(code == 200 and r["wrote"] is True and all(x and "/NPXS40047/hh_bg_" in x for x in c), "a system tile can take a background too (%s)" % (c,))
+    code, r = post_bytes("/api/custom/bg?id=NPXS40047&reset=1", b"")
+    check(code == 200 and cells("NPXS40047") == (None, None), "and Use the original puts its empty slots back")
     code, r = post_bytes("/api/bulk/bg/try", jb({"id": "PPSA01325"}))
     check(code == 409 and "already has a background entry" in r["error"], "a tile that has an entry is sent to the normal list")
     code, r = post_bytes("/api/bulk/bg/try", jb({"id": "CUSA99999"}))
@@ -3582,6 +3727,83 @@ def shared_concept_tests(tmp):
     check(res.get("ok") and "tiles done, cleaning up shared files" in log(), "undo for all finishes (%s)" % res)
     check("one of our own files; putting the first backup's value back" in log(), "a saved original that was one of our own files is replaced from the first backup")
     check(cell("CUSA90006") == orig and "/hh_bg_" not in (cell("CUSA90006") or ""), "the shared cells hold the console's own picture again, not one of ours")
+    # a file of ours is left in the cells, gone, and nobody saved an original for them (what the broken
+    # build left on the console): the next run fixes them from the first backup, and undo puts that back
+    qx(sdb, "DELETE FROM custom_cells")
+    qx(sdb, "DELETE FROM custom")
+    for u in USERS:
+        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=? WHERE localConceptId=?', dead, "cid:local:CUSA90006")
+    res = run_job("/api/bulk/bg/apply", {"ids": tiles, "overwrite": True})
+    check(res.get("failed") == 0, "a run over cells holding a dead file of ours works (%s)" % res)
+    check("no saved original for" in log() and "using the first backup's value" in log(), "the log says the first backup's value was used")
+    check("/hh_bg_" in (cell("CUSA90006") or "") and os.path.exists(cell("CUSA90006")), "and the cells now hold a file that exists")
+    n1 = log().count("background needs fixing")
+    time.sleep(2.5)
+    check(log().count("background needs fixing") == n1, "nothing is flagged for fixing afterwards")
+    res = run_job("/api/bulk/bg/undo", {"all": True})
+    check(cell("CUSA90006") == orig, "undo puts the console's own picture back there (%s)" % cell("CUSA90006"))
+    # undo for only some games (the ticked ones)
+    run_job("/api/bulk/bg/apply", {"ids": tiles[:3], "overwrite": True})
+    res = run_job("/api/bulk/bg/undo", {"ids": [tiles[0]]})
+    lst = http("GET", "/api/list")[1]["tiles"]
+    has = {t["id"]: t.get("custom_bg") for t in lst}
+    check(res.get("changed") == 1 and not has[tiles[0]] and has[tiles[1]] and has[tiles[2]], "undo for the ticked games leaves the other games alone (%s)" % res)
+    run_job("/api/bulk/bg/undo", {"all": True})
+    s.stop()
+
+
+def undo_everything_tests(tmp):
+    print("undo everything I changed")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io
+    d, db, env, ids = bulk_setup(tmp, "u", 6)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def run_job(path, body):
+        code, r = post_bytes(path, json.dumps(body).encode())
+        for _ in range(300):
+            j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+            if j.get("done"):
+                return j["result"]
+            time.sleep(0.2)
+        return {}
+
+    def listing_now():
+        return {t["id"]: t for t in http("GET", "/api/list")[1]["tiles"]}
+
+    before = listing_now()
+    tiles = ["CUSA9%04d" % i for i in range(6)]
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
+    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
+    run_job("/api/bulk/bg/apply", {"ids": tiles[:3]})
+    form("/api/custom/name?id=" + tiles[3], {"name": "My Own Name"})
+    http("POST", "/api/hide?id=" + tiles[4])
+    http("POST", "/api/tab?id=" + tiles[5] + "&to=media")
+    code, r = form("/api/folders/save", {"name": "Temp", "items": tiles[1] + "," + tiles[2]})
+    check(code == 200, "a folder is made first (%s)" % r)
+    now = listing_now()
+    check(now[tiles[3]]["name"] == "My Own Name" and now[tiles[0]].get("custom_bg"), "the changes are in place")
+
+    res = run_job("/api/undo_everything", {})
+    check(res.get("ok") and res.get("failed") == 0, "the job finishes without a failed step (%s)" % res)
+    check(res.get("folders") == 1 and res.get("tabs") == 1 and res.get("bgs") == 3 and res.get("names") == 1,
+          "it reports what it took back (%s)" % res)
+    check("undo everything: 1 folder(s)" in log(), "and the log says so")
+    after = listing_now()
+    check(not any(t["id"].startswith("HHFD") for t in after.values()), "the folder is gone")
+    check(after[tiles[3]]["name"] == before[tiles[3]]["name"] and not after[tiles[3]].get("renamed"), "the hand name is back to the original")
+    check(not any(t.get("custom_bg") for t in after.values()), "no tile has a custom background")
+    check(not after[tiles[4]].get("hidden") and not after[tiles[5]].get("moved"), "the hidden tile is shown and the moved tile is back")
+    res = run_job("/api/undo_everything", {})
+    check(res.get("ok") and not (res.get("folders") or res.get("bgs") or res.get("names") or res.get("tabs")), "a second run has nothing to do (%s)" % res)
+    check(http("POST", "/api/undo_everything", raw=True)[0] in (200, 409), "the route answers")
     s.stop()
 
 
@@ -3766,7 +3988,7 @@ def main():
         check(q(appdb, "SELECT count(*) FROM tbl_contentinfo")[0][0] == len(APPS), "nothing deleted")
         j = launch("PPSA01325")
         check(j["result"] == "ok", "hidden game can still be launched")
-        check(any("would start PPSA01325" in l for l in s.out), "launch reached the system call")
+        check(wait_for(lambda: any("would start PPSA01325" in l for l in s.out), 5), "launch reached the system call")
         code, r = http("POST", "/api/launch?id=bad")
         check(code == 400, "launch with bad id rejected")
         for tid in ("PPSA01325", "CUSA01065"):
@@ -3936,6 +4158,7 @@ def main():
             experiment_tests,
             share_tests,
             shared_concept_tests,
+            undo_everything_tests,
             theme_tests,
             release_tests,
             backup_tests,
@@ -3947,9 +4170,11 @@ def main():
             background_tests,
             watchdog_tests,
             watchdog_multi_folder_tests,
+            watchdog_folder_tab_tests,
+            thumbs_prune_tests,
+            folder_style_tests,
             tabs_tests,
             folder_move_tests,
-            live_tests,
             arrange_tests,
             front_folders_tests,
             show_running_tests,

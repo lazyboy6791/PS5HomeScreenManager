@@ -25,9 +25,34 @@ body.nobar .bar{display:none}
 .sort{font:inherit;color:var(--muted);background:none;border:2px solid transparent;border-radius:10px;padding:6px 12px;cursor:pointer}
 .sort b{color:var(--text);font-weight:500}
 .sort:focus{border-color:#ffffff55;outline:none}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));grid-gap:44px 18px;gap:44px 18px}
-@media (min-width:900px){.grid{grid-template-columns:repeat(5,1fr)}}
-@media (min-width:1350px){.grid{grid-template-columns:repeat(6,1fr)}}
+.ctl{display:flex;align-items:center}
+.vwrap{position:relative;display:inline-block}
+.vmenu{display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:6;min-width:190px;background:#1d2436;
+  border:1px solid #2f6df566;border-radius:14px;padding:6px;box-shadow:0 14px 40px #000b}
+.vmenu.show{display:block}
+#omenu{min-width:110px}
+.vopt{display:block;width:100%;text-align:left;font:inherit;color:var(--muted);background:none;border:2px solid transparent;
+  border-radius:10px;padding:10px 14px;cursor:pointer;white-space:nowrap}
+.vopt.on{color:var(--text)}
+.vopt:before{content:"";display:inline-block;width:.5em;height:.5em;border-radius:50%;margin-right:.7em;vertical-align:middle}
+.vopt.on:before{background:currentColor}
+.arr{display:inline-block;margin-left:8px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid currentColor;vertical-align:middle}
+.vopt:focus{border-color:#ffffff88;outline:none;color:var(--text)}
+.grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));grid-gap:44px 18px;gap:44px 18px}
+/* compact: one row per game, the picture first and then the title */
+.grid.compact,.grid.list{grid-template-columns:minmax(0,1fr);grid-gap:10px 18px;gap:10px 18px}
+.grid.compact .tile,.grid.list .tile{display:flex;align-items:center;width:100%;height:auto;margin:0;text-align:left;border-radius:14px}
+.grid.compact .tile{padding:8px 14px}
+.grid.compact .tile .art{position:static;flex:none;width:64px;height:64px;border-radius:10px}
+.grid.compact .tile .ph,.grid.list .tile .ph{display:none}
+.grid.compact .tile .name,.grid.list .tile .name{position:static;opacity:1;text-align:left;font-size:1em;flex:1;min-width:0}
+.grid.compact .tile .name{margin-left:18px}
+.grid.compact .tile .name,.grid.list .tile .name{font-weight:700}
+.grid.compact .tile:focus,.grid.list .tile:focus{transform:none;box-shadow:0 0 0 4px var(--focus);background:#1d2436}
+.grid.compact .tile:focus .art{box-shadow:none}
+/* list: the titles only, no pictures */
+.grid.list .tile{padding:12px 18px}
+.grid.list .tile .art{display:none}
 .tile{position:relative;display:block;padding:0;border:0;background:#141821;border-radius:10px;cursor:pointer;
   width:100%;height:0;padding-bottom:100%;overflow:visible;font:inherit;color:inherit;transition:transform .12s}
 .tile .art{position:absolute;top:0;left:0;right:0;bottom:0;border-radius:10px;overflow:hidden;
@@ -36,6 +61,10 @@ body.nobar .bar{display:none}
 .tile .ph{position:absolute;left:0;right:0;top:40%;padding:0 12px;text-align:center;font-weight:600;font-size:.9em;color:#cfd6e4}
 .tile .name{position:absolute;left:0;right:0;top:calc(100% + 8px);text-align:center;font-size:.8em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .12s}
+.name .nt{display:inline-block;white-space:nowrap}
+.name.mq{text-overflow:clip;text-align:left}
+.name.mq .nt{animation:mq var(--t,8s) ease-in-out infinite alternate}
+@keyframes mq{0%,15%{transform:translateX(0)}85%,100%{transform:translateX(var(--d,0))}}
 .tile:focus{outline:none;transform:scale(1.06);z-index:2}
 .tile:focus .art{box-shadow:0 0 0 4px var(--focus),0 12px 30px #000a}
 .tile:focus .name{opacity:1}
@@ -62,6 +91,9 @@ body.noedit .foot{display:none}
 [data-theme="light"] body{background:radial-gradient(120% 90% at 85% 10%,#ffffff 0%,#eef1f8 45%,var(--bg) 100%) fixed;background-color:var(--bg)}
 [data-theme="light"] .ficon{background:#dfe5f2}
 [data-theme="light"] .sort:focus{border-color:#1f55d088}
+[data-theme="light"] .vmenu{background:#ffffff;border-color:#2f6df566;box-shadow:0 10px 30px #0003}
+[data-theme="light"] .vopt:focus{border-color:#1f55d088}
+[data-theme="light"] .grid.compact .tile:focus,[data-theme="light"] .grid.list .tile:focus{background:#ffffff}
 [data-theme="light"] .tile{background:#e3e8f3}
 [data-theme="light"] .tile .art{background:linear-gradient(160deg,#eef1f8,#dbe2f0)}
 [data-theme="light"] .tile .ph{color:#3a4458}
@@ -82,7 +114,21 @@ body.noedit .foot{display:none}
   </header>
   <div class="bar" id="bar">
     <span id="count"></span>
-    <button class="sort" id="sortBtn" onclick="toggleSort()">Sort by: <b id="sortLbl">Most Recent</b></button>
+    <span class="ctl">
+      <button class="sort" id="sortBtn" onclick="toggleSort()">Sort by: <b id="sortLbl">Most Recent</b></button>
+      <span class="vwrap">
+        <button class="sort" id="viewBtn" aria-haspopup="true" onclick="toggleView()">View: <b id="viewLbl">Icon</b><i class="arr"></i></button>
+        <div class="vmenu" id="vmenu">
+          <button class="vopt" data-v="grid" onclick="setView('grid')">Icon</button>
+          <button class="vopt" data-v="compact" onclick="setView('compact')">Compact</button>
+          <button class="vopt" data-v="list" onclick="setView('list')">List</button>
+        </div>
+      </span>
+      <span class="vwrap">
+        <button class="sort" id="optBtn" aria-haspopup="true" onclick="toggleOpt()"><span id="optName">Tiles per row</span>: <b id="optLbl">6</b><i class="arr"></i></button>
+        <div class="vmenu" id="omenu"></div>
+      </span>
+    </span>
   </div>
   <div id="grid" class="grid"></div>
   <div id="msg" class="msg" style="display:none"></div>
@@ -93,9 +139,17 @@ body.noedit .foot{display:none}
   <button id="askYes">Close it and start</button><button class="ghost" id="askNo" onclick="hideAsk()">Cancel</button></div></div>
 
 <script>
-var folder = null, sortMode = 'recent', cols = 5;
+var folder = null, sortMode = 'recent', cols = 5, viewMode = 'grid';
+var perRow = 6, listCols = { compact: 1, list: 1 }; /* tiles per row in the icon view (5 to 10), columns in compact and in list (1 to 3, each its own) */
+var VIEWS = { grid: 'Icon', compact: 'Compact', list: 'List' }; /* grid: icons; compact: picture + title; list: titles only */
 var id = (location.pathname.match(/\/folder\/([A-Z0-9]{9})/) || [])[1] || '';
 try { if (localStorage.getItem('hh_sort') === 'name') sortMode = 'name'; } catch (e) {}
+try { var sv = localStorage.getItem('hh_view'); if (sv && VIEWS[sv]) viewMode = sv; } catch (e) {}
+try { var pr = parseInt(localStorage.getItem('hh_perrow'), 10); if (pr >= 5 && pr <= 10) perRow = pr; } catch (e) {}
+try {
+  var lc = parseInt(localStorage.getItem('hh_cols_compact'), 10); if (lc >= 1 && lc <= 3) listCols.compact = lc;
+  lc = parseInt(localStorage.getItem('hh_cols_list'), 10); if (lc >= 1 && lc <= 3) listCols.list = lc;
+} catch (e) {}
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -162,20 +216,47 @@ function render() {
   var items = sorted();
   document.getElementById('sortLbl').textContent = sortMode === 'name' ? 'Name' : 'Most Recent';
   document.getElementById('count').textContent = 'All: ' + items.length;
+  document.getElementById('viewLbl').textContent = VIEWS[viewMode];
+  var opts = document.querySelectorAll('.vopt');
+  for (var o = 0; o < opts.length; o++) opts[o].className = 'vopt' + (opts[o].getAttribute('data-v') === viewMode ? ' on' : '');
+  document.getElementById('grid').className = 'grid' + (viewMode === 'grid' ? '' : ' ' + viewMode);
+  document.getElementById('grid').style.gridTemplateColumns = 'repeat(' + (viewMode === 'grid' ? perRow : listCols[viewMode]) + ',minmax(0,1fr))';
+  document.getElementById('grid').style.fontSize = viewMode === 'grid' && perRow > 7 ? (perRow > 9 ? '.7em' : '.8em') : '';
+  document.getElementById('optName').textContent = viewMode === 'grid' ? 'Tiles per row' : 'Columns';
+  document.getElementById('optLbl').textContent = viewMode === 'grid' ? perRow : listCols[viewMode];
+  var oc = document.querySelectorAll('#omenu .vopt'), ov = viewMode === 'grid' ? perRow : listCols[viewMode];
+  for (var q = 0; q < oc.length; q++) oc[q].className = 'vopt' + (parseInt(oc[q].getAttribute('data-n'), 10) === ov ? ' on' : '');
   var html = '';
   for (var i = 0; i < items.length; i++) {
     var t = items[i];
     html += '<button class="tile" data-i="' + i + '" data-id="' + t.id + '" onclick="launch(this)">' +
       '<span class="art"><span class="ph">' + esc(t.name) + '</span></span>' +
-      '<span class="name">' + esc(t.name) + '</span></button>';
+      '<span class="name"><span class="nt">' + esc(t.name) + '</span></span></button>';
   }
   document.getElementById('grid').innerHTML = html;
   if (!items.length) showMsg('This folder is empty. Add games to it in Home Screen Manager.');
   var tiles = document.querySelectorAll('.tile');
-  for (var k = 0; k < tiles.length; k++) art(tiles[k]);
+  if (viewMode !== 'list') for (var k = 0; k < tiles.length; k++) art(tiles[k]);
   if (tiles.length) { tiles[0].focus(); lastPad = Date.now(); } /* the first game starts highlighted, and X starts it */
   measure();
+  marquee();
 }
+
+/* A name that is wider than its tile or column slides back and forth so all of it can be read. */
+function marquee() {
+  var names = document.querySelectorAll('.name');
+  for (var i = 0; i < names.length; i++) {
+    var n = names[i], t = n.firstChild;
+    n.className = 'name';
+    var over = t.offsetWidth - n.clientWidth;
+    if (over > 2) {
+      n.className = 'name mq';
+      t.style.setProperty('--d', (-over - 2) + 'px');
+      t.style.setProperty('--t', (over / 35 + 4).toFixed(1) + 's');
+    }
+  }
+}
+window.addEventListener('resize', function () { marquee(); });
 
 function art(btn) {
   var img = new Image();
@@ -195,6 +276,50 @@ function toggleSort() {
   sortMode = sortMode === 'name' ? 'recent' : 'name';
   try { localStorage.setItem('hh_sort', sortMode); } catch (e) {}
   render();
+  document.getElementById('sortBtn').focus(); /* the highlight stays on Sort by (render() moves it to the first game) */
+}
+
+function openMenu() { return document.querySelector('.vmenu.show'); }
+function vmOpen() { return !!openMenu(); }
+function closeView(refocus) {
+  var m = openMenu();
+  if (!m) return;
+  m.className = 'vmenu';
+  if (refocus) (m.previousElementSibling || document.getElementById('viewBtn')).focus();
+}
+function showMenu(m) {
+  m.className = 'vmenu show';
+  var cur = m.querySelector('.vopt.on') || m.querySelector('.vopt');
+  if (cur) cur.focus();
+}
+function toggleView() {
+  if (vmOpen()) { closeView(true); return; }
+  showMenu(document.getElementById('vmenu'));
+}
+/* The second menu follows the view: tiles per row for icons, columns for compact and list. */
+function toggleOpt() {
+  if (vmOpen()) { closeView(true); return; }
+  var m = document.getElementById('omenu'), lo = viewMode === 'grid' ? 5 : 1, hi = viewMode === 'grid' ? 10 : 3, h = '';
+  for (var n = lo; n <= hi; n++) h += '<button class="vopt" data-n="' + n + '" onclick="setOpt(' + n + ')">' + n + '</button>';
+  m.innerHTML = h;
+  var oc = m.querySelectorAll('.vopt'), ov = viewMode === 'grid' ? perRow : listCols[viewMode];
+  for (var q = 0; q < oc.length; q++) oc[q].className = 'vopt' + (parseInt(oc[q].getAttribute('data-n'), 10) === ov ? ' on' : '');
+  showMenu(m);
+}
+function setOpt(n) {
+  if (viewMode === 'grid') { perRow = n; try { localStorage.setItem('hh_perrow', n); } catch (e) {} }
+  else { listCols[viewMode] = n; try { localStorage.setItem('hh_cols_' + viewMode, n); } catch (e) {} }
+  closeView(false);
+  render();
+  document.getElementById('optBtn').focus();
+}
+function setView(v) {
+  if (!VIEWS[v]) return;
+  viewMode = v;
+  try { localStorage.setItem('hh_view', v); } catch (e) {}
+  closeView(false);
+  render();
+  document.getElementById('viewBtn').focus(); /* render() highlights the first game; the picker keeps the highlight */
 }
 
 function launch(btn) {
@@ -315,7 +440,7 @@ function dbg(msg) {
 function askOpen() { return document.getElementById('ask').className.indexOf('show') >= 0; }
 
 function isOurs(el) {
-  return !!(el && el.classList && (el.classList.contains('tile') || el.id === 'sortBtn' || el.id === 'edit'));
+  return !!(el && el.classList && (el.classList.contains('tile') || el.classList.contains('vopt') || el.id === 'sortBtn' || el.id === 'viewBtn' || el.id === 'optBtn' || el.id === 'edit'));
 }
 
 /* Where the d-pad goes from el: the sort button, the games, then the edit link. Returns an element or null. */
@@ -323,7 +448,11 @@ function padTarget(el, code) {
   var tiles = document.querySelectorAll('.tile'), n = tiles.length;
   var sortBtn = document.getElementById('sortBtn'), edit = document.getElementById('edit');
   var editOk = edit && edit.offsetParent !== null;
-  if (el === sortBtn) return code === 40 && n ? tiles[0] : null;
+  var viewBtn = document.getElementById('viewBtn');
+  if (el === sortBtn) return code === 40 && n ? tiles[0] : code === 39 ? viewBtn : null;
+  var optBtn = document.getElementById('optBtn');
+  if (el === viewBtn) return code === 40 && n ? tiles[0] : code === 37 ? sortBtn : code === 39 ? optBtn : null;
+  if (el === optBtn) return code === 40 && n ? tiles[0] : code === 37 ? viewBtn : null;
   if (el === edit) return code === 38 && n ? tiles[n - 1] : null;
   if (!el.classList || !el.classList.contains('tile')) return null;
   var i = parseInt(el.getAttribute('data-i'), 10), j = i;
@@ -343,6 +472,18 @@ function padTarget(el, code) {
 
 function padKey(e) {
   var el = document.activeElement;
+  if (vmOpen()) { /* the view menu: up and down move through it, anything else closes it */
+    var vo = Array.prototype.slice.call(openMenu().querySelectorAll('.vopt')), vi = vo.indexOf(el);
+    if (e.keyCode === 38 || e.keyCode === 40) {
+      e.preventDefault();
+      lastPad = Date.now();
+      vo[Math.max(0, Math.min(vo.length - 1, (vi < 0 ? 0 : vi) + (e.keyCode === 40 ? 1 : -1)))].focus();
+    } else if (e.keyCode === 27 || e.keyCode === 37 || e.keyCode === 39) {
+      e.preventDefault();
+      closeView(true);
+    }
+    return;
+  }
   if (askOpen()) {
     if (e.keyCode === 37 || e.keyCode === 39) {
       e.preventDefault();
@@ -371,7 +512,7 @@ function pointerMove(x, y, target) {
   ptrX = x;
   ptrY = y;
   lastPtr = Date.now();
-  var t = target && target.closest ? target.closest('.tile, .sort, .foot a, .ask button') : null;
+  var t = target && target.closest ? target.closest('.tile, .sort, .vopt, .foot a, .ask button') : null;
   dbg('pointer ' + x + ',' + y + ' over ' + dbgName(t || target));
   if (t && document.activeElement !== t) {
     try { t.focus({ preventScroll: true }); } catch (err) { t.focus(); }
@@ -418,6 +559,9 @@ function redirectClick(e) {
 function padUp() { if (downFocus) setTimeout(function () { fireRedirect(); }, 80); }
 
 document.addEventListener('keydown', padKey);
+document.addEventListener('click', function (e) {
+  if (vmOpen() && !(e.target.closest && e.target.closest('.vwrap'))) closeView(false);
+});
 document.addEventListener('mousemove', function (e) { pointerMove(e.clientX, e.clientY, e.target); });
 document.addEventListener('mousedown', padDown, true);
 document.addEventListener('mouseup', padUp, true);

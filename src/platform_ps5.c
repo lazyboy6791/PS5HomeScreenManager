@@ -15,7 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/mount.h>
+#include <sys/param.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+#include <errno.h>
+#include <dirent.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -82,6 +88,15 @@ static int valid_app_id(int id) {
   return id != 0 && id != -1 && !((uint32_t)id & 0x80000000u);
 }
 
+/* Payload managers show a payload under the name of its process. Without one they only know "payload pid N".
+ * Weak, so a console or SDK without the call still links and runs. */
+extern int sceKernelSetProcessName(const char *name) __attribute__((weak));
+
+void plat_set_process_name(const char *name) {
+  if (sceKernelSetProcessName) sceKernelSetProcessName(name);
+  syscall(464 /* SYS_thr_set_name */, -1, name); /* the name of this thread (the main one) */
+}
+
 void plat_init(void) {
   /* needed by sceSystemServiceLaunchWebBrowser; harmless if already done */
   sceUserServiceInitialize(0);
@@ -103,6 +118,17 @@ void plat_notify(const char *fmt, ...) {
 
 int plat_launch_browser(const char *url) {
   return sceSystemServiceLaunchWebBrowser(url, 0) == 0 ? 0 : -1;
+}
+
+void plat_describe_mount(const char *path, char *out, size_t n) {
+  struct statfs sf;
+  if (statfs(path, &sf)) {
+    snprintf(out, n, "statfs failed (%s)", strerror(errno));
+    return;
+  }
+  snprintf(out, n, "type %s, from %s, mounted on %s, %s, %llu KiB free", sf.f_fstypename, sf.f_mntfromname,
+           sf.f_mntonname, (sf.f_flags & MNT_RDONLY) ? "READ-ONLY" : "writable",
+           (unsigned long long)sf.f_bavail * sf.f_bsize / 1024);
 }
 
 int plat_launch_app(const char *title_id, uint32_t *app_id) {
@@ -344,6 +370,140 @@ static long ms_now(void) {
   return (long)(t.tv_sec * 1000L + t.tv_nsec / 1000000L);
 }
 
+/* ---- fast install of one tile: let the console see only that tile --------------------------------------
+ * sceAppInstUtilAppInstallAll walks every folder of /user/app (about 0.7 s per game, registered or not), so with a
+ * big library one folder tile takes minutes. PS4 Mount avoids that by showing the console an empty staging folder
+ * over /user/app with only the new title mounted into it. The same is done here: the tile's own directory is
+ * mounted a second time at a hold path, the staging folder goes over /user/app, the tile goes back in at its place,
+ * and the install-all then sees one title. Everything is undone afterwards, and any failure falls back to the
+ * normal install-all. Not done while a game runs, or when something else already shows /user/app in a special way. */
+static char g_stage[256];
+
+void plat_set_stage_dir(const char *dir) { snprintf(g_stage, sizeof(g_stage), "%s", dir ? dir : ""); }
+
+#define HH_IOV(x) {(void *)(x), strlen(x) + 1}
+
+static int hh_nullfs(const char *from, const char *to) {
+  struct iovec iov[] = {HH_IOV("fstype"), HH_IOV("nullfs"), HH_IOV("from"), HH_IOV(from), HH_IOV("fspath"), HH_IOV(to)};
+  if (nmount(iov, 6, 0)) {
+    hh_log("fast install: mount %s -> %s failed: %s", from, to, strerror(errno));
+    return -1;
+  }
+  return 0;
+}
+
+/* 1 when the directory is a mount point of its own (statfs names the mount it belongs to) */
+static int hh_is_mount_point(const char *path, char *from, size_t fromsz) {
+  struct statfs sf;
+  if (statfs(path, &sf)) return 0;
+  if (from && fromsz) snprintf(from, fromsz, "%s", sf.f_mntfromname);
+  return strcmp(sf.f_mntonname, path) == 0;
+}
+
+static void hh_unmount(const char *path) {
+  for (int i = 0; i < 12; i++) {
+    if (!unmount(path, 0)) return;
+    usleep(250000); /* the system keeps a folder open for a moment after the install returned */
+  }
+  if (unmount(path, MNT_FORCE)) hh_log("fast install: unmount %s failed: %s", path, strerror(errno));
+}
+
+/* a game that runs keeps its folder in use: ask the console which game is open (PS4 Mount does the same).
+ * Looking for any /mnt/sandbox mount was wrong: system apps have those all the time. */
+static int hh_game_running(void) {
+  char t[64];
+  uint32_t id;
+  return plat_running_game(t, sizeof(t), &id) == 0;
+}
+
+/* a daemon that stopped while /user/app showed the staging folder: show everything again */
+void plat_unmask_leftover(void) {
+  char from[300];
+  if (!g_stage[0]) return;
+  if (hh_is_mount_point("/user/app", from, sizeof(from)) && !strncmp(from, g_stage, strlen(g_stage))) {
+    hh_log("fast install: /user/app was still showing only a tile from an earlier run, restoring it");
+    DIR *d = opendir(g_stage);
+    struct dirent *e;
+    while (d && (e = readdir(d))) {
+      if (e->d_name[0] == '.' || strlen(e->d_name) != 8) continue;
+      char t[400];
+      snprintf(t, sizeof(t), "/user/app/%s", e->d_name);
+      if (hh_is_mount_point(t, NULL, 0)) hh_unmount(t);
+    }
+    if (d) closedir(d);
+    hh_unmount("/user/app");
+  }
+}
+
+/* returns 1 when the staging folder now covers /user/app with only `tid` in it */
+static int hh_mask_user_app(const char *tid, const char *app_dir, char *hold, size_t holdsz) {
+  char root[320], mp[400], orig[400], target[400];
+  if (!g_stage[0]) {
+    hh_log("fast install: not possible, no staging folder set");
+    return 0;
+  }
+  if (hh_game_running()) {
+    hh_log("fast install: not used, a game is open (it keeps its folder in use)");
+    return 0;
+  }
+  {
+    /* Another tool (PS4 Mount) may be showing only its own new games over /user/app right now, for about 8
+     * seconds per batch. Wait for it to finish before putting our own cover on, so the two never overlap. */
+    struct statfs sf;
+    int waited = 0;
+    while (waited < 120 && !statfs("/user/app", &sf) && !strcmp(sf.f_fstypename, "nullfs") && !strcmp(sf.f_mntonname, "/user/app")) {
+      if (waited == 0) hh_log("fast install: /user/app is covered by another tool (%s), waiting for it to finish", sf.f_mntfromname);
+      usleep(500000);
+      waited++;
+    }
+    if (waited) hh_log("fast install: waited %d ms for the other tool", waited * 500);
+    if (!statfs("/user/app", &sf)) {
+      hh_log("fast install: /user/app is on %s (type %s, mount point %s)", sf.f_mntfromname, sf.f_fstypename, sf.f_mntonname);
+      if (!strcmp(sf.f_fstypename, "nullfs") && !strcmp(sf.f_mntonname, "/user/app")) {
+        hh_log("fast install: not used, /user/app is still covered by another tool after %d s", waited / 2);
+        return 0;
+      }
+    }
+  }
+  snprintf(root, sizeof(root), "%s/root", g_stage);
+  snprintf(mp, sizeof(mp), "%s/%s", root, tid);
+  snprintf(hold, holdsz, "%s/hold/%s", g_stage, tid);
+  snprintf(orig, sizeof(orig), "%s/%s", app_dir, tid);
+  snprintf(target, sizeof(target), "/user/app/%s", tid);
+  char tmp[400];
+  snprintf(tmp, sizeof(tmp), "%s", g_stage);
+  mkdir(tmp, 0777);
+  snprintf(tmp, sizeof(tmp), "%s/hold", g_stage);
+  mkdir(tmp, 0777);
+  mkdir(root, 0777);
+  mkdir(mp, 0777);
+  mkdir(hold, 0777);
+  if (hh_nullfs(orig, hold)) return 0;                 /* the tile's own files, at a second path */
+  if (hh_nullfs(root, "/user/app")) {                  /* the console now sees an empty folder... */
+    hh_unmount(hold);
+    return 0;
+  }
+  if (hh_nullfs(hold, target)) {                       /* ...and the tile in it */
+    hh_unmount("/user/app");
+    hh_unmount(hold);
+    return 0;
+  }
+  return 1;
+}
+
+static void hh_unmask_user_app(const char *tid, const char *hold) {
+  char target[400];
+  snprintf(target, sizeof(target), "/user/app/%s", tid);
+  char from[300] = "";
+  if (hh_is_mount_point(target, NULL, 0)) hh_unmount(target);
+  /* only take away our own cover: if another tool (PS4 Mount) put its own on top meanwhile, leave it alone */
+  if (hh_is_mount_point("/user/app", from, sizeof(from)) && !strncmp(from, g_stage, strlen(g_stage)))
+    hh_unmount("/user/app");
+  else
+    hh_log("fast install: /user/app is covered by something else now (%s), leaving it alone", from);
+  hh_unmount(hold);
+}
+
 int plat_app_install(const char *title_id, const char *app_dir) {
   long t0 = ms_now();
   int err = sceAppInstUtilInitialize();
@@ -390,7 +550,15 @@ int plat_app_install(const char *title_id, const char *app_dir) {
   char dir[300];
   snprintf(dir, sizeof(dir), "%s/", app_dir);
   long t2 = ms_now();
+  char hold[420] = "";
+  int masked = 0;
+  if (!install_dir) {
+    masked = hh_mask_user_app(title_id, app_dir, hold, sizeof(hold));
+    hh_log("install %s: %s", title_id, masked ? "the console sees only this tile for the install (fast way, as PS4 Mount does)"
+                                              : "could not show the console only this tile, installing with everything visible");
+  }
   err = install_dir ? install_dir(title_id, dir, 0) : sceAppInstUtilAppInstallAll(0);
+  if (masked) hh_unmask_user_app(title_id, hold);
   long t3 = ms_now();
   sceAppInstUtilTerminate();
   long t4 = ms_now();

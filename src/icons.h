@@ -12,9 +12,12 @@
  * Returns 1 if name is one of them. */
 int  icon_valid_color(const char *name);
 
-/* Builds a collage from up to four image files (png/jpg). Missing or
- * unreadable files leave an empty slot. *png is malloc'd. 0 on success. */
-int  icon_collage(const char *const *paths, int n, const char *color,
+/* Builds a collage from up to ICON_COLLAGE_MAX image files (png/jpg). Missing or
+ * unreadable files leave an empty slot. style: 0 grid, 1 stack, 2 feature, 3 single, 4 grid 3x3
+ * (ICON_STYLES of them). *png is malloc'd. 0 on success. */
+#define ICON_COLLAGE_MAX 9
+#define ICON_STYLES 5
+int  icon_collage(const char *const *paths, int n, const char *color, int style,
                   unsigned char **png, size_t *png_len);
 
 /* Center-crops and scales a picture (PNG, JPEG, BMP, GIF first frame, TGA;

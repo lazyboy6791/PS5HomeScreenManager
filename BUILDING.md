@@ -21,6 +21,10 @@ make deploy PS5_HOST=192.168.1.50        # send to the ELF loader on port 9021
 - a fake USB drive, with pictures in nested folders and EXIF-rotated photos (made with Pillow when it's installed)
 - a fake ELF loader
 
+## Native app
+
+`native-app/` builds a launcher app with the ps5-native-app-boilerplate kit (pinned commit, fetched by `build.sh`). It copies `HomeScreenManager.elf` into the app's assets, takes the version from `HH_VERSION` in `src/hider.h`, and writes `native-app/build/HSMA00001` plus a `.zip`. Run `./build.sh` after `make`; `./build.sh deploy <PS5 IP>` sends it to a console. Details in `native-app/README.txt`.
+
 ## Publishing a release (so the updater finds it)
 
 1. Raise `HH_VERSION` in `src/hider.h`, for example `0.3.1`. The updater compares this number, so every release needs a higher one.
@@ -52,9 +56,7 @@ src/usbpics.c/.h    picture browser for USB drives and /data/homescreenmanager/p
 src/launch.c/.h     starting titles: web link tiles, launch jobs, "another game running"
 src/custom.c/.h     renaming tiles, changing their pictures and backgrounds (app.db cells + appmeta files)
 src/texture.c/.h    background files: PNG/JPEG, DDS with BC7 (mode 6), BC1, BC3, RGBA8/BGRA8 and mips
-src/liveshell.c/.h  live wallpaper: starts the built-in LiveShell Engine, talks to its API on port 9050
 src/arrange.c/.h    pre-arrange the home screen: order via lastAccessIndex, pin via MyHome
-third_party/liveshell  LiveShell Engine 1.5.2 by ZiZc3 (GPL-3.0): liveshell.elf + its source, see NOTICE.md
 src/log.c/.h        log file shown in Diagnostics
 src/json.c/.h       small JSON reader for GitHub API replies
 src/sha256.c/.h     SHA-256 for download verification
@@ -119,12 +121,6 @@ Pictures are handled as RGBA throughout. Folder colour `none` keeps the collage 
 
 `arrange.c` forces a tile order the PS5 has no stock UI for. The home row sorts by `tbl_iconinfo_<u>.lastAccessIndex` (counted by `tbl_version.access_index`). Home Screen Manager writes arranged tiles' `lastAccessIndex` to `base - pos`, where `base` is the console's counter plus a large gap, so they sit in front in the chosen order and normal play (which gets the next, smaller index) can't catch up. "Pin" also adds the tile to the per-user `MyHome` group (`tbl_group_<u>`). The true original of every `lastAccessIndex` and pin state is saved once in state.db (`arrange_orig`), so clearing restores exactly and a pin the console already had is never removed. It is re-applied at launch like hidden tiles. API: `/api/arrange` (GET), `/api/arrange/save` (items + pinned), `/api/arrange/clear`.
 
-### Live wallpaper (LiveShell Engine)
-
-[LiveShell Engine](https://github.com/ZiZc3/LiveShell) by ZiZc3 is built in unchanged. `make` turns `third_party/liveshell/liveshell.elf` into `src/liveshell_elf.h`, a byte array inside `HomeScreenManager.elf`. With the `live` setting on, Home Screen Manager sends those bytes to the ELF loader (port 9021), 3 seconds after it starts, unless LiveShell already answers on port 9050. That's the same as loading `liveshell.elf` from Payload Manager.
-
-The menu's Live wallpaper section goes through Home Screen Manager (`/api/live`, `/api/live/power`, `/api/live/select`, `/api/live/delete`, `/api/live/thumb`). Home Screen Manager forwards these to LiveShell's API on `127.0.0.1:9050`, so the menu works from a phone or PC too, and the POST requests get Home Screen Manager's cross-site check. Videos are picked by path, and Home Screen Manager turns the path into LiveShell's list index just before sending. Turning the feature off calls LiveShell's `/api/shutdown`. Everything else (looks, playlists, per-game videos, Discover, uploads) stays on LiveShell's own page. The tests use a fake LiveShell and a recording ELF loader, and check that the exact `liveshell.elf` bytes are sent. See `third_party/liveshell/NOTICE.md` for updating to a newer LiveShell.
-
 ### Menu at start
 
 **Options > When Home Screen Manager starts** sets `open_browser`: `1` always opens the menu, `0` never does, and `2` is "quiet when started by Autoload". In mode `2`, Home Screen Manager stays quiet on the first start after the console boots. It tells boots apart by `kern.boottime`, which it saves in `/data/homescreenmanager/last_boot.txt`. A later start in the same session opens the menu: launching again from Payload Manager also stops the copy that is already running, and either of those means a person started it. The decision is logged as `startup: menu mode ...`.
@@ -140,7 +136,7 @@ Each original value goes to `state.db` (`custom_cells`) before it changes, and p
 
 The grey bar at the top of the folder page belongs to the PS5 browser. A web page can't remove it. The page asks for full screen on the first button press, which the browser may or may not allow.
 
-License: GPL-3.0 (see `LICENSE`), because Home Screen Manager includes LiveShell Engine.
+License: GPL-3.0 (see `LICENSE`), the same as HomeHider, which Home Screen Manager is based on.
 
 Third-party code: [stb_image / stb_image_write](https://github.com/nothings/stb) (public domain) in `third_party/stb`. One line in `stb_image_write.h` (JPEG bit writer) is changed to keep a shift within `int` range; it is marked "Home Screen Manager".
 
