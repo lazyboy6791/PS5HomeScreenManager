@@ -3029,6 +3029,27 @@ static void watchdog_pass(hh_t *h) {
  * takes that write, not our fix before it. So for the next few seconds the
  * closed game's tile is watched closely and hidden again the instant it
  * comes back, and everything is checked again a few times. */
+/* The menu server handles one request at a time. If a request never ends, the menu and the launcher app freeze.
+ * This thread writes to the log when the server has not come round for 20 seconds, with the request it is stuck in. */
+static volatile time_t g_loop_beat;
+static void *stall_monitor(void *arg) {
+  (void)arg;
+  int stuck = 0;
+  while (g_running) {
+    sleep(5);
+    time_t now = time(NULL);
+    long idle = g_loop_beat ? (long)(now - g_loop_beat) : 0;
+    if (idle >= 20 && !stuck) {
+      stuck = 1;
+      hh_log("menu server: stuck for %ld s in the request \"%s\" (nothing else can be answered meanwhile)", idle, g_cur_path);
+    } else if (idle < 20 && stuck) {
+      stuck = 0;
+      hh_log("menu server: answers again");
+    }
+  }
+  return NULL;
+}
+
 static void *rehide_watchdog(void *arg) {
   (void)arg;
   char prev[32];
@@ -3271,10 +3292,13 @@ int main(void) {
   {
     pthread_t wd;
     if (pthread_create(&wd, NULL, rehide_watchdog, NULL) == 0) pthread_detach(wd);
+    pthread_t sm;
+    if (pthread_create(&sm, NULL, stall_monitor, NULL) == 0) pthread_detach(sm);
   }
 
   while (g_running) {
     struct pollfd pfd = {srv, POLLIN, 0};
+    g_loop_beat = time(NULL);
     int r = poll(&pfd, 1, 500);
     if (r <= 0) continue;
     int c = accept(srv, NULL, NULL);

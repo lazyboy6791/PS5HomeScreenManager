@@ -1942,7 +1942,7 @@ var upd = null, updTimer = null, waitingRestart = 0, browserOffer = null, browse
 var browserBusy = false, browserRes = null, updNote = ''; /* updNote: the last message of an update action, shown in the status line */
 
 function verCmp(a, b) {
-  var x = String(a || '').replace(/^[vV]/, '').split('.'), y = String(b || '').replace(/^[vV]/, '').split('.');
+  var x = String(a || '').replace(/^[vV][\s._-]*/, '').split('.'), y = String(b || '').replace(/^[vV][\s._-]*/, '').split('.');
   for (var i = 0; i < 4; i++) {
     var p = parseInt(x[i] || '0', 10) || 0, q = parseInt(y[i] || '0', 10) || 0;
     if (p !== q) return p < q ? -1 : 1;
@@ -1978,6 +1978,7 @@ function renderUpd() {
     (u.phase === 'downloading' && u.progress ? ' ' + mb(u.progress) : '');
   else if (u.phase === 'error') msg = '<span class="err-text">' + esc(u.message) + '</span>';
   else if (u.phase === 'restarting' || u.phase === 'done') msg = esc(u.message);
+  else if (u.github.newer || browserOffer || u.usb.newer) msg = 'You\'re running <b>v' + esc(u.current) + '</b>. An updated version has been found.';
   else msg = 'You\'re running <b>v' + esc(u.current) + '</b>.' + (u.message && u.phase === 'idle' ? ' ' + esc(u.message.replace(/^You have the latest version.*$/, 'It\'s the latest version.')) : '');
   if (!u.repo) hint = 'Set your GitHub repository in Update settings to get updates from GitHub. USB drives are always checked.';
   else {
@@ -1998,7 +1999,7 @@ function renderUpd() {
   if (u.github.newer) html += offer('v' + u.github.version + ' is on GitHub', u.github.notes, u.github.page,
     '<button onclick="installUpd(\'github\',this)">Install</button>', u.github.digest ? 'Checked against GitHub\'s SHA-256.' : '');
   else if (browserOffer) html += offer('v' + browserOffer.version + ' is on GitHub', browserOffer.notes, browserOffer.page,
-    '<button onclick="browserInstall(this)">Install</button>', 'Found by this browser because the PS5 couldn\'t reach GitHub directly.');
+    '', 'Found by this browser because the PS5 couldn\'t reach GitHub directly. The PS5 can\'t download it itself: get the .elf from the release page, then use Update settings > Install from a file, or copy it to a USB drive.');
   if (u.usb.newer) html += offer('v' + u.usb.version + ' is on a USB drive', '', '',
     '<button onclick="installUpd(\'usb\',this)">Install</button>', u.usb.path);
   document.getElementById('updOffers').innerHTML = html;
@@ -2119,32 +2120,10 @@ function browserCheck() {
       if (/\.elf$/i.test(assets[i].name) && (!a || /homescreenmanager|homehider/i.test(assets[i].name))) a = assets[i];
     }
     var newer = !!a && verCmp(r.tag_name, upd.current) > 0;
-    if (newer) browserOffer = { version: String(r.tag_name).replace(/^[vV]/, ''), api: a.url, page: r.html_url, notes: r.body || '' };
+    if (newer) browserOffer = { version: String(r.tag_name).replace(/^[vV][\s._-]*/, ''), api: a.url, page: r.html_url, notes: r.body || '' };
     finish({ state: 'ok', newer: newer });
   };
   x.onerror = x.ontimeout = function () { finish({ state: 'fail' }); };
-  x.send(null);
-}
-
-function browserInstall(btn) {
-  if (!browserOffer) return;
-  busy(btn, true);
-  var x = new XMLHttpRequest();
-  x.open('GET', browserOffer.api, true);
-  x.setRequestHeader('Accept', 'application/octet-stream');
-  x.responseType = 'arraybuffer';
-  x.timeout = 120000;
-  x.onload = function () {
-    if (x.status !== 200 || !x.response) return fail();
-    sendElf(x.response, false, btn);
-  };
-  function fail() {
-    busy(btn, false);
-    updErr('This browser couldn\'t download the file. Open the <a href="' + esc(browserOffer.page) +
-      '" target="_blank" rel="noopener" style="color:#fff">release page</a>, download the .elf, then use ' +
-      '<b>Update settings &gt; Install from a file</b>, or copy it to a USB drive.');
-  }
-  x.onerror = x.ontimeout = fail;
   x.send(null);
 }
 

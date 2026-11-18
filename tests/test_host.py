@@ -281,6 +281,7 @@ class FakeGitHub:
 
     def publish(self, version, elf, digest=True, bad_digest=False):
         self.files["/dl/file"] = elf
+        self.files["/repos/me/HomeHider/releases/assets/7"] = elf
         d = hashlib.sha256(elf).hexdigest()
         if bad_digest:
             d = "0" * 64
@@ -405,6 +406,13 @@ def updater_tests(tmp):
         check(g["ok"] and g["newer"] and g["version"] == "9.9.9", "newer GitHub release found")
         check(g["asset"] == "HomeHider.elf" and g["digest"], "picked the .elf asset with its digest")
         check(g["notes"].startswith("What\u2019s new") and "\U0001F3AE" in g["notes"], "release notes decoded (UTF-8, escapes)")
+
+        print("  GitHub: an odd tag like v.9.9.9 still counts")
+        gh.publish("9.9.9", new)
+        gh.release["tag_name"] = "v.9.9.9"
+        http("POST", "/api/update/check")
+        u = wait_idle()
+        check(u["github"]["ok"] and u["github"]["newer"] and u["github"]["version"] == "9.9.9", "the tag 'v.9.9.9' is read as version 9.9.9")
 
         print("  GitHub: checksum mismatch is refused")
         gh.publish("9.9.9", new, bad_digest=True)
@@ -3011,6 +3019,7 @@ def menu_new_sections_tests(tmp):
                      "adv": "More &amp; troubleshooting"}, "the sections have the names we chose (%s)" % titles)
     check("<details open" not in m and 'id="bulk"' not in m, "every section is closed when the page opens, and Bulk changes is gone")
     check("It only does everything you want with your PS5 home screen." in m and "Hide games, apps and system tiles from your home screen" not in m, "the line under the header is the new one")
+    check("An updated version has been found." in m, "the update status line says so when a newer version was found")
     main = m[m.index('id="mainSec"'):m.index('id="hideOpts"')]
     fo = main[main.index('id="folderOpts"'):main.index('id="q"')]
     check("+ New folder" in main and 'id="tcount"' in main and main.index('id="folderOpts"') < main.index('id="q"') < main.index('id="list"'),
@@ -3064,7 +3073,7 @@ def menu_new_sections_tests(tmp):
     check('<div id="toast"></div>' in m and "function toast(" in m and "toast('Log copied (' + lines + ' lines)')" in m and "toast('Backup written to the USB drive: '" in m,
           "Copy log and the USB export show a small pop-up near the bottom of the screen")
     check("Highlight the first tile" not in m and "highlight_first" not in m, "the first tile highlight is gone")
-    fnames = ["updCheck", "installUpd", "sendElf", "uploadFile", "saveRepo", "browserInstall", "startRestartWait", "checkRestarted", "exportUsb",
+    fnames = ["updCheck", "installUpd", "sendElf", "uploadFile", "saveRepo", "startRestartWait", "checkRestarted", "exportUsb",
               "impUsbList", "impDone", "reloadShell", "quitApp", "unhideAll", "restore", "copyLog", "diag"]
     still = []
     for fn in fnames:
@@ -3106,7 +3115,7 @@ def release_tests(tmp):
     check(open(os.path.join(out, "HomeScreenManager.elf.sha256")).read() == "%s  HomeScreenManager.elf\n" % digest, "the checksum file is in the format sha256sum -c reads")
     check(open(os.path.join(out, "HomeScreenManager.elf"), "rb").read() == open(elf, "rb").read(), "the file is the build")
     notes = open(os.path.join(out, "RELEASE_NOTES.md"), encoding="utf-8").read()
-    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Menu and README wording" in notes,
+    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Time limits on network requests" in notes,
           "the note has the title, the changelog entry and the checksum")
     r = run(elf, "--out", out, "--version", "9.9.9")
     check(r.returncode != 0 and "not version 9.9.9" in r.stderr, "it stops if the build isn't the version it is releasing")

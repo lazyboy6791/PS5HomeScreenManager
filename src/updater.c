@@ -74,6 +74,7 @@ static int parse_ver(const char *s, int v[4]) {
   if (!s) return -1;
   while (*s == ' ') s++;
   if (*s == 'v' || *s == 'V') s++;
+  while (*s == '.' || *s == ' ' || *s == '-' || *s == '_') s++; /* a tag like "v.2.2.2" or "v 2.2.2" */
   if (!isdigit((unsigned char)*s)) return -1;
   for (int i = 0; i < 4; i++) {
     if (!isdigit((unsigned char)*s)) break;
@@ -397,6 +398,13 @@ static int install_and_restart(unsigned char *b, size_t len, const char *ver, in
 /* checks                                                                    */
 /* ------------------------------------------------------------------------- */
 
+/* "v2.2.2", "V2.2.2", "v.2.2.2", "v 2.2.2" -> "2.2.2" */
+static const char *tag_version(const char *tag) {
+  if (*tag == 'v' || *tag == 'V') tag++;
+  while (*tag == '.' || *tag == ' ' || *tag == '-' || *tag == '_') tag++;
+  return tag;
+}
+
 static void check_github(void) {
   char repo[128];
   pthread_mutex_lock(&g_mx);
@@ -478,10 +486,10 @@ static void check_github(void) {
     snprintf(S.gh_error, sizeof(S.gh_error), "The latest release has no version tag.");
   } else if (best_score < 0) {
     snprintf(S.gh_error, sizeof(S.gh_error), "Release %s has no .elf file attached.", tag);
-    snprintf(S.gh_version, sizeof(S.gh_version), "%s", tag[0] == 'v' || tag[0] == 'V' ? tag + 1 : tag);
+    snprintf(S.gh_version, sizeof(S.gh_version), "%s", tag_version(tag));
   } else {
     S.gh_ok = 1;
-    snprintf(S.gh_version, sizeof(S.gh_version), "%s", tag[0] == 'v' || tag[0] == 'V' ? tag + 1 : tag);
+    snprintf(S.gh_version, sizeof(S.gh_version), "%s", tag_version(tag));
     snprintf(S.gh_notes, sizeof(S.gh_notes), "%s", notes);
     snprintf(S.gh_page, sizeof(S.gh_page), "%s", page);
     snprintf(S.gh_asset_name, sizeof(S.gh_asset_name), "%s", best_name);
@@ -740,12 +748,16 @@ void upd_set_repo(const char *repo) {
 }
 
 int upd_start_check(int github, int usb, int notify_if_found) {
-  job_t j = {0, github, usb, notify_if_found, ""};
+  job_t j = {0};
+  j.github = github;
+  j.usb = usb;
+  j.notify = notify_if_found;
   return start_job(&j);
 }
 
 int upd_start_install(const char *source) {
-  job_t j = {1, 0, 0, 0, ""};
+  job_t j = {0};
+  j.install = 1;
   snprintf(j.source, sizeof(j.source), "%s", source);
   return start_job(&j);
 }

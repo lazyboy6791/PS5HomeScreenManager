@@ -2,6 +2,13 @@
 
 Every release has an entry here. `make release` copies the entry for the current version into the release note.
 
+## 2.2.3
+
+- **GitHub update notice.** When the menu's browser finds a newer release on GitHub, the update section says so (and the banner at the top). The console itself can't make a secure connection to GitHub, so it can't download the file; the notice says to get the `.elf` from the release page and use **Install from a file** in Update settings, or copy it to a USB drive. (A try at downloading on the console without certificate checks failed and crashed the console, so it was taken out again.)
+- **Time limits on network requests.** Connecting, sending and receiving have time limits, so a network that changes during a request can't leave the console waiting for ever.
+- **Log: stuck menu server.** The menu server runs one request at a time; when a request takes longer than 20 seconds the log says which one, and says when the menu answers again.
+- **Native app.** The launcher gives up after a few seconds when Home Screen Manager is running but doesn't answer, shows a message instead of an empty screen, and closes.
+
 ## 2.2.2
 
 - **Menu and README wording.** The line under the title in the menu and the opening lines, badges and notes of the README describe what Home Screen Manager does now (tested on firmware 13.60, started from the autoloader, a payload manager or its tile in the Media tab).

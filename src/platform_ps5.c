@@ -240,7 +240,26 @@ int plat_reload_shellui(void) {
 /* ------------------------------------------------------------------------- */
 
 static int g_http_tmpl = -1;
+static int g_http_ctx = -1;
 static const char *g_http_step = ""; /* where a failed request stopped, for the log */
+
+/* functions of the HTTP library that may be missing from the link stubs, found by name when they are needed */
+static void *http2_sym(const char *name) {
+  uint32_t h;
+  if (kernel_dynlib_handle(-1, "libSceHttp2.sprx", &h) != 0) return NULL;
+  intptr_t p = kernel_dynlib_dlsym(-1, h, name);
+  return (p != 0 && p != -1) ? (void *)p : NULL;
+}
+
+/* time limits, so that a changed network can't leave a request waiting for ever (microseconds) */
+static void http_timeouts(int id) {
+  static const char *names[] = {"sceHttp2SetConnectTimeOut", "sceHttp2SetSendTimeOut", "sceHttp2SetRecvTimeOut"};
+  static const unsigned secs[] = {15, 30, 30};
+  for (int i = 0; i < 3; i++) {
+    int (*fn)(int, uint32_t) = (int (*)(int, uint32_t))http2_sym(names[i]);
+    if (fn) fn(id, secs[i] * 1000000u);
+  }
+}
 
 const char *plat_http_last_step(void) { return g_http_step; }
 
@@ -260,6 +279,8 @@ static int http_setup(void) {
   int tmpl = sceHttp2CreateTemplate(ctx, "HomeScreenManager-PS5", 3, 1);
   if (tmpl < 0) return tmpl;
   sceHttp2SetAutoRedirect(tmpl, 1);
+  http_timeouts(tmpl);
+  g_http_ctx = ctx;
   g_http_tmpl = tmpl;
   return 0;
 }
@@ -284,19 +305,20 @@ static int redirect_target(int req, char *out, size_t outsz) {
   return -1;
 }
 
-int plat_http_get(const char *url, unsigned char **out, size_t *out_len,
-                  size_t max, volatile long long *progress) {
+static int http_get_impl(const char *url, unsigned char **out, size_t *out_len,
+                         size_t max, volatile long long *progress) {
   *out = NULL;
   *out_len = 0;
   g_http_step = "";
   int rc = http_setup();
   if (rc) return rc < 0 ? rc : -1;
+  int tmpl_id = g_http_tmpl;
 
   char cur[1024];
   snprintf(cur, sizeof(cur), "%s", url);
   for (int hop = 0; hop < 6; hop++) {
     g_http_step = "creating the request";
-    int req = sceHttp2CreateRequestWithURL(g_http_tmpl, "GET", cur, 0);
+    int req = sceHttp2CreateRequestWithURL(tmpl_id, "GET", cur, 0);
     if (req < 0) return req;
     g_http_step = "connecting and sending the request (secure handshake)";
     if ((rc = sceHttp2SendRequest(req, NULL, 0)) != 0) {
@@ -358,6 +380,11 @@ int plat_http_get(const char *url, unsigned char **out, size_t *out_len,
     return 200;
   }
   return -4; /* too many redirects */
+}
+
+int plat_http_get(const char *url, unsigned char **out, size_t *out_len,
+                  size_t max, volatile long long *progress) {
+  return http_get_impl(url, out, out_len, max, progress);
 }
 
 /* ------------------------------------------------------------------------- */
