@@ -41,12 +41,12 @@ Nothing is ever deleted. Hidden games still work, and every change can be undone
 ## Requirements
 
 - A jailbroken PS5 (tested on firmware **13.60**)
-- [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) by itsPLK, with its ELF loader
-- `HomeScreenManager.elf` from the [Releases](../../releases) page
+- [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) and/or [ShadowMount+](https://github.com/drakmor/ShadowMountPlus)
+- `HomeScreenManager.elf` and/or **PPSA979797.zip** from the [Releases](../../releases) page
 
 ## Install 
 
-There are 2 ways to install home screen manager.
+There are 2 ways to install home screen manager. Both can be installed simultaneously but you will have to update them independently.
 
 **Method 1:** 
    - Start **Payload Manager** on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
