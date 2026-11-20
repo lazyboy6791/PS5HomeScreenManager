@@ -22,7 +22,7 @@ Nothing is ever deleted. A safety backup is made of everything and every change 
 
 ## Features
 
-| | |
+|---|---|
 | **Hide anything** | Games, apps and system tiles such as PlayStation Store, Media Gallery, PlayStation Plus, TV & Video, All Apps — and even Game Library / App Library, which the keep-hidden watchdog puts back if the PS5 restores them. |
 | **Folders** | One tile that opens a Game Library-style page with the games inside, like folders on the PS4. |
 | **Rename** | Give any tile the name you want. |
