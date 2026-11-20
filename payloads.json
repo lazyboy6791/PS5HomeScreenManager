@@ -1,0 +1,13 @@
+{
+  "name": "Home Screen Manager",
+  "payloads": [
+    {
+      "name": "Home Screen Manager",
+      "filename": "HomeScreenManager.elf",
+      "url": "https://github.com/lazyboy6791/PS5HomeScreenManager/releases/latest/download/HomeScreenManager.elf",
+      "description": "Manage the PS5 home screen: hide tiles, folders, names, pictures, backgrounds, music and where system tiles open.",
+      "version": "v2.2.5",
+      "category": "Homebrew"
+    }
+  ]
+}
