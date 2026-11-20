@@ -49,7 +49,7 @@ Nothing is ever deleted. Hidden games still work, and every change can be undone
 There are 2 ways to install home screen manager.
 
 **Method 1:** 
-   Start **Payload Manager** on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
+   - Start **Payload Manager** on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
    - **Phone or PC:** open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file.
    - **USB drive:** copy the file to the top of an exFAT or FAT32 drive. Turn on **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
    - **FTP:** copy the file to `/data/pldmgr/payloads/`.
