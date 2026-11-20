@@ -57,7 +57,7 @@ There are 2 ways to install home screen manager. Both can be installed simultane
    - Launch **HomeScreenManager** from the Payload Manager dashboard and add it to its autoloader.
 
 **Method 2:** 
-   - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page
+   - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page or the [Prospero Store](https://prosperostore.net/app/PPSA97979/)
    - Unzip it on your PC and copy the entire PPSA97979 folder to `/data/homebrew/` on your PS5 via **FTP or File Manager**.
    - Once it finishes **ShadowMount+** will pick it up and install a tile in the media tab
    - Open home screen managers settings menu from this tile. 
