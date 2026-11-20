@@ -5,7 +5,7 @@
 # PS5 Home Screen Manager
 
 **It only does everything you want with your PS5 home screen.**
-Create Folders, Wallpapers, Edit & Modify App/Game Icons & Backgrounds, Change App/Game Names, Hide Apps/Games, Rearrange Tiles and much more...
+Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile Icons, Wallpapers and much more...
 
 ![Tested on FW 13.60](https://img.shields.io/badge/tested-FW%2013.60-2ea44f)
 ![Version 2.2.3](https://img.shields.io/badge/version-2.2.3-7a4bf2)
@@ -44,14 +44,22 @@ Nothing is ever deleted. Hidden games still work, and every change can be undone
 - [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) by itsPLK, with its ELF loader
 - `HomeScreenManager.elf` from the [Releases](../../releases) page
 
-## Install
+## Install 
 
-1. Start **Payload Manager** on the PS5.
-2. Add `HomeScreenManager.elf` in any one of these ways:
+There are 2 ways to install home screen manager.
+
+**Method 1:** Start **Payload Manager** on the PS5.
+   Add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
    - **Phone or PC:** open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file.
    - **USB drive:** copy the file to the top of an exFAT or FAT32 drive. Turn on **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
    - **FTP:** copy the file to `/data/pldmgr/payloads/`.
-3. Launch **HomeScreenManager** from the Payload Manager dashboard.
+   - **From within Payload Manager:** Go to **Settings > Third Party Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download `HomeScreenManager.elf` from there. Updates will also be picked up if you choose this method.
+   - Launch **HomeScreenManager** from the Payload Manager dashboard and add it to its autoloader.
+
+**Method 2:** Download the latest **PPSA97979.zip** from the [Releases](../../releases) page
+   - Unzip it on your PC and copy the entire PPSA97979 folder to `/data/homebrew/` on your PS5 via **FTP or File Manager**.
+   - Once it finishes **ShadowMount+** will pick it up and install a tile in the media tab
+   - Open home screen managers settings menu from this tile. 
 
 The menu opens in the PS5 browser. A notification shows the address for your phone or PC: `http://<PS5-IP>:8090`.
 
