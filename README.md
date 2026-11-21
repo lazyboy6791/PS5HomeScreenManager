@@ -53,7 +53,7 @@ There are 2 ways to install home screen manager. Both can be installed simultane
    - **Phone or PC:** open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file.
    - **USB drive:** copy the file to the top of an exFAT or FAT32 drive. Turn on **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
    - **FTP:** copy the file to `/data/pldmgr/payloads/`.
-   - **From within Payload Manager:** Go to **Settings > Third Party Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download `HomeScreenManager.elf` from there. Updates will also be picked up if you choose this method.
+   - **From within Payload Manager:** Go to **Settings > Multiple Party Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download `HomeScreenManager.elf` from there. Updates will also be picked up if you choose this method.
    - Launch **HomeScreenManager** from the Payload Manager dashboard and add it to its autoloader.
 
 **Method 2:** 
