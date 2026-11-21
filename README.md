@@ -18,6 +18,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 > [!CAUTION]
 > Your changes to the home screen stay in place even when the PS5 isn't jailbroken. Home Screen Manager writes them into the console's own home screen database, so they survive restarts and normal boots. Some features like opening folders and others will not work unless the HomeScreenManager.elf is loaded either through the tile in the media tab or a payload manager. Please add the HomeScreenManager.elf to your autoloader or launch it through its tile in the media tab after the jailbreak.
 
+
 ## Features
 
 **NOTHING IS EVER DELETED! A SAFETY BACKUP IS MADE OF EVERYTHING AND EVERY CHANGE CAN BE UNDONE!**
@@ -36,11 +37,13 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
    - **Quiet Autoload**
    - **Open Anything from the Menu through PC or Phone**
 
+
 ## Requirements
 
 - A jailbroken PS5 (tested on firmware **13.60**)
 - [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) and/or [ShadowMount+](https://github.com/drakmor/ShadowMountPlus)
 - `HomeScreenManager.elf` and/or **PPSA979797.zip** from the [Releases](../../releases) page
+
 
 ## Install 
 
