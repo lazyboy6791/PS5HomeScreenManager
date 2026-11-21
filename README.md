@@ -8,7 +8,7 @@
 Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile Icons, Wallpapers and much more...
 
 ![Tested on FW 13.60](https://img.shields.io/badge/tested-FW%2013.60-2ea44f)
-![Version 2.2.3](https://img.shields.io/badge/version-2.2.3-7a4bf2)
+![Version 2.2.3](https://img.shields.io/badge/version-2.2.5-7a4bf2)
 ![License GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-555)
 
 </div>
