@@ -22,7 +22,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 
 **NOTHING IS EVER DELETED! A SAFETY BACKUP IS MADE OF EVERYTHING AND EVERY CHANGE CAN BE UNDONE!**
 
-   - Create Your Own Folders
+** - Create Your Own Folders
    - Rename any Tile
    - Hide Anything
    - Custom Icons on any Tile
@@ -34,24 +34,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
    - Export & Import All of Your Customizations
    - Light and Dark Mode
    - Quiet Autoload
-   - Open Anything from the Menu through PC or Phone
-
-
-| | |
-|---|---|
-| **Hide anything** | Games, apps and system tiles such as PlayStation Store, Media Gallery, PlayStation Plus, TV & Video, All Apps — and even Game Library / App Library, which the keep-hidden watchdog puts back if the PS5 restores them. |
-| **Folders** | One tile that opens a Game Library-style page with the games inside, like folders on the PS4. |
-| **Rename** | Give any tile the name you want. |
-| **Custom pictures** | Replace any tile's icon. Transparent PNGs work too. |
-| **Custom backgrounds** | Replace the big background shown when a tile is selected, for games, apps and folders. |
-| **One home-screen list** | Your games, apps and folders in one list, in the same order as your home screen, grouped by tab. Hidden tiles sit greyed at the end. Folders appear automatically next to your games. |
-| **Reorder in place** | Use the ▲▼ arrows on any tile to move it earlier or later on its tab, then **Save order**. Home Screen Manager re-applies your order each time it runs. |
-| **Move between tabs** | Open **Edit** on any tile or folder and move it to the other tab. A folder carries everything inside it; take a single app out of a folder to move it on its own. |
-| **Open anything** | Start any game or app from the menu, including hidden ones and web apps such as Payload Manager. |
-| **Keeps itself right** | If the PS5 brings back a tile, name, picture or background, Home Screen Manager puts your choice back the next time it runs. |
-| **Quiet Autoload** | Runs silently when Payload Manager's Autoload starts it, and opens the menu when you launch it yourself. |
-| **Updates itself** | From GitHub, a USB drive, or a file from your phone or PC. |
-| **Safety first** | Backs up the home-screen database before changing anything. |
+   - Open Anything from the Menu through PC or Phone**
 
 ## Requirements
 
