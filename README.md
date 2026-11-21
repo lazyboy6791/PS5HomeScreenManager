@@ -47,7 +47,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 
 ## Install 
 
-There are 2 ways to install home screen manager. Best if you install both but you will also have to update them independently.
+There are 2 methods to install home screen manager. For best results use both but you will also have to update them independently.
 
 **Method 1:** 
    - Start **Payload Manager** on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
