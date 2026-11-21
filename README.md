@@ -22,19 +22,19 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 
 **NOTHING IS EVER DELETED! A SAFETY BACKUP IS MADE OF EVERYTHING AND EVERY CHANGE CAN BE UNDONE!**
 
-** - Create Your Own Folders
-   - Rename any Tile
-   - Hide Anything
-   - Custom Icons on any Tile
-   - Custom Wallpapers On any App/Game/System Tile or Folder
-   - Rearrange Tiles and/or Move Them Between Tabs
-   - Change Your Home Screen Music
-   - Clean Up Your Game Names
-   - Redirect to Where Your System Tiles Open
-   - Export & Import All of Your Customizations
-   - Light and Dark Mode
-   - Quiet Autoload
-   - Open Anything from the Menu through PC or Phone**
+   - **Create Your Own Folders**
+   - **Rename any Tile**
+   - **Hide Anything**
+   - **Custom Icons on any Tile**
+   - **Custom Wallpapers On any App/Game/System Tile or Folder**
+   - **Rearrange Tiles and/or Move Them Between Tabs**
+   - **Change Your Home Screen Music**
+   - **Clean Up Your Game Names**
+   - **Redirect to Where Your System Tiles Open**
+   - **Export & Import All of Your Customizations**
+   - **Light and Dark Mode**
+   - **Quiet Autoload**
+   - **Open Anything from the Menu through PC or Phone**
 
 ## Requirements
 
