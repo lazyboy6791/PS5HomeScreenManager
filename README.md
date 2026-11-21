@@ -21,7 +21,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 
 ## Features
 
-**NOTHING IS EVER DELETED! A SAFETY BACKUP IS MADE OF EVERYTHING AND EVERY CHANGE CAN BE UNDONE!**
+**NOTHING IS EVER DELETED! A SAFETY BACKUP IS MADE OF EVERYTHING! EVERY CHANGE CAN BE UNDONE!**
 
    - **Create Your Own Folders**
    - **Rename any Tile**
