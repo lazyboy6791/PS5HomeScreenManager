@@ -60,7 +60,7 @@ There are 2 methods to install home screen manager. For best results use both bu
 **Method 2:** 
    - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page or the [Prospero Store](https://prosperostore.net/app/PPSA97979/)
    - Copy the unzipped PPSA97979 folder to `/data/homebrew/` on your PS5 via **FTP or File Manager**.
-   - Once it finishes **ShadowMount+** will pick it up and install a tile in the media tab
+   - Once it finishes [ShadowMount+](https://github.com/drakmor/ShadowMountPlus) will pick it up and install a tile in the media tab
    - Open home screen managers settings menu from this tile. 
 
 The menu opens in the PS5 browser. A notification shows the address for your phone or PC: `http://<PS5-IP>:8090`.
