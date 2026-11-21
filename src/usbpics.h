@@ -7,6 +7,7 @@
 #include "strbuf.h"
 
 #define USBPIC_MAX_BYTES (32u * 1024 * 1024)
+#define USBAUDIO_MAX_BYTES (100u * 1024 * 1024) /* songs for the home music */
 
 /* local_dir: a folder on internal storage that is also searched, for
  * pictures copied over FTP (created if missing). */
@@ -22,3 +23,8 @@ int  usbpics_valid_path(const char *path);
 int  usbpics_read(const char *path, unsigned char **buf, size_t *len);
 /* Square PNG preview (cached on internal storage). 0 on success. */
 int  usbpics_thumb(const char *path, unsigned char **png, size_t *len);
+
+/* The same for songs (.mp3, .wav) for the home music: list, check a path, read one (up to USBAUDIO_MAX_BYTES). */
+int  usbpics_list_audio_json(strbuf_t *sb);
+int  usbpics_valid_audio_path(const char *path);
+int  usbpics_read_audio(const char *path, unsigned char **buf, size_t *len);

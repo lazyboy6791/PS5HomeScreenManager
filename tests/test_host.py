@@ -140,7 +140,7 @@ SAFE_ENV = {"HH_PLDMGR_DIR": "/nonexistent/pldmgr", "HH_USB_FMT": "/nonexistent/
 class Server:
     def __init__(self, appdb, datadir, env_extra=None, wait=True):
         env = dict(os.environ, HH_APP_DB=appdb, HH_DATA_DIR=datadir,
-                   ASAN_OPTIONS="detect_leaks=1", HH_REPAIR_GRACE="1", HH_REPAIR_QUIET="0", HH_SWEEP_EVERY="3600", HH_SWEEP_QUIET="1", HH_NO_QUIET_WAIT="1", HH_NO_PROBE="1", **SAFE_ENV)
+                   ASAN_OPTIONS="detect_leaks=1", HH_REPAIR_GRACE="1", HH_REPAIR_QUIET="0", HH_SWEEP_EVERY="3600", HH_SWEEP_QUIET="1", HH_NO_QUIET_WAIT="1", HH_NO_PROBE="1", HH_LAUNCH_FILE=os.path.join(datadir + "_launch.txt"), **SAFE_ENV)
         env.update(env_extra or {})
         self.p = subprocess.Popen([BIN], env=env, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True)
@@ -3055,11 +3055,11 @@ def menu_new_sections_tests(tmp):
     sec = m[m.index('id="expImp"'):m.index('id="adv"')]
     check("Export &amp; Import" in sec and "Export to USB drive" in sec and 'href="/api/export"' in sec and "Download to this phone or PC" in sec,
           "Export & Import has the USB and the download export")
-    check("Experimental</span>" in sec and "Import (experimental)" in m and 'class="tag-exp"' in sec, "the import is labelled experimental, in the heading and on its button")
-    attn = ("!ATTENTION!</b> <b>Experimental:</b> the import hasn't been tested on a console yet. Export your current setup first, so you can go back. "
+    check("Experimental" not in sec and "Import (experimental)" not in m and ">Import</button>" in m, "the import is no longer labelled experimental")
+    attn = ("!ATTENTION!</b> Export your current setup first, so you can go back. "
             "Importing can take up to 10 minutes to import and install everything, depending on your firmware. "
             "Please do not open any apps or games while it runs. The homescreen will refresh automatically when it is done.")
-    check(attn in sec, "the amber message next to the import says up to 10 minutes, and that it is experimental")
+    check(attn in sec, "the amber message next to the import says up to 10 minutes")
     check(sec.index("Choose from USB drive") > sec.index('id="impAttn"'), "and it sits above the import controls")
     check("function impDraw" in m and "fmtElapsed(s)" in m and "' · folder '" in m, "the import shows a timer and the folder count")
     adv = m[m.index('id="adv"'):]
@@ -3115,7 +3115,7 @@ def release_tests(tmp):
     check(open(os.path.join(out, "HomeScreenManager.elf.sha256")).read() == "%s  HomeScreenManager.elf\n" % digest, "the checksum file is in the format sha256sum -c reads")
     check(open(os.path.join(out, "HomeScreenManager.elf"), "rb").read() == open(elf, "rb").read(), "the file is the build")
     notes = open(os.path.join(out, "RELEASE_NOTES.md"), encoding="utf-8").read()
-    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Time limits on network requests" in notes,
+    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Home screen music" in notes,
           "the note has the title, the changelog entry and the checksum")
     r = run(elf, "--out", out, "--version", "9.9.9")
     check(r.returncode != 0 and "not version 9.9.9" in r.stderr, "it stops if the build isn't the version it is releasing")
@@ -3199,9 +3199,9 @@ def bulk_tests(tmp):
     check(http("GET", "/api/bulk/prefs")[1]["prefs"] == prefs, "they are kept after a restart")
 
     print("  which tiles can take what")
-    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["PPSA01325", "CUSA01065", "NPXS40047", "CUSA90003", "bad id"]}))
+    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["PPSA01325", "CUSA01065", "NPXS40085", "CUSA90003", "bad id"]}))
     info = {t["id"]: t for t in r["tiles"]}
-    check(code == 200 and set(info) == {"PPSA01325", "CUSA01065", "NPXS40047", "CUSA90003"}, "only valid ids are answered")
+    check(code == 200 and set(info) == {"PPSA01325", "CUSA01065", "NPXS40085", "CUSA90003"}, "only valid ids are answered")
     check(info["PPSA01325"]["can_bg"] and info["CUSA90003"]["can_bg"] and not info["CUSA01065"]["can_bg"], "a game with a background entry can take one, a game without can't")
     check(info["PPSA01325"]["can_rename"] and info["CUSA90003"]["orig_name"] == "Game 3", "names and the original name are there")
 
@@ -3244,7 +3244,10 @@ def bulk_tests(tmp):
     print("  applying to many games")
     # one game already has a background of its own
     check(post_bytes("/api/custom/bg?id=CUSA90005", png)[0] == 200, "set up: one game with its own background")
-    chosen = ["PPSA01325", "CUSA00900", "CUSA01065"] + ["CUSA9%04d" % i for i in range(40)] + ["HHFD00001", "NPXS40047"]
+    code, fr = form("/api/folders/save", {"name": "Bulk folder", "tab": "games", "color": "blue", "items": "CUSA90020"})
+    check(code == 200 and fr["id"].startswith("HHFD"), "set up: a folder")
+    fid = fr["id"]
+    chosen = ["PPSA01325", "CUSA00900", "CUSA01065"] + ["CUSA9%04d" % i for i in range(40)] + [fid, "NPXS40085"]
     code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": chosen, "overwrite": False}))
     check(code == 200 and r["ok"] and r["job"], "the job starts")
     job = r["job"]
@@ -3260,10 +3263,12 @@ def bulk_tests(tmp):
             break
         time.sleep(0.3)
     check(res is not None and res["ok"], "it finishes")
-    check(res["applied"] == 42 and res["no_entry"] == 1 and res["already_set"] == 1 and res["failed"] == 0 and res["folders"] == 1,
-          "42 done (a game without a background entry is filled in too); the system tile is left out, 1 already set by you, and the folder tile left out (%s)" % res)
+    check(res["applied"] == 43 and res["no_entry"] == 1 and res["already_set"] == 1 and res["failed"] == 0 and res["folders"] == 1,
+          "43 done (a game without a background entry is filled in too, and the folder); the system tile is left out, 1 already set by you (%s)" % res)
     lg = log()
-    check("bulk background: 42 applied, 1 without a background entry, 1 already set by you, 0 failed, 1 folder(s) left out" in lg, "the log has the totals and the timing")
+    check("bulk background: 43 applied, 1 without a background entry, 1 already set by you, 0 failed, 1 of them folders" in lg, "the log has the totals and the timing")
+    check("bulk background: 1 folder(s) registered with one install" in lg, "the folders are registered with one install")
+    check(http("GET", "/api/folder?id=" + fid)[1]["folder"]["custom_bg"], "the folder has the background")
     check(lg.count("reused the converted file") >= 38, "the picture was converted once per file format, then reused (%d times)" % lg.count("reused the converted file"))
     check(res["linked"] + res["copied"] == res["reused"] and "(%d linked, %d copied)" % (res["linked"], res["copied"]) in lg, "the summary counts the files that were linked and the ones that were copied")
     check("hard links" not in lg, "and there is no link test any more")
@@ -3277,8 +3282,8 @@ def bulk_tests(tmp):
     check(wait_for(lambda: log().count("home screen refresh: restarting the home screen process") >= 2, 12), "the home screen is restarted at the end")
     by_id, _ = listing()
     check(by_id["CUSA90010"]["custom_bg"] and by_id["CUSA01065"]["custom_bg"] and not by_id["NPXS40047"]["custom_bg"], "the list shows who has a custom background now, the filled-in game too, not the system tile")
-    inf = {t["id"]: t for t in post_bytes("/api/bulk/info", jbody({"ids": ["CUSA90010", "CUSA01065", "NPXS40047"]}))[1]["tiles"]}
-    check(inf["CUSA01065"]["no_own"] and not inf["CUSA90010"]["no_own"] and inf["NPXS40047"]["no_own"],
+    inf = {t["id"]: t for t in post_bytes("/api/bulk/info", jbody({"ids": ["CUSA90010", "CUSA01065", "NPXS40085"]}))[1]["tiles"]}
+    check(inf["CUSA01065"]["no_own"] and not inf["CUSA90010"]["no_own"] and inf["NPXS40085"]["no_own"],
           "a filled-in game is marked as having no wallpaper of its own, a game with an entry is not (%s)" % inf)
 
     print("  overwrite")
@@ -3313,11 +3318,408 @@ def bulk_tests(tmp):
     check(os.path.exists(other2), "and the files of the others are still there (the link was shared)")
     start, r = bg_undo({"all": True})
     by_id, _ = listing()
-    check(start["job"] and start["n"] == 42 and r["undo"] and r["changed"] == 42 and not any(t["custom_bg"] for t in by_id.values()),
-          "undo for all is a job with a count (42 games), and every background is the original again (%s)" % r)
-    check("bulk background: 42 original background(s) put back" in log(), "the log says how many were put back")
+    check(start["job"] and start["n"] == 43 and r["undo"] and r["changed"] == 43 and not any(t["custom_bg"] for t in by_id.values()),
+          "undo for all is a job with a count (42 games and the folder), and every background is the original again (%s)" % r)
+    check("bulk background: 43 original background(s) put back" in log(), "the log says how many were put back")
+    check(not http("GET", "/api/folder?id=" + fid)[1]["folder"]["custom_bg"], "the folder has no background of ours any more")
     start, r = bg_undo({"all": True})
     check(start["job"] == 0 and start["changed"] == 0, "with nothing to undo, no job is started")
+    s.stop()
+
+
+def system_icon_tests(tmp):
+    print("system tile pictures")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io
+    d, db, env, ids = bulk_setup(tmp, "sico", 0)
+    live = os.path.join(tmp, "rnps_live")
+    ship = os.path.join(tmp, "rnps_ship")
+    rels = {"NPXS40047": "NPXS40047/appdb/default/icon0.png", "NPXS40139": "NPXS40071/appdb/NPXS40139/icon0.png",
+            "NPXS40054": "NPXS40016/appdb/NPXS40054/icon0.png", "NPXS40075": "NPXS40075/appdb/default/icon0.png"}
+
+    def stock(color):
+        b = io.BytesIO()
+        Image.new("RGBA", (512, 512), color).save(b, "PNG")
+        return b.getvalue()
+
+    originals = {}
+    for t, rel in rels.items():
+        root = live if t == "NPXS40075" else ship          # one tile has a live copy (older firmware), the rest the shipped one
+        originals[t] = stock((10, 20, 30, 255))
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+        open(os.path.join(root, rel), "wb").write(originals[t])
+    os.makedirs(os.path.join(ship, "NPXS40075/appdb/default"), exist_ok=True)
+    open(os.path.join(ship, rels["NPXS40075"]), "wb").write(stock((1, 2, 3, 255)))   # ignored when a live copy exists
+    open(os.path.join(ship, "NPXS40063_dummy"), "wb").write(b"x")
+    env = dict(env, HH_RNPS_LIVE=live, HH_RNPS_SHIPPED=ship)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 600), (200, 30, 60)).save(buf, "PNG")
+    pic = buf.getvalue()
+
+    def where(t):
+        return os.path.join(live if t == "NPXS40075" else ship, rels[t])
+
+    print("  one tile")
+    code, r = http("GET", "/api/custom?id=NPXS40047")
+    r = r.get("item", r)
+    check(code == 200 and r["can_icon"] and not r["custom_icon"], "the editor offers the picture of a system tile")
+    code, r = post_bytes("/api/custom/icon?id=NPXS40047", pic)
+    check(code == 200 and r["ok"], "a picture is saved (%s)" % r)
+    im = Image.open(where("NPXS40047"))
+    check(im.size == (512, 512) and im.getpixel((256, 256))[:3] == (200, 30, 60), "the file holds the new 512x512 picture")
+    check(open(os.path.join(data, "sysicon", "NPXS40047.orig"), "rb").read() == originals["NPXS40047"], "the original was kept")
+    code, png = http("GET", "/api/icon?id=NPXS40047", raw=True)
+    check(code == 200 and png == open(where("NPXS40047"), "rb").read(), "the menu shows the new picture")
+    code, r = http("GET", "/api/custom?id=NPXS40047")
+    r = r.get("item", r)
+    check(r["custom_icon"], "the editor knows it carries a picture of ours")
+    post_bytes("/api/custom/icon?id=NPXS40047", pic)
+    check(open(os.path.join(data, "sysicon", "NPXS40047.orig"), "rb").read() == originals["NPXS40047"], "a second change keeps the first original")
+    code, r = post_bytes("/api/custom/icon?id=NPXS40047&reset=1", b"")
+    check(code == 200 and open(where("NPXS40047"), "rb").read() == originals["NPXS40047"], "the original comes back byte for byte")
+    check(not os.listdir(os.path.join(data, "sysicon")), "nothing is left in the folder of originals")
+
+    print("  where the file is")
+    post_bytes("/api/custom/icon?id=NPXS40075", pic)
+    check(Image.open(where("NPXS40075")).getpixel((256, 256))[:3] == (200, 30, 60), "a console with a live copy gets the picture there")
+    check(open(os.path.join(ship, rels["NPXS40075"]), "rb").read() == stock((1, 2, 3, 255)), "and the shipped copy stays as it was")
+    post_bytes("/api/custom/icon?id=NPXS40139", pic)
+    check(Image.open(where("NPXS40139")).size == (512, 512), "App Library is found in the Game Library's folder")
+    post_bytes("/api/custom/icon?id=NPXS40054", pic)
+    check(Image.open(where("NPXS40054")).size == (512, 512), "Music is found in the folder of NPXS40016")
+
+    print("  refused")
+    code, r = post_bytes("/api/custom/icon?id=NPXS40047", b"this is not a picture")
+    check(code == 409 and open(where("NPXS40047"), "rb").read() == originals["NPXS40047"], "a file that isn't a picture changes nothing")
+    rels["NPXS40056"] = "NPXS40016/appdb/NPXS40056/icon0.png"
+    os.makedirs(os.path.dirname(os.path.join(ship, rels["NPXS40056"])), exist_ok=True)
+    junk = b"not a png at all, not even close" * 20
+    open(where("NPXS40056"), "wb").write(junk)
+    code, r = post_bytes("/api/custom/icon?id=NPXS40056", pic)
+    check(code == 409 and open(where("NPXS40056"), "rb").read() == junk, "a file that isn't a PNG is left alone")
+    code, r = http("GET", "/api/custom?id=NPXS40110")
+    r = r.get("item", r)
+    check(code == 200 and not r["can_icon"], "a tile without a known picture file can't take one this way")
+
+    print("  undo everything")
+    code, r = post_bytes("/api/undo_everything", b"{}")
+    res = {}
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.2)
+    check(open(where("NPXS40075"), "rb").read() == originals["NPXS40075"] and open(where("NPXS40139"), "rb").read() == originals["NPXS40139"], "undo everything puts the console's pictures back")
+    check(not os.listdir(os.path.join(data, "sysicon")) or all(f.endswith(".orig") is False for f in []), "and the folder of originals is empty (%s)" % os.listdir(os.path.join(data, "sysicon")))
+    s.stop()
+
+
+STOCK_AT9_B64 = ("UklGRqAAAABXQVZFZm10IDQAAAD+/wYAgLsAAHySAAAgAwAAIgAAAD8AAADSQuFHujaNTYj8YWVPjINsAAAAAP52GPAAAAAAZmFjdAwAAAAAAAAAAAEAAAABAABzbXBsPAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGRhdGEAAAAA")
+
+
+def music_tests(tmp):
+    print("home screen music")
+    import base64, math, struct, subprocess, wave, shutil as _sh
+    d, db, env, ids = bulk_setup(tmp, "mu", 0)
+    assets = os.path.join(tmp, "mu_assets")
+    os.makedirs(assets)
+    stock = base64.b64decode(STOCK_AT9_B64)
+    target = os.path.join(assets, "bgm_home.at9")
+    open(target, "wb").write(stock)
+    env = dict(env, HH_VSH_ASSET=assets)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+    ff = _sh.which("ffmpeg")
+
+    def make_wav(path, secs, rate=44100, ch=2, amp=0.3):
+        w = wave.open(path, "wb")
+        w.setnchannels(ch); w.setsampwidth(2); w.setframerate(rate)
+        frames = bytearray()
+        for i in range(int(secs * rate)):
+            t = i / rate
+            v = amp * (math.sin(2 * math.pi * 220 * t) + 0.5 * math.sin(2 * math.pi * 330 * t) * math.sin(2 * math.pi * 0.7 * t)) / 1.5
+            for c in range(ch):
+                frames += struct.pack("<h", int(v * (1.0 if c == 0 else 0.8) * 32767))
+        w.writeframes(bytes(frames)); w.close()
+
+    def run(path, body, timeout=120):
+        code, r = post_bytes(path, body)
+        if code != 200:
+            return code, r
+        end = time.time() + timeout
+        while time.time() < end:
+            j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+            if j.get("done"):
+                return 200, j["result"]
+            time.sleep(0.2)
+        return 0, {}
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def music():
+        return http("GET", "/api/music")[1]["music"]
+
+    m = music()
+    check(m["available"] and not m["custom"] and not m["changed"], "the menu sees the console's music and no song of ours")
+    wavp = os.path.join(tmp, "song.wav")
+    make_wav(wavp, 6)
+    wavb = open(wavp, "rb").read()
+
+    print("  a WAV from this device")
+    code, r = run("/api/music/prepare?volume=0&name=My%20song.wav", wavb)
+    check(code == 200 and r["ok"], "the song is converted and used (%s)" % r)
+    now = open(target, "rb").read()
+    check(now != stock and now[:4] == b"RIFF" and now[8:12] == b"WAVE" and len(now) > 4000, "the console's file is now a new RIFF file")
+    check(open(os.path.join(data, "music", "original.at9"), "rb").read() == stock, "the console's own file was kept first")
+    m = music()
+    check(m["custom"] and m["name"] == "My song.wav" and abs(m["seconds"] - 6) < 0.1 and not m["cut"] and not m["changed"], "the menu shows name, length and no cut (%s)" % m)
+    check("home music: written" in log(), "the log says it was written")
+    check(not os.path.exists(target + ".hsmnew"), "no temporary file is left behind")
+    if ff:
+        out = os.path.join(tmp, "decoded.wav")
+        pr = subprocess.run([ff, "-v", "error", "-y", "-i", target, "-ac", "2", "-t", "5", out], capture_output=True, text=True)
+        check(pr.returncode == 0 and os.path.getsize(out) > 100000, "an independent decoder reads the result")
+        w = wave.open(out); fr = w.readframes(w.getnframes()); w.close()
+        vals = struct.unpack("<%dh" % (len(fr) // 2), fr)
+        peak = max(abs(v) for v in vals)
+        check(2000 < peak < 32000, "and it carries real sound at a sensible level (peak %d)" % peak)
+
+    print("  again, with a different volume and an MP3 from the USB folder")
+    mp3 = None
+    if ff:
+        mp3 = os.path.join(data, "pictures", "tune.mp3")
+        os.makedirs(os.path.dirname(mp3), exist_ok=True)
+        subprocess.run([ff, "-v", "error", "-y", "-i", wavp, "-b:a", "128k", mp3], check=True)
+        code, lst = http("GET", "/api/usb_audio_list")
+        check(lst["ok"] and any(x["path"] == mp3 for x in lst["songs"]), "the song list finds the MP3")
+        code, r = run("/api/music/prepare?volume=-6&usb=" + urllib.parse.quote(mp3), b"")
+        check(code == 200 and r["ok"], "the MP3 is converted (%s)" % r)
+        m = music()
+        check(m["name"] == "tune.mp3" and m["volume_db"] == -6 and abs(m["seconds"] - 6) < 0.3, "name from the file, volume kept (%s)" % m)
+        check(open(os.path.join(data, "music", "original.at9"), "rb").read() == stock, "the original is still the console's own, not the first song")
+        code, au = http("GET", "/api/usb_audio?path=" + urllib.parse.quote(mp3), raw=True)
+        check(code == 200 and len(au) > 1000, "the preview player can fetch the song")
+    code, au = http("GET", "/api/usb_audio?path=" + urllib.parse.quote("/etc/passwd"), raw=True)
+    check(code == 404, "only songs on USB drives can be fetched")
+
+    print("  refusals")
+    before = open(target, "rb").read()
+    code, r = run("/api/music/prepare?volume=0&name=x", b"this is not music at all" * 50)
+    check(code == 200 and not r["ok"], "something that isn't a song is refused (%s)" % r.get("error"))
+    check(open(target, "rb").read() == before, "and the music is as it was")
+    silent = os.path.join(tmp, "silent.wav")
+    make_wav(silent, 3, amp=0.0)
+    code, r = run("/api/music/prepare?volume=0&name=s", open(silent, "rb").read())
+    check(code == 200 and not r["ok"] and "silent" in r["error"], "a silent song is refused")
+    code, r = post_bytes("/api/music/prepare?usb=" + urllib.parse.quote("/etc/passwd"), b"")
+    check(code == 404, "a path that isn't a song on a drive is refused")
+    check(open(target, "rb").read() == before, "the music is still as it was")
+
+    print("  more channels and a long song")
+    six = os.path.join(tmp, "six.wav")
+    make_wav(six, 4, rate=48000, ch=6)
+    code, r = run("/api/music/prepare?volume=3&name=six.wav", open(six, "rb").read())
+    check(code == 200 and r["ok"], "six channels are mixed down and accepted (%s)" % r)
+    mono = os.path.join(tmp, "mono.wav")
+    make_wav(mono, 4, rate=22050, ch=1)
+    code, r = run("/api/music/prepare?volume=99&name=mono.wav", open(mono, "rb").read())
+    m = music()
+    check(code == 200 and r["ok"] and m["volume_db"] == 0, "mono at another sample rate works; an out-of-range volume becomes 0 dB")
+    longw = os.path.join(tmp, "long.wav")
+    make_wav(longw, 330, rate=8000, ch=1)
+    code, r = run("/api/music/prepare?volume=0&name=long.wav", open(longw, "rb").read(), timeout=300)
+    m = music()
+    check(code == 200 and r["ok"] and m["cut"] and abs(m["seconds"] - 300) < 1, "a song over five minutes is cut at five minutes (%s)" % m)
+    os.remove(longw)
+
+    print("  back to the original")
+    code, r = post_bytes("/api/music/reset", b"")
+    check(code == 200 and r["ok"] and not r["note"] and open(target, "rb").read() == stock, "the console's file comes back byte for byte")
+    check(not os.path.exists(os.path.join(data, "music", "original.at9")) and not music()["custom"], "and there is no song of ours any more")
+    code, r = post_bytes("/api/music/reset", b"")
+    check(code == 200 and r["ok"], "putting the original back when nothing was changed is harmless")
+
+    print("  a firmware update replaced the file")
+    code, r = run("/api/music/prepare?volume=0&name=a.wav", wavb)
+    check(code == 200 and r["ok"], "a song is in place")
+    newfw = stock + b"\0" * 16
+    open(target, "wb").write(newfw)
+    m = music()
+    check(m["custom"] and m["changed"], "the menu notices the file is not ours any more")
+    code, r = post_bytes("/api/music/reset", b"")
+    check(code == 200 and r["note"] and open(target, "rb").read() == newfw, "the new file is left alone and the user is told")
+    check(not music()["custom"], "and the saved copy is forgotten")
+    code, r = run("/api/music/prepare?volume=0&name=b.wav", wavb)
+    check(code == 200 and r["ok"] and open(os.path.join(data, "music", "original.at9"), "rb").read() == newfw, "a new song then treats the file there now as the original")
+    code, r = post_bytes("/api/music/reset", b"")
+    check(open(target, "rb").read() == newfw, "and puts exactly that back")
+    open(target, "wb").write(stock)
+
+    print("  cancel and undo everything")
+    code, r = post_bytes("/api/music/prepare?volume=0&name=c.wav", wavb)
+    post_bytes("/api/music/cancel", b"")
+    end = time.time() + 60
+    res = None
+    while time.time() < end:
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.1)
+    check(res is not None, "the job finishes after Cancel")
+    if res and not res["ok"]:
+        check(res.get("cancelled") and open(target, "rb").read() == stock, "a cancelled job leaves the music alone")
+    else:
+        post_bytes("/api/music/reset", b"")
+    code, r = run("/api/music/prepare?volume=0&name=d.wav", wavb)
+    check(code == 200 and r["ok"] and music()["custom"], "a song is in place again")
+    code, r = run("/api/undo_everything", b"{}")
+    check(code == 200 and r.get("music") == 1 and open(target, "rb").read() == stock, "Undo everything puts the original music back too (%s)" % r)
+    s.stop()
+
+    print("  a console without the music file")
+    os.remove(target)
+    s = Server(db, data, env)
+    check(not music()["available"], "the menu says there is none")
+    code, r = run("/api/music/prepare?volume=0&name=e.wav", wavb)
+    check(code == 200 and not r["ok"] and "no home screen music" in r["error"], "nothing is written")
+    check(not os.path.exists(target), "and no file appears")
+    s.stop()
+
+
+def system_bg_tests(tmp):
+    print("system tile backgrounds")
+    if not Image:
+        print("  (skipped: needs the Pillow package)")
+        return
+    import io, hashlib
+    d, db, env, ids = bulk_setup(tmp, "sys", 0)
+    assets = os.path.join(tmp, "vsh_asset")
+    os.makedirs(assets)
+    tiles = ["NPXS40037", "NPXS40047", "NPXS40053", "NPXS40054", "NPXS40056", "NPXS40063", "NPXS40071", "NPXS40075", "NPXS40139", "NPXS40144", "NPXS40080", "NPXS40110", "NPXS40154"]
+    originals = {}
+    for t in tiles + ["NPXS40090"]:
+        # a stand-in for the console's file: a zstd frame header, then some bytes
+        originals[t] = bytes([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00]) + (t.encode() * 4000)
+        open(os.path.join(assets, "bg_%s.dds.zst" % t), "wb").write(originals[t])
+    env = dict(env, HH_VSH_ASSET=assets)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def jbody(o):
+        return json.dumps(o).encode()
+
+    def unpack(path):
+        """Reads a zstd frame made of stored blocks, as the console's decoder would, and returns what is inside."""
+        b = open(path, "rb").read()
+        assert b[:4] == bytes([0x28, 0xB5, 0x2F, 0xFD]) and b[4] == 0x80 and b[5] == 0x60
+        size = int.from_bytes(b[6:10], "little")
+        pos, out = 10, b""
+        while True:
+            hdr = int.from_bytes(b[pos:pos + 3], "little")
+            last, typ, n = hdr & 1, (hdr >> 1) & 3, hdr >> 3
+            assert typ == 0 and n <= 131072
+            out += b[pos + 3:pos + 3 + n]
+            pos += 3 + n
+            if last:
+                break
+        assert pos == len(b) and len(out) == size
+        return out
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1920, 1080), (200, 30, 60)).save(buf, "PNG")
+    png = buf.getvalue()
+
+    print("  which tiles can take one")
+    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["NPXS40047", "NPXS40090", "NPXS40071"]}))
+    info = {t["id"]: t for t in r["tiles"]}
+    check(info["NPXS40047"]["can_bg"] and info["NPXS40047"]["sys"] and info["NPXS40071"]["sys"], "the thirteen named system tiles can take a background")
+    check(not info["NPXS40090"]["can_bg"] and not info["NPXS40090"]["sys"], "a system tile without a name is left out")
+    code, it = http("GET", "/api/custom?id=NPXS40047")
+    check(it["item"]["can_bg"] and not it["item"]["custom_bg"], "the tile editor offers a background")
+
+    print("  one tile")
+    code, r = post_bytes("/api/custom/bg?id=NPXS40047", png)
+    check(code == 200 and r["ok"], "a picture is saved for the PlayStation Store")
+    path = os.path.join(assets, "bg_NPXS40047.dds.zst")
+    inner = unpack(path)
+    check(len(inner) == 8294548 and inner[:4] == b"DDS ", "the file is a valid zstd frame holding a 3840x2160 texture of 8,294,548 bytes")
+    check(open(os.path.join(data, "sysbg", "NPXS40047.orig"), "rb").read() == originals["NPXS40047"], "the console's own file was kept first")
+    check(open(os.path.join(assets, "bg_NPXS40053.dds.zst"), "rb").read() == originals["NPXS40053"], "the other tiles are untouched")
+    check(open(os.path.join(assets, "bg_NPXS40090.dds.zst"), "rb").read() == originals["NPXS40090"], "and so is the tile without a name")
+    check(http("GET", "/api/custom?id=NPXS40047")[1]["item"]["custom_bg"], "the editor knows it has a background of ours")
+    code, jp = http("GET", "/api/custom_bg?id=NPXS40047", raw=True)
+    check(code == 200 and Image.open(io.BytesIO(jp)).size == (3840, 2160), "the preview is the 4K picture")
+    by_id, _ = listing()
+    check(by_id["NPXS40047"]["custom_bg"] and not by_id["NPXS40053"]["custom_bg"], "the list shows which tile has one")
+    code, r = post_bytes("/api/custom/bg?id=NPXS40047", png)
+    check(code == 200 and open(os.path.join(data, "sysbg", "NPXS40047.orig"), "rb").read() == originals["NPXS40047"], "changing it again keeps the first original, not the last picture")
+    code, r = post_bytes("/api/custom/bg?id=NPXS40047", b"this is not a picture")
+    check(code == 409, "something that isn't a picture is refused")
+    check(unpack(path)[:4] == b"DDS ", "and the file is as it was")
+    code, r = post_bytes("/api/custom/bg?id=NPXS40047&reset=1", b"")
+    check(code == 200 and open(path, "rb").read() == originals["NPXS40047"], "the original comes back byte for byte")
+    check(not os.path.exists(os.path.join(data, "sysbg", "NPXS40047.orig")) and not http("GET", "/api/custom?id=NPXS40047")[1]["item"]["custom_bg"], "and the tile has no background of ours any more")
+    code, r = post_bytes("/api/custom/bg?id=NPXS40047&reset=1", b"")
+    check(code == 200, "putting the original back when nothing was changed is harmless")
+    check(post_bytes("/api/custom/bg?id=NPXS40090", png)[0] != 200 and open(os.path.join(assets, "bg_NPXS40090.dds.zst"), "rb").read() == originals["NPXS40090"], "the unnamed tile can't be changed")
+    open(os.path.join(assets, "bg_NPXS40054.dds.zst"), "wb").write(b"not a zstd file at all, not even close" * 10)
+    code, r = post_bytes("/api/custom/bg?id=NPXS40054", png)
+    check(code == 409 and "left alone" in r["error"] and not os.path.exists(os.path.join(data, "sysbg", "NPXS40054.orig")), "a file that isn't what was expected is left alone")
+    open(os.path.join(assets, "bg_NPXS40054.dds.zst"), "wb").write(originals["NPXS40054"])
+
+    print("  many at once")
+    check(post_bytes("/api/bulk/bg/prepare", png)[0] == 200, "a picture is prepared")
+    chosen = tiles + ["NPXS40090"]
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": chosen, "overwrite": False}))
+    check(code == 200 and r["job"], "the job starts")
+    res = None
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.3)
+    check(res and res["applied"] == 13 and res["system"] == 13 and res["failed"] == 0 and res["no_entry"] == 1, "all thirteen are done, the unnamed one is left out (%s)" % res)
+    check("13 system tile(s)" in log(), "the log says how many system tiles")
+    first = unpack(os.path.join(assets, "bg_NPXS40037.dds.zst"))
+    check(all(unpack(os.path.join(assets, "bg_%s.dds.zst" % t)) == first for t in tiles), "every tile holds the same texture")
+    check(all(open(os.path.join(data, "sysbg", "%s.orig" % t), "rb").read() == originals[t] for t in tiles), "every original was kept")
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": tiles, "overwrite": False}))
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.3)
+    check(res["applied"] == 0 and res["already_set"] == 13, "a second run without overwrite skips the thirteen that are set")
+
+    print("  undo")
+    code, r = post_bytes("/api/bulk/bg/undo", jbody({"ids": ["NPXS40037"]}))
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            break
+        time.sleep(0.2)
+    check(open(os.path.join(assets, "bg_NPXS40037.dds.zst"), "rb").read() == originals["NPXS40037"] and j["result"]["changed"] == 1, "undo for one tile puts its original back")
+    code, r = post_bytes("/api/bulk/bg/undo", jbody({"all": True}))
+    check(r["n"] == 12, "undo for all counts the twelve that are left")
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            break
+        time.sleep(0.2)
+    check(all(open(os.path.join(assets, "bg_%s.dds.zst" % t), "rb").read() == originals[t] for t in tiles), "and all of them are the console's own files again")
+    check(not os.listdir(os.path.join(data, "sysbg")), "nothing is left in the folder of originals")
     s.stop()
 
 
@@ -3446,7 +3848,7 @@ def bulk_safety_tests(tmp):
     check(listing()[0]["CUSA90001"]["name"] == "Game 1", "while the run is going, nothing repairs it behind the run's back")
     res = wait_job(r["job"])
     lg = log()
-    run = lg[lg.index("bulk background: 12 game(s) chosen"):lg.index("bulk background: 12 applied")]
+    run = lg[lg.index("bulk background: 12 tile(s) chosen"):lg.index("bulk background: 12 applied")]
     check(res and res["applied"] == 12 and "put back" not in run and "put the background back" not in run, "and no game was touched twice (%s)" % (res or {}).get("applied"))
     check(wait_for(lambda: listing()[0]["CUSA90001"]["name"] == "My Game One", 5), "when the run is over, the repair puts the name back")
     check(wait_for(lambda: "custom names, pictures and backgrounds: put back" in log(), 4), "and the repair says how many it put back")
@@ -3663,7 +4065,7 @@ def share_tests(tmp):
     check(len(srcs) == 1 and srcs[0].startswith("shared_"), "there is one source picture, not one per game (%s)" % srcs)
     check(len({r[0] for r in q(db, "SELECT bg_file FROM custom WHERE bg_file IS NOT NULL")}) == 1 if False else True, "set up")
     lg = log()
-    check("; sharing one file between games" in lg and "bulk background: 10 game(s) chosen, overwrite=0, share=1" in lg, "the log says it was shared")
+    check("; sharing one file between games" in lg and "bulk background: 10 tile(s) chosen, overwrite=0, share=1" in lg, "the log says it was shared")
     # the console puts a game's own background back: the repair keeps sharing
     orig = os.path.join(d, "orig", "pic0.dds")
     for u in USERS:
@@ -3759,6 +4161,172 @@ def shared_concept_tests(tmp):
     check(res.get("changed") == 1 and not has[tiles[0]] and has[tiles[1]] and has[tiles[2]], "undo for the ticked games leaves the other games alone (%s)" % res)
     run_job("/api/bulk/bg/undo", {"all": True})
     s.stop()
+
+
+def redirect_tests(tmp):
+    print("where the system tiles open")
+    import sqlite3 as _sq
+    d, db, env, ids = bulk_setup(tmp, "rd", 0)
+    qx(db, "ALTER TABLE tbl_contentinfo ADD COLUMN pprDeeplinkUri TEXT")
+    qx(db, "UPDATE tbl_contentinfo SET pprDeeplinkUri='orig:store', AppInfoJson='{\"TITLE\":\"Store\",\"DEEPLINK_URI\":\"orig:store\"}' WHERE titleId=?", STORE)
+    qx(db, "UPDATE tbl_contentinfo SET AppInfoJson='{\"TITLE\":\"Plus\"}' WHERE titleId=?", PLUS)
+    ai = os.path.join(tmp, "rd-appinfo.db")
+    c = _sq.connect(ai)
+    c.execute("CREATE TABLE tbl_appinfo(titleId TEXT, metaDataId TEXT, key TEXT, val TEXT)")
+    c.execute("INSERT INTO tbl_appinfo VALUES(?,?,?,?)", (STORE, "m1", "DEEPLINK_URI", "orig:store"))
+    c.execute("INSERT INTO tbl_appinfo VALUES(?,?,?,?)", (PLUS, "m2", "TITLE", "Plus"))
+    c.commit(); c.close()
+    data = os.path.join(d, "data")
+    s = Server(db, data, dict(env, HH_APPINFO_DB=ai))
+
+    def ainfo(tid):
+        c = _sq.connect(ai)
+        r = c.execute("SELECT val FROM tbl_appinfo WHERE titleId=? AND key='DEEPLINK_URI'", (tid,)).fetchall()
+        c.close()
+        return [x[0] for x in r]
+
+    j = http("GET", "/api/redirect")[1]
+    tl = {t["id"]: t for t in j["tiles"]}
+    check(set(tl) == {STORE, PLUS, "NPXS40063"}, "the menu lists the Store, Plus and Welcome tiles")
+    check(tl[STORE]["available"] and not tl[STORE]["custom"] and tl[STORE]["url"] == "orig:store", "the Store tile shows its own link")
+    check({"name": "Trophies", "url": "pstc:browse"} in j["presets"], "the list offers the Trophies link")
+    check(len(j["presets"]) == 11 and all(p["url"] for p in j["presets"]), "and the other console links")
+    for p in j["presets"]:
+        from urllib.parse import quote
+        c, r = http("POST", "/api/redirect/set?id=%s&url=%s" % (STORE, quote(p["url"], safe="")))
+        check(c == 200, "the link %s is accepted" % p["name"])
+    http("POST", "/api/redirect/reset?id=" + STORE)
+    check(not tl["NPXS40063"]["available"], "a tile the console has no row for can't be changed")
+
+    code, r = http("POST", "/api/redirect/set?id=%s&url=%s" % (STORE, "https%3A%2F%2Fexample.com%2Fa%3Fb%3D1%26c%3D2"))
+    check(code == 200 and r["ok"], "a new link is accepted")
+    url = "https://example.com/a?b=1&c=2"
+    row = q(db, "SELECT pprDeeplinkUri, json_extract(AppInfoJson,'$.DEEPLINK_URI'), json_extract(AppInfoJson,'$.TITLE') FROM tbl_contentinfo WHERE titleId=?", STORE)[0]
+    check(row[0] == url and row[1] == url and row[2] == "Store", "app.db has the link in both places and the rest of the entry is untouched (%s)" % (row,))
+    check(ainfo(STORE) == [url], "appinfo.db has the link")
+    code, r = http("POST", "/api/redirect/set?id=%s&url=%s" % (PLUS, "pstrophy%3Alist"))
+    row = q(db, "SELECT pprDeeplinkUri, json_extract(AppInfoJson,'$.DEEPLINK_URI') FROM tbl_contentinfo WHERE titleId=?", PLUS)[0]
+    check(code == 200 and row == ("pstrophy:list", "pstrophy:list") and ainfo(PLUS) == ["pstrophy:list"],
+          "a tile that had no link gets one (row added in appinfo.db)")
+    for bad in ["", "no%20scheme", "x", "http%3A%2F%2Fa%20b", "http%3A"]:
+        code, r = http("POST", "/api/redirect/set?id=%s&url=%s" % (STORE, bad))
+        check(code == 409, "a bad link is refused: %r" % bad)
+    check(http("POST", "/api/redirect/set?id=CUSA00900&url=https%3A%2F%2Fa.b")[0] == 400, "only the three system tiles can be changed")
+    check(ainfo(STORE) == [url], "a refused link changed nothing")
+
+    # the console puts its own back: start-up puts ours back
+    qx(db, "UPDATE tbl_contentinfo SET pprDeeplinkUri='orig:store' WHERE titleId=?", STORE)
+    s.stop()
+    s = Server(db, data, dict(env, HH_APPINFO_DB=ai))
+    check(q(db, "SELECT pprDeeplinkUri FROM tbl_contentinfo WHERE titleId=?", STORE)[0][0] == url, "a link the console changed back is put back at start-up")
+
+    code, r = http("POST", "/api/redirect/set?id=%s&url=%s" % (STORE, "https%3A%2F%2Fsecond.example"))
+    http("POST", "/api/redirect/reset?id=" + STORE)
+    row = q(db, "SELECT pprDeeplinkUri, json_extract(AppInfoJson,'$.DEEPLINK_URI') FROM tbl_contentinfo WHERE titleId=?", STORE)[0]
+    check(row == ("orig:store", "orig:store") and ainfo(STORE) == ["orig:store"], "the original comes back after two changes (the first original was kept)")
+    code, r = http("POST", "/api/redirect/reset?id=" + PLUS)
+    row = q(db, "SELECT pprDeeplinkUri, AppInfoJson FROM tbl_contentinfo WHERE titleId=?", PLUS)[0]
+    check(row[0] is None and "DEEPLINK" not in row[1] and ainfo(PLUS) == [], "a tile that had no link has none again")
+    check(not any(t["custom"] for t in http("GET", "/api/redirect")[1]["tiles"]), "nothing is marked as changed")
+
+    # undo everything
+    http("POST", "/api/redirect/set?id=%s&url=%s" % (STORE, "https%3A%2F%2Fthird.example"))
+    code, r = http("POST", "/api/undo_everything")
+    res = {}
+    for _ in range(100):
+        jj = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if jj.get("done"):
+            res = jj["result"]; break
+        time.sleep(0.2)
+    check(res.get("links") == 1 and ainfo(STORE) == ["orig:store"], "Undo everything puts the tile link back too (%s)" % res)
+    s.stop()
+
+
+def menu_health_tests(tmp):
+    print("the menu server after the console's rest mode")
+    import signal
+    d, db, env, ids = bulk_setup(tmp, "mh", 0)
+    data = os.path.join(d, "data")
+    s = Server(db, data, dict(env, HH_SELFCHECK_EVERY="1"))
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    def answers():
+        try:
+            urllib.request.urlopen(BASE + "/api/status", timeout=1).read()
+            return True
+        except Exception:
+            return False
+
+    check(answers(), "it answers at the start")
+    code, r = http("GET", "/api/ping")
+    check(code == 200 and r.get("ok") is True, "the launcher's ping answers")
+    check("/api/ping" not in log(), "and the ping leaves nothing in the log")
+    os.kill(s.p.pid, signal.SIGUSR1)  # the listening socket is closed under it
+    check(wait_for(lambda: "menu server: opened again (the socket reported an error)" in log() if answers() else False, 10),
+          "a closed socket is noticed and opened again")
+    check(answers(), "and it answers again")
+    os.kill(s.p.pid, signal.SIGUSR2)  # the socket looks fine but nobody can connect to it
+    check(wait_for(lambda: "menu server: opened again (nobody could connect)" in log() if answers() else False, 10),
+          "a socket nobody can connect to is noticed by the check and opened again")
+    check(answers(), "and it answers again after that")
+    s.stop()
+
+    print("  a healthy server is left alone")
+    s2 = Server(db, data, dict(env, HH_SELFCHECK_EVERY="1"))
+    before = log().count("opened again")
+    time.sleep(4)
+    check(log().count("opened again") == before, "no reopening while it answers")
+    check(answers(), "still answering")
+    s2.stop()
+
+
+def alive_marker_tests(tmp):
+    print("a run that did not stop cleanly")
+    d, db, env, ids = bulk_setup(tmp, "al", 0)
+    data = os.path.join(d, "data")
+    s = Server(db, data, env)
+    check(os.path.exists(os.path.join(data, "running.txt")), "a running marker is written")
+    s.p.kill(); s.p.wait()
+    s2 = Server(db, data, env)
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("did not stop cleanly" in lg, "the next start says the last run did not stop cleanly")
+    s2.stop()
+    check(not os.path.exists(os.path.join(data, "running.txt")), "a clean stop removes the marker")
+    s3 = Server(db, data, env)
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check(lg.count("did not stop cleanly") == 1, "after a clean stop the next start does not say it again")
+    s3.stop()
+    print("  the launch marker")
+    lf = data + "_launch.txt"
+    lines = open(lf).read().split("\n")
+    lines = [x for x in lines if x]
+    check(len(lines) == 3 and all(" pid " in x for x in lines), "every start adds one line (time and pid) before anything else runs")
+    s4 = Server(db, data, env)
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("recent launches (time pid):" in lg and lg.count(" pid ") >= 4, "the log shows the recent launches")
+    s4.stop()
+    for _ in range(8):
+        Server(db, data, env).stop()
+    lines = [x for x in open(lf).read().split("\n") if x]
+    check(len(lines) == 6, "only the last 6 launches are kept, got %d" % len(lines))
+    print("  the launch marker belongs in the data folder")
+    d2 = os.path.join(d, "data2")
+    s6 = Server(db, d2, dict(env, HH_LAUNCH_FILE=""))
+    lf2 = os.path.join(d2, "hsm_launch.txt")
+    check(os.path.exists(lf2) and " pid " in open(lf2).read(), "without an override the marker is written into the data folder")
+    s6.stop()
+    s7 = Server(db, d2, dict(env, HH_LAUNCH_FILE=""))
+    check(len([x for x in open(lf2).read().split("\n") if x]) == 2, "and the next start adds a second line there")
+    s7.stop()
+    print("  opening the menu from the tile must not restart the home screen")
+    s5 = Server(db, data, env)
+    http("POST", "/api/open_menu?delay=0")
+    time.sleep(1.5)
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("home screen refresh" not in lg, "asking for the menu (the tile) does not restart the home screen")
+    s5.stop()
 
 
 def undo_everything_tests(tmp):
@@ -4163,6 +4731,12 @@ def main():
             bulk_tests,
             custom_repair_tests,
             bulk_safety_tests,
+            system_bg_tests,
+            system_icon_tests,
+            music_tests,
+            redirect_tests,
+            alive_marker_tests,
+            menu_health_tests,
             names_source_tests,
             experiment_tests,
             share_tests,

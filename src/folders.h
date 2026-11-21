@@ -90,6 +90,7 @@ int  folders_reapply(hh_t *h, int *fixed);
  * quiet for `quiet` seconds, before they are reinstalled (another tool may be registering games). */
 int  folders_reapply_patient(hh_t *h, int *fixed, long quiet);
 /* Removes folder tiles (ids HHFD...) that no folder of ours is behind, with their files. */
+int  folders_clear_stale_bg(hh_t *h); /* returns how many database entries were cleared */
 int  folders_sweep_orphans(hh_t *h, int *removed);
 int  folders_sweep_tiles_removed(void); /* tiles the last sweeps took off the home screen (reset on read) */
 /* Uninstalls every folder tile (used before restoring the original database). */

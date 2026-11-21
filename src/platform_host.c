@@ -283,6 +283,21 @@ static sqlite3 *open_app_db(void) {
 
 static int host_register(const char *title_id, const char *app_dir);
 
+/* tests: every tile in the list is registered by one call, as on the console */
+int plat_app_install_many(const char (*ids)[16], int n, const char *app_dir) {
+  const char *dl = getenv("HH_INSTALL_DELAY_MS");
+  int delay_ms = dl ? atoi(dl) : 0;
+  hh_log("install %s: host test build (%d tile(s))%s", ids[0], n, delay_ms > 0 ? " (slow install simulated)" : "");
+  if (delay_ms > 0) usleep((useconds_t)delay_ms * 1000);
+  int rc = 0;
+  for (int i = 0; i < n; i++) {
+    int r = host_register(ids[i], app_dir);
+    if (i == 0) rc = r;
+  }
+  if (getenv("HH_ONE_ONLY")) return rc;
+  return rc;
+}
+
 int plat_app_install(const char *title_id, const char *app_dir) {
   /* tests: HH_INSTALL_DELAY_MS makes the install slow, like the console's on newer firmware */
   const char *dl = getenv("HH_INSTALL_DELAY_MS");

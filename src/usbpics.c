@@ -100,14 +100,24 @@ static int is_picture_name(const char *name) {
   return 0;
 }
 
+static int is_audio_name(const char *name) {
+  static const char *const ext[] = {".mp3", ".wav"};
+  if (name[0] == '.') return 0;
+  const char *dot = strrchr(name, '.');
+  if (!dot) return 0;
+  for (size_t i = 0; i < sizeof(ext) / sizeof(ext[0]); i++)
+    if (!strcasecmp(dot, ext[i])) return 1;
+  return 0;
+}
+
 static int skip_dir(const char *name) {
   return name[0] == '.' || name[0] == '$' || !strcasecmp(name, "System Volume Information");
 }
 
-int usbpics_valid_path(const char *path) {
+static int valid_path(const char *path, int audio) {
   if (!path || strstr(path, "..") || strstr(path, "//")) return 0;
   const char *slash = strrchr(path, '/');
-  if (!slash || !is_picture_name(slash + 1)) return 0;
+  if (!slash || !(audio ? is_audio_name(slash + 1) : is_picture_name(slash + 1))) return 0;
   for (int i = 0; i < N_ROOTS; i++) {
     char root[256];
     if (root_path(i, root, sizeof(root))) continue;
@@ -117,11 +127,15 @@ int usbpics_valid_path(const char *path) {
   return 0;
 }
 
+int usbpics_valid_path(const char *path) { return valid_path(path, 0); }
+int usbpics_valid_audio_path(const char *path) { return valid_path(path, 1); }
+
 typedef struct {
   strbuf_t *sb;
   int count, visits;
   size_t root_len;
   const char *label; /* shown for pictures in the top folder of this root */
+  int audio;         /* 1: list songs (mp3, wav) instead of pictures */
 } scan_t;
 
 static void scan_dir(scan_t *s, const char *dir, int depth) {
@@ -139,8 +153,8 @@ static void scan_dir(scan_t *s, const char *dir, int depth) {
       if (depth < MAX_DEPTH && !skip_dir(e->d_name)) scan_dir(s, p, depth + 1);
       continue;
     }
-    if (!S_ISREG(st.st_mode) || !is_picture_name(e->d_name) || st.st_size <= 0 ||
-        (unsigned long long)st.st_size > USBPIC_MAX_BYTES)
+    if (!S_ISREG(st.st_mode) || !(s->audio ? is_audio_name(e->d_name) : is_picture_name(e->d_name)) || st.st_size <= 0 ||
+        (unsigned long long)st.st_size > (s->audio ? USBAUDIO_MAX_BYTES : USBPIC_MAX_BYTES))
       continue;
     sb_puts(s->sb, s->count ? ",{\"path\":" : "{\"path\":");
     sb_json_str(s->sb, p);
@@ -162,9 +176,9 @@ static void scan_dir(scan_t *s, const char *dir, int depth) {
   closedir(d);
 }
 
-int usbpics_list_json(strbuf_t *sb) {
+static int list_json(strbuf_t *sb, int audio) {
   sb_puts(sb, "[");
-  scan_t s = {sb, 0, 0, 0, ""};
+  scan_t s = {sb, 0, 0, 0, "", audio};
   for (int i = 0; i < N_ROOTS; i++) {
     char root[256];
     struct stat st;
@@ -175,6 +189,33 @@ int usbpics_list_json(strbuf_t *sb) {
   }
   sb_puts(sb, "]");
   return sb->oom ? -1 : 0;
+}
+
+int usbpics_list_json(strbuf_t *sb) { return list_json(sb, 0); }
+int usbpics_list_audio_json(strbuf_t *sb) { return list_json(sb, 1); }
+
+int usbpics_read_audio(const char *path, unsigned char **buf, size_t *len) {
+  *buf = NULL;
+  *len = 0;
+  if (!usbpics_valid_audio_path(path)) return -1;
+  struct stat st;
+  if (stat(path, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 || (unsigned long long)st.st_size > USBAUDIO_MAX_BYTES) return -1;
+  FILE *f = fopen(path, "rb");
+  if (!f) return -1;
+  unsigned char *b = malloc((size_t)st.st_size);
+  if (!b) {
+    fclose(f);
+    return -1;
+  }
+  size_t n = fread(b, 1, (size_t)st.st_size, f);
+  fclose(f);
+  if (n != (size_t)st.st_size) {
+    free(b);
+    return -1;
+  }
+  *buf = b;
+  *len = n;
+  return 0;
 }
 
 int usbpics_read(const char *path, unsigned char **buf, size_t *len) {

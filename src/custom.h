@@ -83,3 +83,8 @@ int  custom_undo_names(hh_t *h, const char *tid, int hand_too);
  * 0 = done, 1 = only a report was made, -1 = error (text in h->err). */
 int  custom_set_bg_fill(hh_t *h, const char *tid, const unsigned char *img, size_t len);
 int  custom_try_bg(hh_t *h, const char *tid, const unsigned char *jpg, size_t len, const char *prepared_path, int write);
+
+/* Logs what the home screen database says about a folder tile's background (pic0Info/pic1Info) and whether those files
+ * exist. With no_bg set, an entry that points at a file that is gone is cleared (a tile that lost its background shows
+ * black until the console falls back otherwise). Returns how many entries were cleared. */
+int custom_folder_bg_check(hh_t *h, const char *tid, int no_bg);

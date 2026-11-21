@@ -462,9 +462,9 @@ void plat_unmask_leftover(void) {
   }
 }
 
-/* returns 1 when the staging folder now covers /user/app with only `tid` in it */
-static int hh_mask_user_app(const char *tid, const char *app_dir, char *hold, size_t holdsz) {
-  char root[320], mp[400], orig[400], target[400];
+/* returns 1 when the staging folder now covers /user/app with only these tiles in it */
+static int hh_mask_user_app(const char (*tids)[16], int n, const char *app_dir) {
+  char root[320];
   if (!g_stage[0]) {
     hh_log("fast install: not possible, no staging folder set");
     return 0;
@@ -493,45 +493,74 @@ static int hh_mask_user_app(const char *tid, const char *app_dir, char *hold, si
     }
   }
   snprintf(root, sizeof(root), "%s/root", g_stage);
-  snprintf(mp, sizeof(mp), "%s/%s", root, tid);
-  snprintf(hold, holdsz, "%s/hold/%s", g_stage, tid);
-  snprintf(orig, sizeof(orig), "%s/%s", app_dir, tid);
-  snprintf(target, sizeof(target), "/user/app/%s", tid);
   char tmp[400];
   snprintf(tmp, sizeof(tmp), "%s", g_stage);
   mkdir(tmp, 0777);
   snprintf(tmp, sizeof(tmp), "%s/hold", g_stage);
   mkdir(tmp, 0777);
   mkdir(root, 0777);
-  mkdir(mp, 0777);
-  mkdir(hold, 0777);
-  if (hh_nullfs(orig, hold)) return 0;                 /* the tile's own files, at a second path */
-  if (hh_nullfs(root, "/user/app")) {                  /* the console now sees an empty folder... */
-    hh_unmount(hold);
-    return 0;
+  int held = 0; /* tiles whose own files are at a second path (hold/<tid>) so far */
+  for (int i = 0; i < n; i++) {
+    char mp[400], hold[400], orig[400];
+    snprintf(mp, sizeof(mp), "%s/%s", root, tids[i]);
+    snprintf(hold, sizeof(hold), "%s/hold/%s", g_stage, tids[i]);
+    snprintf(orig, sizeof(orig), "%s/%s", app_dir, tids[i]);
+    mkdir(mp, 0777);
+    mkdir(hold, 0777);
+    if (hh_nullfs(orig, hold)) goto undo_holds; /* the tile's own files, at a second path */
+    held++;
   }
-  if (hh_nullfs(hold, target)) {                       /* ...and the tile in it */
-    hh_unmount("/user/app");
-    hh_unmount(hold);
-    return 0;
+  if (hh_nullfs(root, "/user/app")) goto undo_holds; /* the console now sees an empty folder... */
+  for (int i = 0; i < n; i++) {                       /* ...and the tiles in it */
+    char hold[400], target[400];
+    snprintf(hold, sizeof(hold), "%s/hold/%s", g_stage, tids[i]);
+    snprintf(target, sizeof(target), "/user/app/%s", tids[i]);
+    if (hh_nullfs(hold, target)) {
+      for (int k = 0; k < i; k++) {
+        snprintf(target, sizeof(target), "/user/app/%s", tids[k]);
+        hh_unmount(target);
+      }
+      hh_unmount("/user/app");
+      goto undo_holds;
+    }
   }
   return 1;
+undo_holds:
+  for (int k = 0; k < held; k++) {
+    char hold[400];
+    snprintf(hold, sizeof(hold), "%s/hold/%s", g_stage, tids[k]);
+    hh_unmount(hold);
+  }
+  return 0;
 }
 
-static void hh_unmask_user_app(const char *tid, const char *hold) {
-  char target[400];
-  snprintf(target, sizeof(target), "/user/app/%s", tid);
+static void hh_unmask_user_app(const char (*tids)[16], int n) {
   char from[300] = "";
-  if (hh_is_mount_point(target, NULL, 0)) hh_unmount(target);
+  for (int i = 0; i < n; i++) {
+    char target[400];
+    snprintf(target, sizeof(target), "/user/app/%s", tids[i]);
+    if (hh_is_mount_point(target, NULL, 0)) hh_unmount(target);
+  }
   /* only take away our own cover: if another tool (PS4 Mount) put its own on top meanwhile, leave it alone */
   if (hh_is_mount_point("/user/app", from, sizeof(from)) && !strncmp(from, g_stage, strlen(g_stage)))
     hh_unmount("/user/app");
   else
     hh_log("fast install: /user/app is covered by something else now (%s), leaving it alone", from);
-  hh_unmount(hold);
+  for (int i = 0; i < n; i++) {
+    char hold[400];
+    snprintf(hold, sizeof(hold), "%s/hold/%s", g_stage, tids[i]);
+    hh_unmount(hold);
+  }
 }
 
 int plat_app_install(const char *title_id, const char *app_dir) {
+  char one[1][16];
+  snprintf(one[0], sizeof(one[0]), "%s", title_id);
+  return plat_app_install_many((const char (*)[16])one, 1, app_dir);
+}
+
+int plat_app_install_many(const char (*ids)[16], int nids, const char *app_dir) {
+  const char *title_id = ids[0];
   long t0 = ms_now();
   int err = sceAppInstUtilInitialize();
   if (err) {
@@ -577,15 +606,19 @@ int plat_app_install(const char *title_id, const char *app_dir) {
   char dir[300];
   snprintf(dir, sizeof(dir), "%s/", app_dir);
   long t2 = ms_now();
-  char hold[420] = "";
   int masked = 0;
   if (!install_dir) {
-    masked = hh_mask_user_app(title_id, app_dir, hold, sizeof(hold));
-    hh_log("install %s: %s", title_id, masked ? "the console sees only this tile for the install (fast way, as PS4 Mount does)"
-                                              : "could not show the console only this tile, installing with everything visible");
+    masked = hh_mask_user_app(ids, nids, app_dir);
+    hh_log("install %s: %s (%d tile(s))", title_id, masked ? "the console sees only the changed tile(s) for the install (fast way, as PS4 Mount does)"
+                                                          : "could not show the console only these tiles, installing with everything visible", nids);
   }
-  err = install_dir ? install_dir(title_id, dir, 0) : sceAppInstUtilAppInstallAll(0);
-  if (masked) hh_unmask_user_app(title_id, hold);
+  if (install_dir) {
+    err = 0;
+    for (int i = 0; i < nids && !err; i++) err = install_dir(ids[i], dir, 0);
+  } else {
+    err = sceAppInstUtilAppInstallAll(0);
+  }
+  if (masked) hh_unmask_user_app(ids, nids);
   long t3 = ms_now();
   sceAppInstUtilTerminate();
   long t4 = ms_now();

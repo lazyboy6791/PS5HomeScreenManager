@@ -14,6 +14,8 @@
 #include "folders.h"
 #include "icons.h"
 #include "log.h"
+#include "sysbg.h"
+#include "sysicon.h"
 #include "texture.h"
 
 #define MAX_KEYS   8
@@ -1297,6 +1299,29 @@ int custom_bg_path(hh_t *h, const char *tid, char *out, size_t n) {
   return file_exists(out) ? 0 : -1;
 }
 
+int custom_folder_bg_check(hh_t *h, const char *tid, int no_bg) {
+  cell_t *cells = calloc(MAX_CELLS, sizeof(cell_t));
+  if (!cells) return 0;
+  char saved_err[sizeof(h->err)];
+  memcpy(saved_err, h->err, sizeof(saved_err)); /* a busy database here is not an error of the caller's */
+  int n = find_cells(h, tid, K_BG, cells, MAX_CELLS), cleared = 0;
+  if (n == 0) hh_log("folder %s: the database has no background entry for it", tid);
+  for (int i = 0; i < n; i++) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s", cells[i].value);
+    char *q = strchr(path, '?');
+    if (q) *q = 0;
+    struct stat st;
+    int ex = stat(path, &st) == 0;
+    hh_log("folder %s: %s = %s (%s%s)", tid, cells[i].col, cells[i].value, ex ? "file there, " : "file missing", ex ? (st.st_size > 0 ? "not empty" : "empty") : "");
+    if (no_bg && !ex && set_cell(h, &cells[i], cells[i].value, "") >= 0) cleared++;
+  }
+  if (cleared) hh_log("folder %s: cleared %d background entr%s that pointed at a missing file", tid, cleared, cleared == 1 ? "y" : "ies");
+  memcpy(h->err, saved_err, sizeof(saved_err));
+  free(cells);
+  return cleared;
+}
+
 /* Puts our background back if the console reset a cell or our file is gone. */
 static int bg_needs_fix(hh_t *h, const char *tid) {
   cell_t *cells = calloc(MAX_CELLS, sizeof(cell_t));
@@ -1352,6 +1377,15 @@ int custom_get_json(hh_t *h, const char *tid, strbuf_t *sb) {
   char bgf[400] = "";
   text1(h, "SELECT bg_file FROM hh.custom WHERE title_id=?1", tid, bgf, sizeof(bgf));
   free(cells);
+  if (sysbg_available(tid)) { /* a system tile: its background is a file of the console's */
+    nbg = 1;
+    snprintf(bgf, sizeof(bgf), "%s", sysbg_custom(tid) ? "x" : "");
+  }
+  int sicon = sysicon_available(tid); /* a system tile: its picture is a file of the console's */
+  if (sicon) {
+    nicon = 1;
+    snprintf(icon, sizeof(icon), "%s", sysicon_custom(tid) ? "x" : "");
+  }
   sb_printf(sb, "{\"id\":\"%s\",\"name\":", tid);
   sb_json_str(sb, name[0] ? name : tid);
   sb_puts(sb, ",\"orig_name\":");
@@ -1508,7 +1542,8 @@ void custom_bulk_info_json(hh_t *h, char (*ids)[16], int n, strbuf_t *sb) {
   for (int i = 0; i < n; i++) {
     cell_t c;
     char name[256] = "", orig[256] = "";
-    int bg = hh_valid_tid(ids[i]) && find_cells(h, ids[i], K_BG, &c, 1) > 0;
+    int sys = sysbg_available(ids[i]);
+    int bg = sys || (hh_valid_tid(ids[i]) && find_cells(h, ids[i], K_BG, &c, 1) > 0);
     int rn = hh_valid_tid(ids[i]) && find_cells(h, ids[i], K_NAME, &c, 1) > 0;
     hh_title_name(h, ids[i], name, sizeof(name));
     text1(h, "SELECT orig_name FROM hh.custom WHERE title_id=?1", ids[i], orig, sizeof(orig));
@@ -1517,13 +1552,13 @@ void custom_bulk_info_json(hh_t *h, char (*ids)[16], int n, strbuf_t *sb) {
     text1(h, "SELECT name_src FROM hh.custom WHERE title_id=?1", ids[i], src, sizeof(src));
     /* a tile that has no wallpaper of its own: no entry at all, or only ours (the original was empty) */
     int no_own = !bg;
-    if (bg && custom_has_bg(h, ids[i])) {
+    if (bg && !sys && custom_has_bg(h, ids[i])) {
       char cnt[16] = "";
       text1(h, "SELECT count(*) FROM hh.custom_cells WHERE title_id=?1 AND kind='bg' AND orig IS NOT NULL AND orig<>''", ids[i], cnt, sizeof(cnt));
       no_own = atoi(cnt) == 0;
     }
-    sb_printf(sb, "%s{\"id\":\"%s\",\"can_bg\":%s,\"no_own\":%s,\"can_rename\":%s,\"by\":\"%s\",\"orig_name\":", i ? "," : "", ids[i], bg ? "true" : "false",
-              no_own ? "true" : "false", rn ? "true" : "false", cname[0] ? (!strcmp(src, "tool") ? "tool" : "hand") : "");
+    sb_printf(sb, "%s{\"id\":\"%s\",\"can_bg\":%s,\"sys\":%s,\"no_own\":%s,\"can_rename\":%s,\"by\":\"%s\",\"orig_name\":", i ? "," : "", ids[i], bg ? "true" : "false",
+              sys ? "true" : "false", no_own ? "true" : "false", rn ? "true" : "false", cname[0] ? (!strcmp(src, "tool") ? "tool" : "hand") : "");
     sb_json_str(sb, orig[0] ? orig : name);
     sb_puts(sb, "}");
   }

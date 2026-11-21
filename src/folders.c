@@ -579,6 +579,50 @@ static int install_tile(hh_t *h, const char *tid, char *note, size_t notesz) {
 
 static void folder_tab(hh_t *h, const char *tid, char *tab, size_t n);
 
+
+
+/* After a bulk install: wait until the home screen database and the apps folder have been still for 8 seconds
+ * (at most 150 s). The console is still working through the changed tiles until then. */
+static void wait_console_settled(void) {
+  const char *skip = getenv("HH_NO_QUIET_WAIT");
+  if (skip && skip[0]) return;
+  long long last = activity_stamp();
+  long t0 = now_ms(), still = t0;
+  for (;;) {
+    usleep(500000);
+    long long cur = activity_stamp();
+    long now = now_ms();
+    if (cur != last) {
+      last = cur;
+      still = now;
+    }
+    if (now - still >= 8000) break;
+    if (now - t0 >= 150000) {
+      hh_log("folders: the console was still busy after 150 s, going on");
+      return;
+    }
+  }
+  hh_log("folders: the console was quiet again after %ld ms", now_ms() - t0);
+}
+
+static long file_size_or(const char *p) {
+  struct stat st;
+  return stat(p, &st) == 0 ? (long)st.st_size : -1;
+}
+
+/* What the console made of a folder tile's pictures, for the log (and a stale database entry for a folder without a
+ * background is cleared). */
+static void diag_folder_pictures(hh_t *h, const char *tid) {
+  char a[600], m1[600], m2[600];
+  snprintf(a, sizeof(a), "%s/%s/sce_sys/pic0.dds", F.app_dir, tid);
+  snprintf(m1, sizeof(m1), "%s/%s/pic0.dds", g_meta_dir, tid);
+  snprintf(m2, sizeof(m2), "%s/%s/pic0.png", g_meta_dir, tid);
+  long sa = file_size_or(a);
+  hh_log("folders: %s pictures: tile pic0.dds %ld, appmeta pic0.dds %ld, pic0.png %ld", tid, sa, g_meta_dir[0] ? file_size_or(m1) : -2,
+         g_meta_dir[0] ? file_size_or(m2) : -2);
+  custom_folder_bg_check(h, tid, sa < 0);
+}
+
 /* Registers every folder tile that install_tile postponed, with one installer call, then puts each on
  * its tab. A folder the installer didn't pick up (a console where it installs one title at a time) gets
  * its own call. Returns the number of folders that could not be registered (0 = all fine). */
@@ -592,7 +636,7 @@ int folders_install_pending(hh_t *h) {
   wait_for_other_tools();
   log_install_state(h, ids[0]);
   long t0 = now_ms();
-  int err = plat_app_install(ids[0], F.app_dir);
+  int err = plat_app_install_many((const char (*)[16])ids, n, F.app_dir);
   g_last_inst_took_ms = now_ms() - t0;
   g_last_inst_end_ms = now_ms();
   hh_log("folders: the install returned 0x%08X after %ld ms", (unsigned)err, g_last_inst_took_ms);
@@ -616,6 +660,11 @@ int folders_install_pending(hh_t *h) {
     folder_tab(h, ids[i], tab, sizeof(tab));
     place_tile(h, ids[i], tab);
   }
+  /* The install call returns after the console has dealt with one tile; with several changed tiles it keeps going
+   * on its own for a while (up to a minute and a half), and a home screen restart before it is done leaves the
+   * later tiles with their old pictures. So wait until it has been quiet for a while. */
+  if (n > 1) wait_console_settled();
+  for (int i = 0; i < n; i++) diag_folder_pictures(h, ids[i]);
   hh_log("folders: %d of %d folder tile(s) registered in %ld ms", n - bad, n, now_ms() - t0);
   return bad;
 }
@@ -1223,6 +1272,17 @@ static int folders_set_bg_impl(hh_t *h, const char *tid, const unsigned char *im
     unlink(dds_path);
     unlink(jpg_path);
     hh_log("folder %s: background removed", tid);
+    /* In a bulk restore (install postponed) the tile is already registered: taking the picture away only needs
+     * the tile's picture file gone and the database entry cleared. The install (about 100 s, and the home screen
+     * moves games around meanwhile) is not needed for that. */
+    char tile_pic[420];
+    snprintf(tile_pic, sizeof(tile_pic), "%s/%s/sce_sys/pic0.dds", F.app_dir, tid);
+    if (t_defer && tile_present(h, tid)) {
+      unlink(tile_pic);
+      custom_folder_bg_check(h, tid, 1);
+      hh_log("folder %s: background taken off the tile without an install", tid);
+      return 0;
+    }
   }
   return install_tile(h, tid, NULL, 0);
 }
@@ -1466,4 +1526,17 @@ void folders_remove_all_tiles(hh_t *h) {
     plat_app_uninstall(ids[i]);
     remove_tile_files(ids[i]);
   }
+}
+
+/* A folder without a background whose database entry still points at a file that is gone (left by taking a background
+ * away) shows black for a while on the home screen: clear such entries. */
+int folders_clear_stale_bg(hh_t *h) {
+  char ids[FOLDER_MAX][16];
+  int n = folders_ids(h, ids, FOLDER_MAX), cleared = 0;
+  for (int i = 0; i < n; i++) {
+    char bgp[400];
+    if (folders_bg_path(ids[i], bgp, sizeof(bgp)) == 0) continue;
+    cleared += custom_folder_bg_check(h, ids[i], 1);
+  }
+  return cleared;
 }

@@ -340,6 +340,40 @@ summary .n{margin-left:10px;color:var(--muted);font-weight:500;font-size:.85em}
 
   </details>
 
+  <details class="section" id="muSec" ontoggle="if(this.open)muLoad()">
+    <summary><span class="sumh">Home screen music</span></summary>
+    <p class="hint">Play your own song on the home screen. Pick a WAV or MP3 song (from a USB drive, or from this device); Home Screen Manager converts it to the console's music format, matches its loudness to the console's own music, fades the ends so the loop doesn't click, and checks the result before it replaces anything. Songs longer than 5 minutes are cut at 5 minutes, then the music loops. Only the home screen music is changed. The console's original is kept: <b>Use the original music</b> puts it back.</p>
+    <div class="hint" id="muState"></div>
+    <div id="muBody">
+      <div class="actions">
+        <button class="ghost" onclick="muUsbLoad(this)">Choose from USB drive</button>
+        <span><input type="file" id="muFile" accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav" onchange="muPickFile()"></span>
+      </div>
+      <div class="hint" id="muUsbHint"></div>
+      <div id="muUsbList"></div>
+      <div id="muChosen"></div>
+      <div class="row"><div class="txt"><b>Volume</b> <span id="muVolTxt">0 dB (the same loudness as the console's music)</span>
+        <div class="zoomrow"><input type="range" id="muVol" min="-12" max="12" step="1" value="0" oninput="muVolDraw()" style="width:100%;max-width:340px"></div>
+        <div class="hint">The loudness is matched to the console's own music automatically; this moves it up or down from there. Changing it means converting the song again.</div></div></div>
+      <div class="attn"><b>!ATTENTION!</b> When the song is in place (or the original is back), the homescreen will refresh automatically to start the new music. Please do not open any apps or games while it converts. If you don't hear the change, restart the console. If it doesn't work for you, use the original music.</div>
+      <div class="actions">
+        <button id="muGo" onclick="muConvert(this)" disabled>Convert and use</button>
+        <button class="ghost" id="muCancel" onclick="muCancelJob()" style="display:none">Cancel</button>
+        <button class="ghost" id="muReset" onclick="muUndo(this)">Use the original music</button>
+      </div>
+      <div class="fm-msg" id="muMsg"></div>
+      <div class="hint">If another tool (Prospero Themes, for example) changed the home music earlier, the "original" Home Screen Manager keeps is that tool's file. It can't tell the difference.</div>
+    </div>
+  </details>
+
+  <details class="section" id="rdSec" ontoggle="if(this.open)rdLoad()">
+    <summary><span class="sumh">Where the System Tiles Open</span></summary>
+    <p class="hint">Make the PlayStation Store, PlayStation Plus or Welcome tile open something else: pick a link from the list, or type your own. A web address (https://...) makes the tile open that page in the console's web browser; the other links open parts of the console's settings. Only that one tile's launch link is changed. The console's own link is kept: <b>Use the original</b> puts it back. The idea comes from JailbreakStore by maj0r.</p>
+    <div class="attn"><b>!ATTENTION!</b> This changes the console's own database. After saving, the home screen refreshes automatically to show the change. If a tile doesn't open any more, use the original.</div>
+    <div id="rdList"></div>
+    <div class="fm-msg" id="rdMsg"></div>
+  </details>
+
   <details class="section" id="nmSec">
     <summary><span class="sumh">Clean Up Game Names</span></summary>
     <p class="hint">Clean up game names in one go. You see every change before anything is saved, and <b>Use the original names</b> undoes it.</p>
@@ -418,8 +452,8 @@ summary .n{margin-left:10px;color:var(--muted);font-weight:500;font-size:.85em}
       <button class="ghost" onclick="exportUsb(this)">Export to USB drive</button>
       <a class="btn ghost" href="/api/export" id="expDl">Download to this phone or PC</a>
     </div>
-    <div class="sumh2">Import <span class="tag-exp">Experimental</span></div>
-    <div class="attn" id="impAttn"><b>!ATTENTION!</b> <b>Experimental:</b> the import hasn't been tested on a console yet. Export your current setup first, so you can go back. Importing can take up to 10 minutes to import and install everything, depending on your firmware. Please do not open any apps or games while it runs. The homescreen will refresh automatically when it is done.</div>
+    <div class="sumh2">Import</div>
+    <div class="attn" id="impAttn"><b>!ATTENTION!</b> Export your current setup first, so you can go back. Importing can take up to 10 minutes to import and install everything, depending on your firmware. Please do not open any apps or games while it runs. The homescreen will refresh automatically when it is done.</div>
     <div class="actions">
       <button class="ghost" onclick="impUsbList(this)">Choose from USB drive</button>
       <span id="impFileRow"><input type="file" id="impFile" accept=".zip,application/zip" onchange="impUpload()"></span>
@@ -1270,7 +1304,7 @@ function impSummaryHtml(j) {
     h += '<div class="hint" style="margin:8px 0">Not installed on this console, so skipped: ' + esc(j.missing.join(', ')) + '</div>';
   h += '<div class="hint" style="margin:8px 0">The folders are added next to the ' + plural(j.existing_folders, 'folder', 'folders') +
     ' you have now. Nothing is deleted. Your saved home screen order and your settings are replaced by the backup\'s.</div>';
-  h += '<div class="inline"><button onclick="impStart(this)">Import (experimental)</button> ' +
+  h += '<div class="inline"><button onclick="impStart(this)">Import</button> ' +
     '<button class="ghost" onclick="impCancel()">Cancel</button></div></div>';
   return h;
 }
@@ -1363,10 +1397,23 @@ function bulkLoad(cb) {
       for (i = 0; i < j.tiles.length; i++) {
         var t = j.tiles[i], x = info[t.id] || {};
         bulk.tiles.push({ id: t.id, name: t.name, kind: t.kind, tab: t.tab, renamed: t.renamed, custom_bg: t.custom_bg,
-          can_bg: !!x.can_bg, no_own: !!x.no_own, can_rename: !!x.can_rename, orig_name: x.orig_name || t.name, by: x.by || '' });
+          can_bg: !!x.can_bg, sys: !!x.sys, no_own: !!x.no_own, can_rename: !!x.can_rename, orig_name: x.orig_name || t.name, by: x.by || '' });
       }
-      bulk.loaded = true;
-      cb();
+      req('GET', '/api/folders', function (fj) { /* a folder keeps its own record of its background */
+        var m = {}, q;
+        var have = {};
+        for (q = 0; q < bulk.tiles.length; q++) have[bulk.tiles[q].id] = true;
+        if (fj && fj.ok && fj.folders) for (q = 0; q < fj.folders.length; q++) {
+          var fo = fj.folders[q];
+          m[fo.id] = !!fo.custom_bg;
+          /* the tile list leaves our own folder tiles out: add them here */
+          if (!have[fo.id]) bulk.tiles.push({ id: fo.id, name: fo.name, kind: 'folder', tab: fo.tab === 'media' ? 'media' : 'games', renamed: false, custom_bg: !!fo.custom_bg,
+            can_bg: true, sys: false, no_own: false, can_rename: false, orig_name: fo.name, by: '' });
+        }
+        for (q = 0; q < bulk.tiles.length; q++) if (/^HHFD/.test(bulk.tiles[q].id)) bulk.tiles[q].custom_bg = !!m[bulk.tiles[q].id];
+        bulk.loaded = true;
+        cb();
+      });
     });
   });
 }
@@ -1437,11 +1484,12 @@ function bgPrepare(url, file) {
   });
 }
 function bgGroups() {
-  var g = { games: [], others: [], none: [], folders: 0 }, i;
+  var g = { games: [], others: [], none: [], folders: [], system: [] }, i;
   for (i = 0; i < bulk.tiles.length; i++) {
     var t = bulk.tiles[i];
-    if (/^HHFD/.test(t.id)) { g.folders++; continue; }
-    if (!t.can_bg && /^NPXS/.test(t.id)) { g.none.push(t); continue; } /* system tiles: left out */
+    if (/^HHFD/.test(t.id)) { g.folders.push(t); continue; }
+    if (t.sys) { g.system.push(t); continue; } /* a system tile with a background file of the console's */
+    if (!t.can_bg && /^NPXS/.test(t.id)) { g.none.push(t); continue; } /* the other system tiles: left out */
     (t.kind === 'game' ? g.games : g.others).push(t);
   }
   return g;
@@ -1450,10 +1498,14 @@ function bgRenderTiles() {
   var g = bgGroups(), h = '', i, t;
   for (i = 0; i < g.games.length; i++) if (bgSel[g.games[i].id] === undefined) bgSel[g.games[i].id] = true;
   for (i = 0; i < g.others.length; i++) if (bgSel[g.others[i].id] === undefined) bgSel[g.others[i].id] = false;
+  for (i = 0; i < g.folders.length; i++) if (bgSel[g.folders[i].id] === undefined) bgSel[g.folders[i].id] = false;
+  for (i = 0; i < g.system.length; i++) if (bgSel[g.system[i].id] === undefined) bgSel[g.system[i].id] = false;
   h += '<div class="actions" style="margin:14px 0 6px"><button class="ghost small" onclick="bgSetAll(true)">Select all</button>' +
     '<button class="ghost small" onclick="bgSetAll(false)">Select none</button>' +
     '<button class="ghost small" onclick="bgSetTab(\'games\')">Games tab only</button>' +
-    '<button class="ghost small" onclick="bgSetTab(\'media\')">Media tab only</button></div>';
+    '<button class="ghost small" onclick="bgSetTab(\'media\')">Media tab only</button>' +
+    '<button class="ghost small" onclick="bgSetGroup(\'folders\')">Folders only</button>' +
+    '<button class="ghost small" onclick="bgSetGroup(\'system\')">System tiles only</button></div>';
   function rows(list) {
     var out = '', k;
     for (k = 0; k < list.length; k++) {
@@ -1467,8 +1519,9 @@ function bgRenderTiles() {
   }
   h += '<div class="hint" style="margin-top:10px"><b>Games</b> (' + g.games.length + ')</div>' + rows(g.games);
   if (g.others.length) h += '<div class="hint" style="margin-top:10px"><b>Apps and other tiles</b> that can take a background (' + g.others.length + '), not ticked</div>' + rows(g.others);
-  if (g.none.length) h += '<div class="hint" style="margin-top:10px">System tiles (' + g.none.length + ') are not included: the home screen does not keep a background that is given to them.</div>';
-  if (g.folders) h += '<div class="hint" style="margin-top:10px">Folders (' + g.folders + ') are not included. Set a folder\'s background in its own editor.</div>';
+  if (g.system.length) h += '<div class="hint" style="margin-top:10px"><b>System tiles</b> (' + g.system.length + '), not ticked. Their background is a file of the console\'s: the original is kept, and "Use the original" puts it back. The home screen shows a new one after it restarts.</div>' + rows(g.system);
+  if (g.none.length) h += '<div class="hint" style="margin-top:10px">Other system tiles (' + g.none.length + ') are not included: they have no tile name, so it is not known which they are.</div>';
+  if (g.folders.length) h += '<div class="hint" style="margin-top:10px"><b>Folders</b> (' + g.folders.length + '), not ticked</div>' + rows(g.folders);
   el('bgTiles').innerHTML = h;
   el('bgOvRow').style.display = '';
   el('bgShareRow').style.display = '';
@@ -1478,13 +1531,19 @@ function bgRenderTiles() {
 }
 function bgToggle(id, on) { bgSel[id] = on; bgCount(); }
 function bgSetAll(on) {
-  var g = bgGroups(), l = g.games.concat(g.others), i;
+  var g = bgGroups(), l = g.games.concat(g.others, g.folders, g.system), i;
   for (i = 0; i < l.length; i++) bgSel[l[i].id] = on;
   bgRenderTiles();
 }
 function bgSetTab(tab) {
-  var g = bgGroups(), l = g.games.concat(g.others), i;
+  var g = bgGroups(), l = g.games.concat(g.others, g.folders, g.system), i;
   for (i = 0; i < l.length; i++) bgSel[l[i].id] = l[i].tab === tab;
+  bgRenderTiles();
+}
+function bgSetGroup(which) {
+  var g = bgGroups(), l = g.games.concat(g.others, g.folders, g.system), i, keep = {};
+  for (i = 0; i < g[which].length; i++) keep[g[which][i].id] = true;
+  for (i = 0; i < l.length; i++) bgSel[l[i].id] = !!keep[l[i].id];
   bgRenderTiles();
 }
 /* what a press of Apply would do */
@@ -1492,15 +1551,15 @@ function bgPlan() {
   var ow = el('bgOverwrite').checked, plan = { ids: [], already: 0 }, i, t;
   for (i = 0; i < bulk.tiles.length; i++) {
     t = bulk.tiles[i];
-    if (!bgSel[t.id] || (!t.can_bg && /^NPXS/.test(t.id)) || /^HHFD/.test(t.id)) continue;
+    if (!bgSel[t.id] || (!t.can_bg && !t.sys && /^NPXS/.test(t.id))) continue;
     if (t.custom_bg && !ow) { plan.already++; continue; }
     plan.ids.push(t.id);
   }
   return plan;
 }
 function bgCount() {
-  var p = bgPlan(), g = bgGroups(), s = 'Applies to ' + p.ids.length + ' game' + (p.ids.length === 1 ? '' : 's') + '.';
-  if (g.none.length) s += ' ' + g.none.length + ' system tile' + (g.none.length === 1 ? '' : 's') + ' not included.';
+  var p = bgPlan(), g = bgGroups(), s = 'Applies to ' + p.ids.length + ' tile' + (p.ids.length === 1 ? '' : 's') + '.';
+  if (g.none.length) s += ' ' + g.none.length + ' other system tile' + (g.none.length === 1 ? '' : 's') + ' not included.';
   if (p.already) s += ' ' + p.already + ' skipped: already set by you.';
   el('bgSummary').textContent = s;
   el('bgApplyBtn').disabled = !bgState || !p.ids.length;
@@ -1514,7 +1573,7 @@ function bgTickedWithBg() {
   var out = [], i, t;
   for (i = 0; i < bulk.tiles.length; i++) {
     t = bulk.tiles[i];
-    if (bgSel[t.id] && t.custom_bg && !/^HHFD/.test(t.id)) out.push(t.id);
+    if (bgSel[t.id] && t.custom_bg) out.push(t.id);
   }
   return out;
 }
@@ -1546,7 +1605,7 @@ function bgPoll(job, btn, undo) {
     if (!r.ok) { busy(btn, false); setMsg('bgMsg', esc(r.error || 'Lost track of the job.')); return; }
     if (!r.done) {
       setMsg('bgMsg', '<span class="spin"></span>&nbsp; ' + (undo ? 'Putting the original backgrounds back… ' : 'Applying the background… ') + fmtElapsed(Math.floor((Date.now() - bgJobT) / 1000)) +
-        ' &middot; game ' + r.i + ' of ' + r.n + '<br><span class="hint">Please do not open any apps or games. The home screen refreshes by itself when it is done.</span>', true);
+        ' &middot; ' + r.i + ' of ' + r.n + '<br><span class="hint">Please do not open any apps or games. The home screen refreshes by itself when it is done.</span>', true);
       setTimeout(function () { bgPoll(job, btn, undo); }, 800);
       return;
     }
@@ -1554,15 +1613,15 @@ function bgPoll(job, btn, undo) {
     var x = r.result;
     if (undo) {
       setMsg('bgMsg', '');
-      toast('Original backgrounds put back on ' + x.changed + ' game' + (x.changed === 1 ? '' : 's') + '. The home screen is refreshing…', 8000);
+      toast('Original backgrounds put back on ' + x.changed + ' tile' + (x.changed === 1 ? '' : 's') + '. The home screen is refreshing…', 8000);
       loadList();
       return;
     }
-    if (x.stopped) setMsg('bgMsg', 'Stopped after ' + x.applied + ' games: ' + esc(x.error) + ' Use the original for all takes them away again.', false);
-    else if (x.failed) setMsg('bgMsg', 'Applied to ' + x.applied + ' games. ' + x.failed + ' failed: ' + esc(x.error) + ' The home screen is refreshing…', true);
+    if (x.stopped) setMsg('bgMsg', 'Stopped after ' + x.applied + ' tiles: ' + esc(x.error) + ' Use the original for all takes them away again.', false);
+    else if (x.failed) setMsg('bgMsg', 'Applied to ' + x.applied + ' tiles. ' + x.failed + ' failed: ' + esc(x.error) + ' The home screen is refreshing…', true);
     else {
       setMsg('bgMsg', '');
-      toast('Background applied to ' + x.applied + ' game' + (x.applied === 1 ? '' : 's') + '. The home screen is refreshing…', 8000);
+      toast('Background applied to ' + x.applied + ' tile' + (x.applied === 1 ? '' : 's') + (x.folders || x.system ? ' (' + (x.folders ? x.folders + ' folder' + (x.folders === 1 ? '' : 's') : '') + (x.folders && x.system ? ', ' : '') + (x.system ? x.system + ' system tile' + (x.system === 1 ? '' : 's') : '') + ')' : '') + '. The home screen is refreshing…', 8000);
     }
     loadList();
   });
@@ -1920,6 +1979,8 @@ function undoAllPoll(job, btn) {
     if (x.shown) parts.push(x.shown + ' tile' + (x.shown === 1 ? '' : 's') + ' shown again');
     if (x.pics) parts.push(x.pics + ' picture' + (x.pics === 1 ? '' : 's') + ' restored');
     if (x.bgs) parts.push(x.bgs + ' background' + (x.bgs === 1 ? '' : 's') + ' restored');
+    if (x.music) parts.push('home screen music restored');
+    if (x.links) parts.push(x.links + ' tile link' + (x.links === 1 ? '' : 's') + ' restored');
     if (x.names) parts.push(x.names + ' name' + (x.names === 1 ? '' : 's') + ' restored');
     advMsg((parts.length ? 'Done: ' + parts.join(', ') + '.' : 'Nothing was changed.') +
       (x.failed ? ' ' + x.failed + ' step' + (x.failed === 1 ? '' : 's') + ' failed; see the log.' : '') +
@@ -3043,6 +3104,178 @@ loadTabs();
 
 loadUpd();
 setTimeout(loadUpd, 3000);
+/* ----- where the system tiles open ----- */
+var rdTiles = [], rdPresets = [];
+function rdLoad() {
+  req('GET', '/api/redirect', function (j) {
+    if (!j.ok) { el('rdList').textContent = j.error || 'Could not read the tiles.'; return; }
+    rdTiles = j.tiles; rdPresets = j.presets || []; rdDraw();
+  });
+}
+function rdName(t) { /* what the tile opens, as a name from the list */
+  if (!t.custom) return 'normal';
+  for (var k = 0; k < rdPresets.length; k++) if (rdPresets[k].url === t.url) return rdPresets[k].name;
+  return null;
+}
+function rdDraw() {
+  var h = '';
+  rdTiles.forEach(function (t, i) {
+    h += '<div class="row"><div class="txt"><b>' + esc(t.name) + '</b><div class="hint">';
+    if (!t.available) h += 'This console has no launch link for this tile, so it can\'t be changed.</div></div></div>';
+    else {
+      var nm = rdName(t);
+      h += (nm === 'normal' ? 'Opens as normal.' : nm ? 'Opens as <b>' + esc(nm) + '</b>.' : 'Opens the website <b>' + esc(t.url) + '</b>.') + '</div>';
+      h += '<select id="rdSel' + i + '" onchange="rdPick(' + i + ')"><option value="">Choose a link…</option>';
+      rdPresets.forEach(function (p, k) { h += '<option value="' + k + '"' + (nm === p.name ? ' selected' : '') + '>' + esc(p.name) + '</option>'; });
+      h += '<option value="web"' + (nm === null ? ' selected' : '') + '>Open Website</option></select> ' +
+        '<input type="text" id="rdUrl' + i + '" placeholder="https://example.com" style="width:100%;max-width:420px;' + (nm === null ? '' : 'display:none') + '" value="' + esc(nm === null ? t.url : '') + '">' +
+        '<div class="actions"><button onclick="rdSet(' + i + ',this)">Use this link</button>' +
+        (t.custom ? '<button class="ghost" onclick="rdUndo(' + i + ',this)">Use the original</button>' : '') + '</div></div></div>';
+    }
+  });
+  el('rdList').innerHTML = h;
+}
+function rdPick(i) { /* the address box is only there for "Open Website" */
+  var v = el('rdSel' + i).value, box = el('rdUrl' + i);
+  box.style.display = v === 'web' ? '' : 'none';
+  if (v !== 'web') box.value = '';
+}
+function rdDone(j, ok, btn) {
+  if (btn) btn.disabled = false;
+  if (!j.ok) { toast(j.error || 'That did not work.', 6000, 'err'); return; }
+  rdTiles = j.tiles; rdDraw();
+  toast(ok, 5000);
+}
+function rdSet(i, btn) {
+  var v = el('rdSel' + i).value, url = '';
+  if (v === 'web') url = el('rdUrl' + i).value.trim();
+  else if (v !== '') url = rdPresets[+v].url;
+  if (!url) { toast(v === 'web' ? 'Type the web address first.' : 'Choose a link first.', 4000, 'err'); return; }
+  btn.disabled = true;
+  req('POST', '/api/redirect/set?id=' + encodeURIComponent(rdTiles[i].id) + '&url=' + encodeURIComponent(url),
+    function (j) { rdDone(j, 'Saved. The home screen refreshes now.', btn); });
+}
+function rdUndo(i, btn) {
+  btn.disabled = true;
+  req('POST', '/api/redirect/reset?id=' + encodeURIComponent(rdTiles[i].id),
+    function (j) { rdDone(j, 'The original link is back. The home screen refreshes now.', btn); });
+}
+/* ----- home screen music ----- */
+var muSrc = null, muInfo = null, muT0 = 0, muRunning = false;
+function muLoad() {
+  req('GET', '/api/music', function (j) { if (j.ok) { muInfo = j.music; muDraw(); } });
+}
+function muLen(s) { s = Math.round(s); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+function muDb(x) { return (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(x % 1 ? 1 : 0) + ' dB'; }
+function muDraw() {
+  var m = muInfo, h = '';
+  if (!m) return;
+  el('muBody').style.display = m.available ? '' : 'none';
+  if (!m.available) h = 'This console has no home screen music file, so there is nothing to change here.';
+  else if (m.custom) {
+    h = '<b>Your music is on the home screen:</b> ' + esc(m.name) + '<br>Length ' + muLen(m.seconds) +
+      (m.cut ? ' (cut at ' + Math.round(m.cut_at / 60) + ' minutes, then it loops)' : '') +
+      ' &middot; ' + (m.ref_console ? 'loudness matched to the console\'s music' : 'the console\'s music could not be measured, a standard loudness was used') + ' &middot; volume ' + muDb(m.volume_db);
+    if (m.changed) h += '<br><span style="color:var(--warn)">The music file was changed after Home Screen Manager wrote it (a firmware update, or another tool). "Use the original music" will leave that file as it is and only forget Home Screen Manager\'s saved copy.</span>';
+  } else h = 'The console\'s own music is in use.';
+  el('muState').innerHTML = h;
+  el('muReset').style.display = m.custom ? '' : 'none';
+}
+function muVolDraw() {
+  var v = parseInt(el('muVol').value, 10);
+  el('muVolTxt').textContent = (v === 0 ? '0 dB' : muDb(v)) + (v === 0 ? ' (the same loudness as the console\'s music)' : v < 0 ? ' (quieter)' : ' (louder)');
+}
+function muChoose(src) {
+  muSrc = src;
+  var h = '<div class="hint"><b>' + esc(src.name) + '</b>' + (src.size ? ' &middot; ' + mb(src.size) : '') + '</div>';
+  var url = src.usb ? '/api/usb_audio?path=' + encodeURIComponent(src.usb) : URL.createObjectURL(src.file);
+  h += '<audio controls preload="none" src="' + url + '" style="width:100%;max-width:420px" onerror="muNoPreview()"></audio><div class="hint" id="muPrevHint">Preview (the converted music sounds a little different, and the volume setting is not applied here).</div>';
+  el('muChosen').innerHTML = h;
+  el('muGo').disabled = muRunning;
+}
+function muNoPreview() { var e = el('muPrevHint'); if (e) e.textContent = 'This browser can\'t play a preview of that song. You can still convert it.'; }
+function muPickFile() {
+  var f = el('muFile').files[0];
+  if (!f) return;
+  if (f.size > 100 * 1048576) { setMsg('muMsg', 'That file is bigger than 100 MB.'); el('muFile').value = ''; return; }
+  setMsg('muMsg', '');
+  muChoose({ file: f, name: f.name, size: f.size });
+}
+function muUsbLoad(btn) {
+  busy(btn, true);
+  el('muUsbHint').innerHTML = '<span class="spin"></span>&nbsp; Looking for songs on USB drives…';
+  req('GET', '/api/usb_audio_list', function (j) {
+    busy(btn, false);
+    if (!j.ok) { el('muUsbHint').textContent = ''; toast(j.error, 5000); return; }
+    var songs = j.songs, h = '', i;
+    muSongs = songs;
+    el('muUsbHint').textContent = songs.length ? songs.length + ' song' + (songs.length === 1 ? '' : 's') + ' found. Pick one:'
+      : 'No songs found. Copy MP3 or WAV files (up to 100 MB each) to a USB drive (any folder), plug it in and try again.';
+    for (i = 0; i < songs.length; i++)
+      h += '<button class="ghost small" style="display:block;margin:4px 0;text-align:left" onclick="muUsbPick(' + i + ')">' + esc(songs[i].name) +
+        ' <span class="hint" style="display:inline">' + mb(songs[i].size) + (songs[i].folder ? ' &middot; ' + esc(shortFolder(songs[i].folder)) : '') + '</span></button>';
+    el('muUsbList').innerHTML = h;
+  });
+}
+var muSongs = [];
+function muUsbPick(i) {
+  var s = muSongs[i];
+  setMsg('muMsg', '');
+  muChoose({ usb: s.path, name: s.name, size: s.size });
+}
+function muConvert(btn) {
+  if (!muSrc || muRunning) return;
+  var v = el('muVol').value, q = '?volume=' + encodeURIComponent(v) + '&name=' + encodeURIComponent(muSrc.name);
+  muBusy(true);
+  muT0 = Date.now();
+  setMsg('muMsg', '<span class="spin"></span>&nbsp; ' + (muSrc.usb ? 'Reading the song…' : 'Sending the song to the console…'), true);
+  var url = '/api/music/prepare' + q + (muSrc.usb ? '&usb=' + encodeURIComponent(muSrc.usb) : '');
+  post(url, muSrc.usb ? null : muSrc.file, function (j) {
+    if (!j.ok) { muBusy(false); setMsg('muMsg', esc(j.error)); return; }
+    muPoll(j.job);
+  });
+}
+function muBusy(on) {
+  muRunning = on;
+  el('muGo').disabled = on || !muSrc;
+  el('muCancel').style.display = on ? '' : 'none';
+  el('muReset').disabled = on;
+}
+function muCancelJob() {
+  post('/api/music/cancel', null, function () { setMsg('muMsg', '<span class="spin"></span>&nbsp; Cancelling…', true); });
+}
+function muPoll(job) {
+  req('GET', '/api/bulk/job?job=' + job, function (r) {
+    if (!r.ok) { muBusy(false); setMsg('muMsg', esc(r.error || 'Lost track of the job.')); return; }
+    if (!r.done) {
+      var pct = r.n ? Math.round(r.i * 100 / r.n) : 0;
+      setMsg('muMsg', '<span class="spin"></span>&nbsp; ' + esc(r.phase) + ' ' + pct + '% &middot; ' + fmtElapsed(Math.floor((Date.now() - muT0) / 1000)) +
+        '<div style="height:6px;background:var(--line,#333);border-radius:3px;margin:6px 0;max-width:340px"><div style="height:6px;border-radius:3px;background:var(--accent,#4a8cff);width:' + pct + '%"></div></div>' +
+        '<span class="hint">Please do not put the console to sleep or open any games while this runs.</span>', true);
+      setTimeout(function () { muPoll(job); }, 700);
+      return;
+    }
+    muBusy(false);
+    var x = r.result;
+    if (!x.ok) { setMsg('muMsg', esc(x.error), !!x.cancelled); return; }
+    muInfo = x.music; muDraw();
+    setMsg('muMsg', '');
+    toast('Your music is in place. The home screen is refreshing\u2026', 8000);
+  });
+}
+function muUndo(btn) {
+  confirmTwice(btn, 'Press again to put the original back', function () {
+    busy(btn, true);
+    post('/api/music/reset', null, function (j) {
+      busy(btn, false);
+      if (!j.ok) { setMsg('muMsg', esc(j.error)); return; }
+      muInfo = j.music; muDraw();
+      setMsg('muMsg', j.note ? esc(j.note) : '', !j.note);
+      toast(j.note ? j.note : 'The original music is back. The home screen is refreshing\u2026', 8000);
+    });
+  });
+}
+
 </script>
 <div class="askbox" id="askBox"><div class="askcard"><div id="askMsg"></div><div class="actions"><button id="askYes"></button><button class="ghost" id="askNo">Cancel</button></div></div></div>
 <div id="toast"></div>

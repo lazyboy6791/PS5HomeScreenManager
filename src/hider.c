@@ -1,6 +1,8 @@
 #include "hider.h"
 #include "log.h"
 #include "folders.h"
+#include "sysbg.h"
+#include "sysicon.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -857,6 +859,10 @@ int hh_list(hh_t *h, strbuf_t *out) {
       it->custom_bg = sqlite3_column_int(st, 3);
     }
     sqlite3_finalize(st);
+  }
+  for (int i = 0; i < n; i++) { /* the system tiles' backgrounds and pictures are files, kept apart from the database */
+    if (sysbg_is(items[i].id) && sysbg_custom(items[i].id)) items[i].custom_bg = 1;
+    if (sysicon_is(items[i].id) && sysicon_custom(items[i].id)) items[i].custom_icon = 1;
   }
   st = prep(h, "SELECT title_id, orig_disp FROM hh.hidden WHERE orig_disp IS NOT NULL",
             NULL, NULL, NULL);

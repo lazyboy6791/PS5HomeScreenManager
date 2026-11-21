@@ -45,6 +45,8 @@ int  plat_http_get(const char *url, unsigned char **out, size_t *out_len,
 /* Registers the app folder app_dir/<title_id> (sce_sys/param.json +
  * icon0.png) as a home screen tile, or refreshes it. 0 on success. */
 int  plat_app_install(const char *title_id, const char *app_dir);
+/* The same for several tile folders at once (the console is shown only these, in one pass). */
+int  plat_app_install_many(const char (*ids)[16], int n, const char *app_dir);
 /* Removes a tile installed with plat_app_install. 0 on success. */
 int  plat_app_uninstall(const char *title_id);
 /* Something that changes every time the console starts (the boot time).

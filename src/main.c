@@ -30,6 +30,10 @@
 #include "arrange.h"
 #include "tabs.h"
 #include "custom.h"
+#include "sysbg.h"
+#include "sysicon.h"
+#include "sysmusic.h"
+#include "sysredirect.h"
 #include "http.h"
 #include "json.h"
 #include "launch.h"
@@ -113,6 +117,39 @@ static int g_arrange_fixed = 0;
 /* ------------------------------------------------------------------------- */
 
 static char g_data_note[400]; /* what happened to the data folder at start, for the log */
+
+static char g_alive_path[300];
+static time_t g_alive_at;
+static void alive_touch(void) {
+  FILE *f = fopen(g_alive_path, "w");
+  g_alive_at = time(NULL);
+  if (!f) return;
+  fprintf(f, "%lld\n", (long long)g_alive_at);
+  fclose(f);
+}
+
+/* If the program is ended by a signal it can catch (a crash, or the console asking it to stop), the signal number is
+ * written to <data>/lastexit.txt with write() only (nothing else is safe in a handler); the next start logs it.
+ * A kill that can't be caught (SIGKILL) leaves nothing, which the running marker below then shows. */
+static char g_exit_path[300];
+#ifndef HH_HOST
+static void exit_signal_handler(int sig) {
+  char buf[40];
+  int n = 0;
+  buf[n++] = 's'; buf[n++] = 'i'; buf[n++] = 'g'; buf[n++] = ' ';
+  if (sig >= 10) buf[n++] = (char)('0' + sig / 10);
+  buf[n++] = (char)('0' + sig % 10);
+  buf[n++] = '\n';
+  int fd = open(g_exit_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  if (fd >= 0) {
+    ssize_t w = write(fd, buf, (size_t)n);
+    (void)w;
+    close(fd);
+  }
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+#endif
 
 static void setup_paths(void) {
   const char *data = "/data/homescreenmanager";
@@ -723,6 +760,9 @@ static void handle_icon(int fd, const char *query) {
     http_send_text(fd, 404, "text/plain", "no icon");
     return;
   }
+  if (sysicon_available(tid) && sysicon_path(tid, path, sizeof(path)) == 0 &&
+      send_file(fd, path, "image/png", "Cache-Control: no-cache\r\n") == 0)
+    return;
   hh_t h;
   int ok = hh_open(&h, g_app_db, g_state_db) == 0;
   if (!ok) h.db = NULL;
@@ -1280,6 +1320,29 @@ static void handle_custom_bg(int fd, http_req_t *r) {
   unsigned char *body;
   size_t len;
   if (read_picture(fd, r, reset, &body, &len)) return;
+  if (sysbg_is(id)) { /* a system tile: its background is a file of the console's, not a database entry */
+    char err[300] = "";
+    int rc;
+    if (reset) rc = sysbg_reset(id, err, sizeof(err)); /* then any database entry of an older build goes below */
+    else {
+      sysbg_blob_t blob;
+      rc = sysbg_prepare(body, len, &blob, err, sizeof(err));
+      if (rc == 0) {
+        rc = sysbg_write(id, &blob, err, sizeof(err));
+        sysbg_blob_free(&blob);
+      }
+    }
+    if (rc) {
+      send_error(fd, 409, err);
+      free(body);
+      return;
+    }
+    if (!reset) {
+      send_ok(fd, "Background saved.");
+      free(body);
+      return;
+    }
+  }
   hh_t h;
   if (hh_open(&h, g_app_db, g_state_db)) {
     free(body);
@@ -1300,6 +1363,10 @@ static void send_jpg_or_404(int fd, int found, const char *path) {
 static void handle_custom_bg_get(int fd, const char *query) {
   char id[32] = "", path[400];
   http_query_get(query, "id", id, sizeof(id));
+  if (sysbg_is(id)) {
+    send_jpg_or_404(fd, sysbg_preview_path(id, path, sizeof(path)) == 0, path);
+    return;
+  }
   hh_t h;
   int found = 0;
   if (hh_open(&h, g_app_db, g_state_db) == 0) {
@@ -1373,13 +1440,30 @@ static void handle_custom_icon(int fd, http_req_t *r) {
   } else {
     http_drain(fd, r);
   }
+  int sysicon_done = 0;
+  if (sysicon_is(id) && (reset ? sysicon_custom(id) : sysicon_available(id))) { /* a system tile: its picture is a file of the console's */
+    char err[300] = "";
+    int rc = reset ? sysicon_reset(id, err, sizeof(err)) : sysicon_write(id, body, len, clear, err, sizeof(err));
+    if (rc) {
+      free(body);
+      send_error(fd, 409, err);
+      return;
+    }
+    if (!reset) {
+      free(body);
+      send_ok(fd, "Picture saved.");
+      return;
+    }
+    sysicon_done = 1;
+  }
   hh_t h;
   if (hh_open(&h, g_app_db, g_state_db)) {
     free(body);
-    send_error(fd, 500, h.err);
+    if (sysicon_done) send_ok(fd, "Original picture back.");
+    else send_error(fd, 500, h.err);
     return;
   }
-  if (custom_set_icon(&h, id, reset ? NULL : body, len, clear)) send_error(fd, 409, h.err);
+  if (custom_set_icon(&h, id, reset ? NULL : body, len, clear) && !sysicon_done) send_error(fd, 409, h.err);
   else send_ok(fd, reset ? "Original picture back." : "Picture saved.");
   free(body);
   hh_close(&h);
@@ -2232,7 +2316,9 @@ static int create_big_thread(pthread_t *th, void *(*fn)(void *), void *arg) {
 static void *bulk_bg_worker(void *arg) {
   bkjob_t *j = arg;
   hh_t h;
-  int applied = 0, no_entry = 0, already = 0, failed = 0, folders = 0, stopped = 0;
+  int applied = 0, no_entry = 0, already = 0, failed = 0, folders = 0, stopped = 0, sys = 0;
+  sysbg_blob_t sblob;
+  int have_sblob = 0;
   char first_err[300] = "";
   long t0 = bk_now_ms(), enc_ms = 0, reused = 0, linked = 0, copied = 0, shared = 0;
   char path[420];
@@ -2253,6 +2339,7 @@ static void *bulk_bg_worker(void *arg) {
   }
   if (jpg && hh_open(&h, g_app_db, g_state_db) == 0) {
     folders_hold(1);
+    folders_defer_install(1);
     custom_bulk_begin(j->share);
     for (int i = 0; i < j->n; i++) {
       g_bk.i = i + 1;
@@ -2265,7 +2352,43 @@ static void *bulk_bg_worker(void *arg) {
         break;
       }
       if (!strncmp(id, "HHFD", 4)) {
-        folders++;
+        /* a folder: its tile files are written now and all folders are registered with one install at the end */
+        char old[400];
+        if (!j->overwrite && folders_bg_path(id, old, sizeof(old)) == 0) {
+          already++;
+          continue;
+        }
+        if (folders_set_bg(&h, id, jpg, jl) == 0) {
+          applied++;
+          folders++;
+        } else {
+          if (!failed) snprintf(first_err, sizeof(first_err), "%s: %.200s", id, h.err);
+          hh_log("bulk background: folder %s failed: %.200s", id, h.err);
+          failed++;
+        }
+        continue;
+      }
+      if (sysbg_available(id)) { /* a system tile: the console's own background file, written once per run from one converted picture */
+        if (!j->overwrite && sysbg_custom(id)) {
+          already++;
+          continue;
+        }
+        char serr[300] = "";
+        int rc = 0;
+        if (!have_sblob) {
+          snprintf(g_bk.phase, sizeof(g_bk.phase), "Converting the picture for the system tiles…");
+          rc = sysbg_prepare(jpg, jl, &sblob, serr, sizeof(serr));
+          have_sblob = rc == 0;
+        }
+        if (rc == 0) rc = sysbg_write(id, &sblob, serr, sizeof(serr));
+        if (rc == 0) {
+          applied++;
+          sys++;
+        } else {
+          if (!failed) snprintf(first_err, sizeof(first_err), "%s: %.200s", id, serr);
+          hh_log("bulk background: system tile %s failed: %.200s", id, serr);
+          failed++;
+        }
         continue;
       }
       if (!custom_can_bg(&h, id)) {
@@ -2297,7 +2420,14 @@ static void *bulk_bg_worker(void *arg) {
       }
     }
     custom_bulk_end(&enc_ms, &reused, &linked, &copied, &shared);
+    if (folders) {
+      snprintf(g_bk.phase, sizeof(g_bk.phase), "Registering the %d folder(s) with the console…", folders);
+      int notreg = folders_install_pending(&h);
+      hh_log("bulk background: %d folder(s) registered with one install, %d not registered", folders, notreg);
+    }
+    folders_defer_install(0);
     folders_hold(0);
+    if (have_sblob) sysbg_blob_free(&sblob);
     hh_close(&h);
   } else {
     snprintf(first_err, sizeof(first_err), "The prepared picture or the database couldn't be opened.");
@@ -2305,14 +2435,14 @@ static void *bulk_bg_worker(void *arg) {
   }
   free(jpg);
   long total = bk_now_ms() - t0;
-  hh_log("bulk background: %d applied, %d without a background entry, %d already set by you, %d failed, %d folder(s) left out; "
+  hh_log("bulk background: %d applied, %d without a background entry, %d already set by you, %d failed, %d of them folders, %d system tile(s); "
          "%ld ms in all, %ld ms converting, %ld converted file(s) reused (%ld linked, %ld copied)%s%s",
-         applied, no_entry, already, failed, folders, total, enc_ms, reused, linked, copied, j->share ? "; sharing one file between games" : "",
+         applied, no_entry, already, failed, folders, sys, total, enc_ms, reused, linked, copied, j->share ? "; sharing one file between games" : "",
          stopped ? "; STOPPED: the drive is almost full" : "");
   strbuf_t sb;
   sb_init(&sb);
-  sb_printf(&sb, "{\"ok\":true,\"applied\":%d,\"no_entry\":%d,\"already_set\":%d,\"failed\":%d,\"folders\":%d,\"ms\":%ld,\"converting_ms\":%ld,\"reused\":%ld,\"linked\":%ld,\"copied\":%ld,\"shared\":%ld,\"stopped\":%s,\"error\":",
-            applied, no_entry, already, failed, folders, total, enc_ms, reused, linked, copied, shared, stopped ? "true" : "false");
+  sb_printf(&sb, "{\"ok\":true,\"applied\":%d,\"no_entry\":%d,\"already_set\":%d,\"failed\":%d,\"folders\":%d,\"system\":%d,\"ms\":%ld,\"converting_ms\":%ld,\"reused\":%ld,\"linked\":%ld,\"copied\":%ld,\"shared\":%ld,\"stopped\":%s,\"error\":",
+            applied, no_entry, already, failed, folders, sys, total, enc_ms, reused, linked, copied, shared, stopped ? "true" : "false");
   sb_json_str(&sb, first_err);
   sb_puts(&sb, "}");
   snprintf(g_bk.result, sizeof(g_bk.result), "%s", sb.data ? sb.data : "{\"ok\":false}");
@@ -2380,7 +2510,7 @@ static void handle_bulk_bg_apply(int fd, http_req_t *r) {
   g_bk.t0 = time(NULL);
   snprintf(g_bk.phase, sizeof(g_bk.phase), "Starting…");
   g_import_running = 1;
-  hh_log("bulk background: %d game(s) chosen, overwrite=%d, share=%d", n, overwrite, share);
+  hh_log("bulk background: %d tile(s) chosen, overwrite=%d, share=%d", n, overwrite, share);
   pthread_t th;
   if (create_big_thread(&th, bulk_bg_worker, j) != 0) {
     g_import_running = 0;
@@ -2410,11 +2540,30 @@ static void *bulk_undo_worker(void *arg) {
   if (hh_open(&h, g_app_db, g_state_db) == 0) {
     folders_hold(1);
     custom_gc_defer(1);
+    folders_defer_install(1);
+    int fback = 0;
     for (int i = 0; i < j->n; i++) {
       g_bk.i = i + 1;
       snprintf(g_bk.phase, sizeof(g_bk.phase), "Putting the original backgrounds back… %d of %d", i + 1, j->n);
+      if (!strncmp(j->ids[i], "HHFD", 4)) {
+        char old[400];
+        if (folders_bg_path(j->ids[i], old, sizeof(old)) == 0 && folders_set_bg(&h, j->ids[i], NULL, 0) == 0) {
+          back++;
+          fback++;
+        }
+        continue;
+      }
+      if (sysbg_is(j->ids[i])) {
+        char serr[300];
+        if (sysbg_custom(j->ids[i]) && sysbg_reset(j->ids[i], serr, sizeof(serr)) == 0) back++;
+      }
       if (custom_has_bg(&h, j->ids[i]) && custom_set_bg(&h, j->ids[i], NULL, 0) == 0) back++;
     }
+    if (fback) {
+      int notreg = folders_install_pending(&h);
+      hh_log("bulk background: %d folder(s) registered with one install, %d not registered", fback, notreg);
+    }
+    folders_defer_install(0);
     custom_gc_defer(0);
     hh_log("bulk background: tiles done, cleaning up shared files");
     custom_shared_gc(&h);
@@ -2454,6 +2603,18 @@ static void handle_bulk_bg_undo(int fd, http_req_t *r) {
   int n = json_flag((const char *)buf, t, nt, "all")
               ? custom_bg_ids(&h, ids, BULK_MAX_TILES)
               : ids_from_json((const char *)buf, t, nt, json_get((const char *)buf, t, nt, 0, "ids"), ids, BULK_MAX_TILES);
+  if (json_flag((const char *)buf, t, nt, "all") && ids) { /* system tiles with a background of ours */
+    n += sysbg_custom_ids(ids + n, BULK_MAX_TILES - n);
+  }
+  if (json_flag((const char *)buf, t, nt, "all") && ids) { /* folders with a background of ours too */
+    char (*fid)[16] = calloc(FOLDER_MAX, 16);
+    int fn = fid ? folders_ids(&h, fid, FOLDER_MAX) : 0;
+    for (int i = 0; i < fn && n < BULK_MAX_TILES; i++) {
+      char old[400];
+      if (folders_bg_path(fid[i], old, sizeof(old)) == 0) snprintf(ids[n++], 16, "%s", fid[i]);
+    }
+    free(fid);
+  }
   hh_close(&h);
   free(buf);
   free(t);
@@ -2508,7 +2669,7 @@ static void bk_step(const char *what, int i, int n) {
 static void *undo_everything_worker(void *arg) {
   (void)arg;
   hh_t h;
-  int folders = 0, tabs = 0, order = 0, shown = 0, pics = 0, bgs = 0, names = 0, failed = 0;
+  int folders = 0, tabs = 0, order = 0, shown = 0, pics = 0, bgs = 0, names = 0, failed = 0, music = 0, links = 0;
   long t0 = bk_now_ms();
   char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
   if (ids && hh_open(&h, g_app_db, g_state_db) == 0) {
@@ -2543,10 +2704,40 @@ static void *undo_everything_worker(void *arg) {
       if (custom_set_icon(&h, ids[i], NULL, 0, 0) == 0) pics++;
       else failed++;
     }
+    n = sysicon_custom_ids(ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      char serr[300];
+      bk_step("Putting the original system tile pictures back…", i + 1, n);
+      if (sysicon_reset(ids[i], serr, sizeof(serr)) == 0) pics++;
+      else failed++;
+    }
     n = custom_bg_ids(&h, ids, BULK_MAX_TILES);
     for (int i = 0; i < n; i++) {
       bk_step("Putting the original backgrounds back…", i + 1, n);
       if (custom_set_bg(&h, ids[i], NULL, 0) == 0) bgs++;
+      else failed++;
+    }
+    n = sysbg_custom_ids(ids, BULK_MAX_TILES);
+    for (int i = 0; i < n; i++) {
+      char serr[300];
+      bk_step("Putting the original system tile backgrounds back…", i + 1, n);
+      if (sysbg_reset(ids[i], serr, sizeof(serr)) == 0) bgs++;
+      else failed++;
+    }
+    {
+      char rids[8][16];
+      int rn = sysredirect_custom_ids(rids, 8);
+      for (int i = 0; i < rn; i++) {
+        char serr[300];
+        bk_step("Putting the original tile links back…", i + 1, rn);
+        if (sysredirect_reset(&h, rids[i], serr, sizeof(serr)) == 0) links++;
+        else failed++;
+      }
+    }
+    if (sysmusic_custom()) {
+      char serr[300], note[300];
+      bk_step("Putting the original home screen music back…", 0, 0);
+      if (sysmusic_reset(note, sizeof(note), serr, sizeof(serr)) == 0) music = 1;
       else failed++;
     }
     n = custom_renamed_ids(&h, ids, BULK_MAX_TILES);
@@ -2569,8 +2760,8 @@ static void *undo_everything_worker(void *arg) {
          folders, tabs, order ? "cleared" : "unchanged", shown, pics, bgs, names, failed, bk_now_ms() - t0);
   snprintf(g_bk.result, sizeof(g_bk.result),
            "{\"ok\":true,\"folders\":%d,\"tabs\":%d,\"order\":%d,\"shown\":%d,\"pics\":%d,\"bgs\":%d,\"names\":%d,"
-           "\"failed\":%d,\"ms\":%ld}",
-           folders, tabs, order, shown, pics, bgs, names, failed, bk_now_ms() - t0);
+           "\"music\":%d,\"links\":%d,\"failed\":%d,\"ms\":%ld}",
+           folders, tabs, order, shown, pics, bgs, names, music, links, failed, bk_now_ms() - t0);
   request_home_refresh_quick();
   g_bk.done = 1;
   g_import_running = 0;
@@ -2692,6 +2883,229 @@ static void handle_bulk_job(int fd, const char *query) {
   sb_free(&sb);
 }
 
+
+/* ---- home screen music ----
+ * One job at a time, shown through the same job poll as the bulk changes (/api/bulk/job: i of 1000 is the progress). */
+typedef struct {
+  unsigned char *data;
+  size_t len;
+  char name[200];
+  double volume;
+} musicjob_t;
+static volatile int g_music_cancel;
+
+static int music_progress(void *ctx, double f, const char *what) {
+  (void)ctx;
+  g_bk.i = (int)(f * 1000);
+  g_bk.n = 1000;
+  snprintf(g_bk.phase, sizeof(g_bk.phase), "%s", what);
+  return g_music_cancel;
+}
+
+static void *music_worker(void *arg) {
+  musicjob_t *j = arg;
+  char err[300] = "";
+  int rc = sysmusic_apply(j->data, j->len, j->name, j->volume, music_progress, NULL, err, sizeof(err));
+  free(j->data);
+  strbuf_t sb;
+  sb_init(&sb);
+  if (rc == 0) {
+    request_home_refresh_quick(); /* the home screen starts the new music when it restarts */
+    sb_puts(&sb, "{\"ok\":true,\"music\":");
+    sysmusic_json(&sb);
+    sb_puts(&sb, "}");
+  } else {
+    int cancelled = !strcmp(err, "cancelled");
+    sb_printf(&sb, "{\"ok\":false,\"cancelled\":%s,\"error\":", cancelled ? "true" : "false");
+    sb_json_str(&sb, cancelled ? "Cancelled. The music was not changed." : err);
+    sb_puts(&sb, "}");
+  }
+  snprintf(g_bk.result, sizeof(g_bk.result), "%s", sb.data ? sb.data : "{\"ok\":false}");
+  sb_free(&sb);
+  free(j);
+  g_bk.done = 1;
+  g_import_running = 0;
+  return NULL;
+}
+
+static void handle_music_get(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"music\":");
+  sysmusic_json(&sb);
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_redirect_get(int fd) {
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    send_error(fd, 500, h.err);
+    return;
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"tiles\":");
+  sysredirect_json(&h, &sb);
+  sb_puts(&sb, ",\"presets\":");
+  sysredirect_presets_json(&sb);
+  sb_puts(&sb, "}");
+  hh_close(&h);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+/* reset=1 puts the console's own link back; otherwise url= is the new link */
+static void handle_redirect_set(int fd, const char *query, int reset) {
+  char tid[16] = "", url[512] = "", err[300] = "";
+  if (http_query_get(query, "id", tid, sizeof(tid)) || !sysredirect_is(tid)) {
+    send_error(fd, 400, "That tile's link can't be changed.");
+    return;
+  }
+  hh_t h;
+  if (hh_open(&h, g_app_db, g_state_db)) {
+    send_error(fd, 500, h.err);
+    return;
+  }
+  int rc;
+  if (reset) rc = sysredirect_reset(&h, tid, err, sizeof(err));
+  else {
+    http_query_get(query, "url", url, sizeof(url));
+    rc = sysredirect_set(&h, tid, url, err, sizeof(err));
+  }
+  if (rc) {
+    hh_close(&h);
+    send_error(fd, 409, err);
+    return;
+  }
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"tiles\":");
+  sysredirect_json(&h, &sb);
+  sb_puts(&sb, "}");
+  hh_close(&h);
+  request_home_refresh_quick(); /* the home screen restarts to show where the tile opens now */
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_usb_audio_list(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"songs\":");
+  usbpics_list_audio_json(&sb);
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+/* the song itself, for the preview player */
+static void handle_usb_audio(int fd, const char *query) {
+  char path[1024];
+  if (http_query_get(query, "path", path, sizeof(path)) || !usbpics_valid_audio_path(path)) {
+    http_send_text(fd, 404, "text/plain", "no song");
+    return;
+  }
+  const char *ext = strrchr(path, '.');
+  const char *type = ext && !strcasecmp(ext, ".wav") ? "audio/wav" : "audio/mpeg";
+  if (send_file(fd, path, type, "Cache-Control: no-store\r\n")) http_send_text(fd, 404, "text/plain", "no song");
+}
+
+static void handle_music_prepare(int fd, http_req_t *r) {
+  if (g_import_running || folders_busy()) {
+    http_drain(fd, r);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  char usb[1024] = "", vol[16] = "", name[200] = "";
+  http_query_get(r->query, "usb", usb, sizeof(usb));
+  http_query_get(r->query, "volume", vol, sizeof(vol));
+  http_query_get(r->query, "name", name, sizeof(name));
+  unsigned char *body = NULL;
+  size_t len = 0;
+  if (usb[0]) {
+    http_drain(fd, r);
+    if (usbpics_read_audio(usb, &body, &len)) {
+      send_error(fd, 404, "That song isn't on the USB drive any more (or is bigger than 100 MB). Plug the drive back in and try again.");
+      return;
+    }
+    if (!name[0]) {
+      const char *sl = strrchr(usb, '/');
+      snprintf(name, sizeof(name), "%s", sl ? sl + 1 : usb);
+    }
+  } else {
+    int rc = http_read_body(fd, r, &body, &len, USBAUDIO_MAX_BYTES);
+    if (rc) {
+      send_error(fd, rc == -2 ? 413 : 400, "Send a WAV or MP3 song (up to 100 MB).");
+      return;
+    }
+  }
+  musicjob_t *j = calloc(1, sizeof(*j));
+  if (!j) {
+    free(body);
+    send_error(fd, 500, "Out of memory.");
+    return;
+  }
+  j->data = body;
+  j->len = len;
+  j->volume = vol[0] ? atof(vol) : 0;
+  snprintf(j->name, sizeof(j->name), "%s", name[0] ? name : "song");
+  g_music_cancel = 0;
+  g_bk.job++;
+  g_bk.done = 0;
+  g_bk.i = 0;
+  g_bk.n = 1000;
+  g_bk.result[0] = '\0';
+  g_bk.t0 = time(NULL);
+  snprintf(g_bk.phase, sizeof(g_bk.phase), "Starting…");
+  g_import_running = 1;
+  hh_log("home music: starting (%zu bytes, volume %+.1f dB)", len, j->volume);
+  pthread_t th;
+  if (create_big_thread(&th, music_worker, j) != 0) {
+    g_import_running = 0;
+    free(j->data);
+    free(j);
+    send_error(fd, 500, "Couldn't start the job.");
+    return;
+  }
+  pthread_detach(th);
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_printf(&sb, "{\"ok\":true,\"job\":%d}", g_bk.job);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_music_cancel(int fd, http_req_t *r) {
+  http_drain(fd, r);
+  g_music_cancel = 1;
+  send_ok(fd, "Cancelling…");
+}
+
+static void handle_music_reset(int fd, http_req_t *r) {
+  http_drain(fd, r);
+  if (g_import_running || folders_busy()) {
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  char err[300] = "", note[300] = "";
+  if (sysmusic_reset(note, sizeof(note), err, sizeof(err))) {
+    send_error(fd, 500, err);
+    return;
+  }
+  request_home_refresh_quick();
+  strbuf_t sb;
+  sb_init(&sb);
+  sb_puts(&sb, "{\"ok\":true,\"note\":");
+  sb_json_str(&sb, note);
+  sb_puts(&sb, ",\"music\":");
+  sysmusic_json(&sb);
+  sb_puts(&sb, "}");
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
 static void handle_client(int fd) {
   struct timeval tv = {5, 0};
   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -2712,10 +3126,19 @@ static void handle_client(int fd) {
   int asave = post && !strcmp(p, "/api/arrange/save");
   int iinspect = post && !strcmp(p, "/api/import/inspect"); /* reads the backup file itself */
   int bulk = post && !strncmp(p, "/api/bulk/", 10);      /* reads its own body */
+  int mprep = post && !strcmp(p, "/api/music/prepare");  /* reads the song itself */
+  if (mprep) bulk = 1;
   if (!upload && !fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave && !iinspect && !bulk) http_drain(fd, &r);
 
   if (!strcmp(p, "/") || !strcmp(p, "/index.html")) {
     send_page(fd, WEBUI_HTML, WEBUI_HTML_LEN);
+  } else if (!strcmp(p, "/api/ping")) {
+    /* nothing but "the server answers": the launcher app asks this before it trusts a port that accepts connections */
+    strbuf_t sb;
+    sb_init(&sb);
+    sb_puts(&sb, "{\"ok\":true}");
+    send_json(fd, 200, &sb);
+    sb_free(&sb);
   } else if (!strcmp(p, "/api/status")) {
     handle_status(fd);
   } else if (!strncmp(p, "/folder/", 8)) {
@@ -2733,6 +3156,18 @@ static void handle_client(int fd) {
     handle_usb_images(fd);
   } else if (!strcmp(p, "/api/usb_pic")) {
     handle_usb_pic(fd, r.query);
+  } else if (!strcmp(p, "/api/music")) {
+    handle_music_get(fd);
+  } else if (!strcmp(p, "/api/redirect")) {
+    handle_redirect_get(fd);
+  } else if (!strcmp(p, "/api/redirect/set")) {
+    handle_redirect_set(fd, r.query, 0);
+  } else if (!strcmp(p, "/api/redirect/reset")) {
+    handle_redirect_set(fd, r.query, 1);
+  } else if (!strcmp(p, "/api/usb_audio_list")) {
+    handle_usb_audio_list(fd);
+  } else if (!strcmp(p, "/api/usb_audio")) {
+    handle_usb_audio(fd, r.query);
   } else if (!strcmp(p, "/api/usb_thumb")) {
     handle_usb_thumb(fd, r.query);
   } else if (!strcmp(p, "/api/list")) {
@@ -2793,6 +3228,12 @@ static void handle_client(int fd) {
     handle_bulk_bg_try(fd, &r);
   } else if (!strcmp(p, "/api/bulk/bg/undo")) {
     handle_bulk_bg_undo(fd, &r);
+  } else if (!strcmp(p, "/api/music/prepare")) {
+    handle_music_prepare(fd, &r);
+  } else if (!strcmp(p, "/api/music/cancel")) {
+    handle_music_cancel(fd, &r);
+  } else if (!strcmp(p, "/api/music/reset")) {
+    handle_music_reset(fd, &r);
   } else if (!strcmp(p, "/api/export/usb")) {
     handle_export_usb(fd);
   } else if (!strcmp(p, "/api/import/inspect")) {
@@ -2923,6 +3364,38 @@ static int open_server(void) {
   }
   close(s);
   return -1;
+}
+
+/* After the console has been in rest mode the program is still there but its listening socket may be dead: the
+ * menu and the launcher tile get no answer, and the folders (which need the menu server) stop working, until the
+ * program is stopped and started again. So the socket is checked now and then, and opened again when it is dead. */
+static int menu_answers(void) {
+  int s = socket(AF_INET, SOCK_STREAM, 0);
+  if (s < 0) return 1; /* out of sockets: not a reason to touch the server */
+  int fl = fcntl(s, F_GETFL, 0);
+  fcntl(s, F_SETFL, fl | O_NONBLOCK);
+  struct sockaddr_in a;
+  memset(&a, 0, sizeof(a));
+  a.sin_family = AF_INET;
+  a.sin_port = htons(HH_PORT);
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  int ok = 0;
+  if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) ok = 1;
+  else if (errno == EINPROGRESS) {
+    struct pollfd p = {s, POLLOUT, 0};
+    int err = 0;
+    socklen_t el = sizeof(err);
+    if (poll(&p, 1, 1500) == 1 && getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &el) == 0 && err == 0) ok = 1;
+  }
+  close(s);
+  return ok;
+}
+
+static void reopen_server(int *srv, const char *why) {
+  if (*srv >= 0) close(*srv);
+  *srv = open_server();
+  if (*srv < 0) hh_log("menu server: could not open it again (%s), trying again later", why);
+  else hh_log("menu server: opened again (%s)", why);
 }
 
 /* Hides again the tiles the PS5 brought back. A game that is running is left
@@ -3177,13 +3650,102 @@ static void wait_previous_instance_gone(void) {
   }
 }
 
+/* The very first thing a start does: one line in a small file, so that after a console sleep it is clear whether
+ * the program was started at all (this runs before anything that could stop it). The last few lines are copied
+ * into the log once that exists. */
+#ifdef HH_HOST
+static volatile sig_atomic_t g_test_drop; /* tests: 1 = close the listening socket, 2 = swap it for one nobody can reach */
+static void test_drop_handler(int sig) { g_test_drop = (sig == SIGUSR1) ? 1 : 2; }
+#endif
+static char g_launch_path[320] = "";
+static int g_launch_written;
+#ifndef HH_HOST
+static int g_session_rc = 0, g_session_errno = 0;
+#endif
+/* Adds this start to the file at `path` (the last 6 starts are kept). Returns 1 if it could be written. */
+static int launch_note_to(const char *path) {
+  snprintf(g_launch_path, sizeof(g_launch_path), "%s", path);
+  char keep[6][80];
+  int n = 0;
+  FILE *f = fopen(g_launch_path, "r");
+  if (f) {
+    char line[80];
+    while (fgets(line, sizeof(line), f)) {
+      line[strcspn(line, "\r\n")] = '\0';
+      if (n == 5) {
+        memmove(keep[0], keep[1], 4 * sizeof(keep[0]));
+        n = 4;
+      }
+      snprintf(keep[n++], sizeof(keep[0]), "%s", line);
+    }
+    fclose(f);
+  }
+  f = fopen(g_launch_path, "w");
+  if (!f) return 0;
+  for (int i = 0; i < n; i++) fprintf(f, "%s\n", keep[i]);
+  fprintf(f, "%lld pid %d\n", (long long)time(NULL), (int)getpid());
+  fclose(f);
+  return 1;
+}
+
+/* The very first thing a start does. The file lives in the data folder; when that folder isn't there yet (it may
+ * still have to be moved from the old name, which must not be pre-empted by creating it) the line is written as
+ * soon as the folder is ready (see launch_note_late). */
+static void launch_note(void) {
+  const char *early = "/data/homescreenmanager/hsm_launch.txt";
+#ifdef HH_HOST
+  early = (getenv("HH_LAUNCH_FILE") && getenv("HH_LAUNCH_FILE")[0]) ? getenv("HH_LAUNCH_FILE") : NULL;
+  if (!early) return;
+#else
+  if (access("/data/homescreenmanager", F_OK) != 0) return;
+#endif
+  g_launch_written = launch_note_to(early);
+}
+
+static void launch_note_late(void) {
+  char path[320];
+  snprintf(path, sizeof(path), "%s/hsm_launch.txt", g_data_dir);
+  if (!g_launch_written) g_launch_written = launch_note_to(path);
+#ifndef HH_HOST
+  /* where these two files were kept before they moved into the data folder */
+  unlink("/data/hsm_launch.txt");
+  unlink("/data/hsm_launcher.txt");
+#endif
+}
+
+static void launch_note_log(void) {
+  FILE *f = fopen(g_launch_path, "r");
+  if (!f) return;
+  char line[80], all[400] = "";
+  while (fgets(line, sizeof(line), f)) {
+    line[strcspn(line, "\r\n")] = '\0';
+    if (all[0]) strncat(all, ", ", sizeof(all) - strlen(all) - 1);
+    strncat(all, line, sizeof(all) - strlen(all) - 1);
+  }
+  fclose(f);
+  hh_log("startup: recent launches (time pid): %s", all);
+}
+
 int main(void) {
+  launch_note();
+#ifdef HH_HOST
+  signal(SIGUSR1, test_drop_handler);
+  signal(SIGUSR2, test_drop_handler);
+#endif
+#ifndef HH_HOST
+  /* Its own session and process group, away from the app or loader that started it: when that app ends (or
+   * crashes), what the console cleans up for it should not take this program along. Fails harmlessly when the
+   * program already leads a group; the result goes into the log. */
+  g_session_rc = (int)setsid();
+  g_session_errno = errno;
+#endif
   signal(SIGPIPE, SIG_IGN);
   plat_init();
   plat_set_process_name("HomeScreenManager");
   int was_running = stop_previous_instance(); /* first: the data folder may be moved next */
   if (was_running) wait_previous_instance_gone();
   setup_paths();
+  launch_note_late();
   load_settings();
   {
     backup_cfg_t bcfg = {g_data_dir, HH_VERSION};
@@ -3194,7 +3756,60 @@ int main(void) {
     snprintf(lp, sizeof(lp), "%s/log.txt", g_data_dir);
     hh_log_init(lp);
     hh_log("Home Screen Manager %s starting", HH_VERSION);
+    launch_note_log();
+#ifndef HH_HOST
+    if (g_session_rc == -1) hh_log("startup: own session: not started (%s), the program stays in its parent's group", strerror(g_session_errno));
+    else hh_log("startup: own session: started (session %d)", g_session_rc);
+#endif
     if (g_data_note[0]) hh_log("%s", g_data_note);
+  }
+  /* A marker that says the program is running, refreshed every 30 s and removed on a clean stop. If it is still
+   * there at the next start, the last run was ended from outside (the console going to rest mode, a crash...). */
+  snprintf(g_alive_path, sizeof(g_alive_path), "%s/running.txt", g_data_dir);
+  snprintf(g_exit_path, sizeof(g_exit_path), "%s/lastexit.txt", g_data_dir);
+  {
+    FILE *ef = fopen(g_exit_path, "r");
+    if (ef) {
+      char line[60] = "";
+      if (fgets(line, sizeof(line), ef)) {
+        line[strcspn(line, "\r\n")] = 0;
+        hh_log("startup: the last run was ended by a signal (%s; 11 = crash, 15 = asked to stop, 1 = hang up)", line);
+      }
+      fclose(ef);
+      unlink(g_exit_path);
+    }
+  }
+#ifndef HH_HOST
+  {
+    static const int sigs[] = {SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE, SIGTERM, SIGHUP};
+    /* A signal that was started as "ignored" stays ignored: the loader that starts a payload may leave hang-up and
+       terminate ignored, and a handler that ends the program would then kill it as soon as the app that sent it
+       closes (the launcher tile does exactly that). */
+    char ignored[64] = "";
+    for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) {
+      struct sigaction cur;
+      if (sigaction(sigs[i], NULL, &cur) == 0 && cur.sa_handler == SIG_IGN) {
+        size_t l = strlen(ignored);
+        snprintf(ignored + l, sizeof(ignored) - l, "%s%d", l ? "," : "", sigs[i]);
+        continue;
+      }
+      signal(sigs[i], exit_signal_handler);
+    }
+    if (ignored[0]) hh_log("startup: signals started as ignored, left that way: %s", ignored);
+  }
+#endif
+  {
+    FILE *af = fopen(g_alive_path, "r");
+    long long last = 0;
+    if (af) {
+      if (fscanf(af, "%lld", &last) != 1) last = 0;
+      fclose(af);
+      char when[40] = "an unknown time";
+      time_t lt = (time_t)last;
+      if (last > 0) strftime(when, sizeof(when), "%m-%d %H:%M:%S", localtime(&lt));
+      hh_log("startup: the last run did not stop cleanly (it was last seen running at %s): the console was probably put to rest mode or restarted, or it was stopped from outside", when);
+    }
+    alive_touch();
   }
   {
     char tc[320], pics[320];
@@ -3212,11 +3827,21 @@ int main(void) {
     plat_set_stage_dir(sd);
     plat_unmask_leftover();
   }
-  probe_system_art();
+  if (getenv("HH_PROBE")) probe_system_art(); /* a long read-only listing, only for diagnosis */
   launch_cfg_t lcfg = {g_app_dir, g_appmeta_dir};
   launch_init(&lcfg);
   custom_cfg_t ccfg = {g_data_dir, g_appmeta_dir};
   custom_init(&ccfg);
+  sysbg_init(g_data_dir, getenv("HH_VSH_ASSET"));
+  sysicon_init(g_data_dir, getenv("HH_RNPS_LIVE"), getenv("HH_RNPS_SHIPPED"));
+  sysmusic_init(g_data_dir, getenv("HH_VSH_ASSET"));
+  {
+    const char *ai = "/system_data/priv/mms/appinfo.db";
+#ifdef HH_HOST
+    if (getenv("HH_APPINFO_DB")) ai = getenv("HH_APPINFO_DB");
+#endif
+    sysredirect_init(g_data_dir, ai);
+  }
   /* safety copies of the home screen database */
   char err[256] = "";
   if (!file_exists(g_backup_orig) && hh_copy_db(g_app_db, g_backup_orig, err, sizeof(err)))
@@ -3230,8 +3855,10 @@ int main(void) {
       hh_release_locked(&h, &g_released);
       if (g_cfg.reapply) rehide_now(&h, &g_reapplied);
       folders_reapply(&h, &g_folders_fixed); /* folder tiles always come back */
+      folders_clear_stale_bg(&h);            /* and a folder without a background has no leftover entry */
       if (g_cfg.folders_first) { int ff = 0; folders_front_apply(&h, &ff); } /* in the first spots */
       custom_reapply(&h, &g_custom_fixed);   /* and so do new names and pictures */
+      sysredirect_reapply(&h);               /* and where the system tiles open */
       arrange_apply(&h, &g_arrange_fixed);   /* and the chosen home-screen order */
       { int tf = 0; tabs_apply(&h, &tf); }   /* and tiles moved to the other tab */
       hh_log("startup: users=%d reapplied=%d folders_fixed=%d custom_fixed=%d arrange_fixed=%d",
@@ -3261,10 +3888,12 @@ int main(void) {
 
   int srv = open_server();
   if (srv < 0) {
+    hh_log("startup: port %d is busy, stopping", HH_PORT);
     plat_notify("Home Screen Manager: port %d is busy.\nRestart the PS5 and try again.", HH_PORT);
     return 1;
   }
 
+  hh_log("startup: the menu server is listening on port %d", HH_PORT);
   char ip[64] = "";
   char url[96];
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/", HH_PORT);
@@ -3296,17 +3925,77 @@ int main(void) {
     if (pthread_create(&sm, NULL, stall_monitor, NULL) == 0) pthread_detach(sm);
   }
 
+  time_t last_check = time(NULL);
+  time_t last_reopen = 0;
+  long check_every = 30;
+#ifdef HH_HOST
+  if (getenv("HH_SELFCHECK_EVERY")) check_every = atol(getenv("HH_SELFCHECK_EVERY"));
+#endif
+  int frozen = 0;
   while (g_running) {
     struct pollfd pfd = {srv, POLLIN, 0};
+    {
+      /* the loop turns every half second: a much longer gap means the whole program was frozen (the console's
+         rest mode, or heavy load) */
+      time_t before = g_loop_beat, now = time(NULL);
+      if (before && now - before >= 20) {
+        hh_log("the menu loop did not turn for %lld s and is running again (the console in rest mode, or a long job)", (long long)(now - before));
+        frozen = 1;
+      }
+    }
     g_loop_beat = time(NULL);
+    if (g_loop_beat - g_alive_at >= 30) alive_touch();
+#ifdef HH_HOST
+    if (g_test_drop == 1) { g_test_drop = 0; close(srv); }       /* a closed socket */
+    if (g_test_drop == 2) { /* a socket that listens somewhere else: nothing wrong to see, but nobody can connect */
+      g_test_drop = 0;
+      int other = socket(AF_INET, SOCK_STREAM, 0);
+      struct sockaddr_in oa;
+      memset(&oa, 0, sizeof(oa));
+      oa.sin_family = AF_INET;
+      oa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      oa.sin_port = 0;
+      if (other >= 0 && bind(other, (struct sockaddr *)&oa, sizeof(oa)) == 0 && listen(other, 4) == 0) {
+        dup2(other, srv);
+        close(other);
+      }
+    }
+#endif
+    if (srv < 0 || frozen || g_loop_beat - last_check >= check_every) {
+      last_check = g_loop_beat;
+      if (srv < 0) {
+        if (g_loop_beat - last_reopen >= 3) { last_reopen = g_loop_beat; reopen_server(&srv, "it was not open"); }
+      } else if (!menu_answers()) {
+        reopen_server(&srv, frozen ? "nobody could connect after the program was frozen" : "nobody could connect");
+        last_reopen = g_loop_beat;
+      }
+      frozen = 0;
+    }
+    if (srv < 0) { usleep(200000); continue; }
     int r = poll(&pfd, 1, 500);
+    if (r < 0 && errno != EINTR) {
+      reopen_server(&srv, "poll failed");
+      continue;
+    }
     if (r <= 0) continue;
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      reopen_server(&srv, "the socket reported an error");
+      continue;
+    }
     int c = accept(srv, NULL, NULL);
-    if (c < 0) continue;
+    if (c < 0) {
+      if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK && errno != ECONNABORTED) {
+        hh_log("menu server: accept failed (%s)", strerror(errno));
+        usleep(100000);
+        reopen_server(&srv, "accept failed");
+      }
+      continue;
+    }
     handle_client(c);
     close(c);
   }
-  close(srv);
+  if (srv >= 0) close(srv);
+  unlink(g_alive_path); /* a clean stop */
   plat_notify("Home Screen Manager closed");
   return 0;
 }
