@@ -62,6 +62,8 @@ There are 2 methods to install home screen manager. For best results use both bu
    - Copy the unzipped PPSA97979 folder to `/data/homebrew/` on your PS5 via **FTP or File Manager**.
    - Once it finishes [ShadowMount+](https://github.com/drakmor/ShadowMountPlus) will pick it up and install a tile in the media tab
    - Open home screen managers settings menu from this tile. 
+>  [!CAUTION]
+>   When using this method you will always have to start HSM after the jailbreak to use its features.
 
 The menu opens in the PS5 browser. A notification shows the address for your phone or PC: `http://<PS5-IP>:8090`.
 
