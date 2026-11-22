@@ -16,7 +16,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
 ---
 
 > [!IMPORTANT]
-> Your changes to the home screen stay in place even when the PS5 isn't jailbroken. Home Screen Manager writes them into the console's own database, so they survive restarts and boots. Some features, like opening folders, will not work unless Home Screen Manager is loaded either through autoload, a payload manager or the tile in the media tab after the jailbreak. Read the [Installation Guide](https://github.com/lazyboy6791/PS5HomeScreenManager#installation-guide) for more details. For the best experience access HSM from a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090`.
+> Your changes to the home screen stay in place even when the PS5 isn't jailbroken. Home Screen Manager writes them into the console's own database, so they survive restarts and boots. Some features, like opening folders, will not work unless Home Screen Manager is loaded either through autoload, a payload manager or the tile in the media tab after the jailbreak. Read the [Installation Guide](https://github.com/lazyboy6791/PS5HomeScreenManager#installation-guide) for more details. For the best experience access the HSM menu from a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090`.
 
 ## Home Screen Manager Features
 
