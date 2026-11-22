@@ -51,7 +51,7 @@ There are 2 methods to install home screen manager. For best results use both bu
 **Method 1:** 
    - Start [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
    - **From within Payload Manager:** Go to **Settings > Multiple Payload Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download it from there. Updates will also be picked up if you choose this method.
-   - **Phone or PC:** On the same network as the PS5 open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file on your device.
+   - **Phone or PC:** In the same network as the PS5 open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file on your device.
    - **USB drive:** Copy the file to the root of an exFAT or FAT32 drive, in payload manager go to **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
    - **FTP or File Manager:** Copy the file from your device to `/data/pldmgr/payloads/`.
    - Launch **HomeScreenManager** from the Payload Manager.
@@ -60,7 +60,7 @@ There are 2 methods to install home screen manager. For best results use both bu
 > Add HSM to payload managers autoloader so its features are always available.
 > - In Payload Manager, go to **Autoload > Add Item to Sequence** and choose **HomeScreenManager**.
 > - In Home Screen Manager, open the **Start-Up Options** and choose **Quiet when started by Autoload**.
-> - From then on HSM will start silently in the background. The menu will still be accessible through a PC or phone on the same network as the PS5 under `http://<PS5-IP>:8090` and the menu in the PS5 browser is also still accessible by re-launching HSM again through payload manager or the **tile in the media tab** as described in **Method 2**. 
+> - From then on HSM will start silently in the background. The menu will still be accessible through a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090` and the menu in the PS5 browser is also still accessible by re-launching HSM again through payload manager or the **tile in the media tab** as described in **Method 2**. 
 
 **Method 2:** 
    - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page or the [Prospero Store](https://prosperostore.net/app/PPSA97979/)
@@ -245,7 +245,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 
 **Why can't Game Library and App Library be hidden?** The home screen adds those two tiles itself.
 
-**Can I use it from my phone?** Yes. Open `http://<PS5-IP>:8090` on any device on the same network.
+**Can I use it from my phone?** Yes. Open `http://<PS5-IP>:8090` on any device in the same network.
 
 </details>
 
