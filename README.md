@@ -63,7 +63,7 @@ There are 2 methods to install home screen manager. For best results use both bu
    - Once it finishes [ShadowMount+](https://github.com/drakmor/ShadowMountPlus) will pick it up and install a tile in the media tab
    - Open home screen managers settings menu from this tile. 
 >  [!IMPORTANT]
->   When using method 2 you will always have to start HSM manually after the jailbreak to use its features.
+>   When using only method 2 you will always have to start HSM manually after the jailbreak to use its features.
 
 The menu opens in the PS5 browser. A notification shows the address for your phone or PC: `http://<PS5-IP>:8090`.
 
