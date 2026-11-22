@@ -56,14 +56,14 @@ There are 2 methods to install home screen manager. For best results use both bu
    - **USB drive:** copy the file to the top of an exFAT or FAT32 drive. Turn on **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
    - **FTP:** copy the file to `/data/pldmgr/payloads/`.
    - Launch **HomeScreenManager** from the Payload Manager dashboard and/or add it to its autoloader.
-   - The menu opens in the PS5 browser and is also accessible on your PC or phone under `http://<PS5-IP>:8090`.
+   - The menu opens in the PS5 browser and is also accessible on a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090`.
 
 **Method 2:** 
    - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page or the [Prospero Store](https://prosperostore.net/app/PPSA97979/)
    - Copy the unzipped PPSA97979 folder to `/data/homebrew/` on your PS5 via **FTP or File Manager**.
    - Once it finishes [ShadowMount+](https://github.com/drakmor/ShadowMountPlus) will pick it up and install a tile in the media tab
    - Click on the tile and home screen manager will be loaded
-   - The menu opens in the PS5 browser and is also accessible on your PC or phone under `http://<PS5-IP>:8090`.
+   - The menu opens in the PS5 browser and is also accessible on a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090`.
 >  [!IMPORTANT]
 >   When using only method 2 you will always have to start HSM manually after the jailbreak to use its features.
 
