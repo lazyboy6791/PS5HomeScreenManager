@@ -49,7 +49,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 There are 2 methods to install home screen manager. For best results use both but you will also have to update them independently.
 
 **Method 1:** 
-   - Start **Payload Manager** on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
+   - Start [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
    - **From within Payload Manager:** Go to **Settings > Multiple Payload Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download `HomeScreenManager.elf` from there. Updates will also be picked up if you choose this method.
    - **Phone or PC:** open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file.
    - **USB drive:** copy the file to the top of an exFAT or FAT32 drive. Turn on **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
