@@ -61,7 +61,7 @@ There are 2 methods to install home screen manager. For best results use both bu
 > Add HSM to payload managers autoloader so its features are always available.
 > - In Payload Manager, go to **Autoload > Add Item to Sequence** and choose **HomeScreenManager**.
 > - In Home Screen Manager, open **Home Screen Manager Start-Up Options** and choose **Quiet when started by Autoload**.
-> From then on, HSM will start silently in the background, the menu will still be accessible through a PC or Phone on the same network as the PS5 under `http://<PS5-IP>:8090` and the menu in the PS5 browser is also still opened by launching HSM again through payload manager or the tile in the media tab as described in Method 2. 
+> - From then on, HSM will start silently in the background, the menu will still be accessible through a PC or Phone on the same network as the PS5 under `http://<PS5-IP>:8090` and the menu in the PS5 browser is also still opened by launching HSM again through payload manager or the tile in the media tab as described in Method 2. 
 
 **Method 2:** 
    - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page or the [Prospero Store](https://prosperostore.net/app/PPSA97979/)
