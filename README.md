@@ -45,7 +45,7 @@ Create Folders; Rearrange, Hide & Rename Tiles; Change Home Screen Music, Tile I
 - `HomeScreenManager.elf` and/or **PPSA979797.zip** from the [Releases](../../releases) page
 
 
-## Install 
+## Installation Guide
 
 There are 2 methods to install home screen manager. For best results use both but you will also have to update them independently.
 
