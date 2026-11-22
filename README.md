@@ -72,7 +72,7 @@ There are 2 methods to install home screen manager. For best results use both bu
 >  [!IMPORTANT]
 > When using only method 2 you will always have to start HSM manually after the jailbreak to use its features.
 
-## Getting started
+## Getting Started
 
 | To... | Do this |
 |---|---|
@@ -82,20 +82,18 @@ There are 2 methods to install home screen manager. For best results use both bu
 | Start a game or app | Press **Open**. It works for hidden ones too. |
 | See your changes | Hiding and folders show after you open and close any game, or restart. Names, pictures and backgrounds show after **Refresh home screen now**. |
 
-## The menu
+## The Menu
 
-The menu is one page of sections. Every section is closed when the page opens, so you open only the one you need:
-
-1. **Home Screen Folders and Tiles**: your folders and tiles, with the **Folder options** inside it.
+1. **Home Screen Folders and Tiles**: your folders and tiles, with more **Folder options** inside.
 2. **Tile hiding options**
 3. **Change and Edit Wallpapers**
-4. **Clean Up Game Names**
-5. **Home Screen Manager Start-Up Options**
-6. **Update settings**
-7. **Export & Import**
-8. **More & troubleshooting**
-
-The **Light mode / Dark mode** button at the top switches the colours. The choice is kept in Home Screen Manager, so your phone, your PC and the folder page on the TV all follow it. A page that is already open changes the next time you open it.
+4. **Home Screen Music**
+5. **Where System Tiles Open**
+6. **Clean Up Game Names**
+7. **Home Screen Manager Start-Up Options**
+8. **Update settings**
+9. **Export & Import**
+10. **More & troubleshooting**
 
 ## Folders
 
