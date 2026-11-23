@@ -163,9 +163,8 @@ Custom names, pictures and backgrounds stay in place: when the PS5 writes a game
 Open **Export & Import** in the menu to save everything Home Screen Manager manages in one file: your folders (with their pictures and backgrounds), the tiles you hid, custom names, pictures and backgrounds, the home screen order and the settings. Your games are not in it.
 
 - **Export to USB drive** writes `HomeScreenManager-backup-<date>.zip` to the top of a drive. **Download to this phone or PC** saves the same file there.
-- **Import (experimental)** reads a backup from a USB drive or from your phone or PC, shows what is in it, and only changes anything after you confirm. Folders are added next to the ones you have, the hidden tiles and custom names, pictures and backgrounds are restored, and your saved order and settings are replaced by the backup's. Games that aren't installed are skipped.
+- **Import** reads a backup from a USB drive or from your phone or PC, shows what is in it, and only changes anything after you confirm. Folders are added next to the ones you have, the hidden tiles and custom names, pictures and backgrounds are restored, and your saved order and settings are replaced by the backup's. Games that aren't installed are skipped.
 - Creating folders uses the console's installer, so an import can take up to about 10 minutes depending on your firmware. The menu shows a timer and which folder it is on, and the home screen refreshes by itself at the end.
-- The import hasn't been tested on a console yet. Export your current setup first.
 
 ## Names, pictures and backgrounds
 
