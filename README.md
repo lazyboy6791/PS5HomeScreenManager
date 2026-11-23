@@ -120,6 +120,32 @@ The picture is converted once for each file format and the result is shared betw
 
 **Share one file between games (experimental).** Instead of one converted file per game, one file per format is kept in a folder of its own (`hsm_shared` in `appmeta`) and every game points at it. It is much smaller and faster. It is off by default: try it on a few games first, restart the console once, and check that the backgrounds are still there. The shared files are removed when no game uses them any more.
 
+**Folders.** Your folders are listed as a group of their own, not ticked at the start (**Select all** includes them). One picture goes on every folder you tick, and all folders are registered with the console in one go, so it is quick. **Overwrite** and **Use the original** work for folders too.
+
+**System tiles.** PlayStation Plus, PlayStation Store, TV & Video, Music, All Apps, Explore, Game Library, Media Gallery, App Library, Share Play, Disc Player, Unsupported Disc and Remote Play (13 tiles) can take a background too, one by one (**Edit** next to the tile) or together with the rest. The console keeps these backgrounds as files in `/system_ex/vsh_asset`, so HSM writes its picture there in the same kind of file. The first time a tile is changed, its original file is copied to `/data/homescreenmanager/sysbg`, and **Use the original** puts that copy back byte for byte (**Use the original for all** also covers these). The home screen shows a new background after it restarts, and a change to these files may need a console restart on some firmware.
+
+**System tile pictures.** The picture of PlayStation Store, PlayStation Plus, Game Library, App Library, Media Gallery, Explore, TV & Video, Music and All Apps can be changed in the editor like a game's (**Edit** next to the tile, only there, not in the bulk changer). These pictures are files of the console's (`icon0.png` inside the tile's own folder under `/system_ex/rnps/apps`, or under `/mnt/rnps/apps` on firmware that keeps a live copy, which is used first). The first time a tile is changed its own file is copied to `/data/homescreenmanager/sysicon`, and **Use the original** puts it back byte for byte (**Use the original for all** covers these too). The home screen shows a new picture after it restarts.
+
+## Where the System Tiles Open
+
+In the menu section **Where the System Tiles Open**, the PlayStation Store, PlayStation Plus and Welcome tiles can be made to open something else: a link from the list, or one you type (a web page, or a console link). Only that tile's launch link is changed (`pprDeeplinkUri` and `DEEPLINK_URI` in the console's app database, and the `DEEPLINK_URI` row in `appinfo.db`); the name and picture are not touched. The first time a tile is changed, what it held is saved, and **Use the original** (or Undo everything) puts it back, even if the tile had no link at all. If the console writes its own link back, Home Screen Manager puts yours back at the next start. The home screen refreshes by itself after a change. This changes the console's own database: if a tile doesn't open any more, use the original. The idea comes from [JailbreakStore]by maj0r (MIT licence).
+
+## Home Screen Music
+
+Plays your own song on the home screen. In the menu section **Home screen music**, pick a WAV or MP3 song from a USB drive or upload one from the device you are using (up to 100 MB). Home Screen Manager converts it to the console's music format (ATRAC9) itself, so you don't need to make an `.at9` file:
+
+- the loudness is matched to the console's own music automatically, and a **volume** slider (about -12 dB to +12 dB, 0 by default) moves it from there. Changing the volume means converting the song again;
+- songs longer than 5 minutes are cut at 5 minutes, then the music loops (the limit is one number, `MUSIC_MAX_SECONDS`, in `src/audioin.h`);
+- mono and stereo songs are used as they are; a song with more channels is mixed down to stereo (the other speakers stay silent);
+- the ends are faded briefly so the loop doesn't click, a **Preview** player plays the chosen song in the menu (if the browser can play it), and the menu shows the name, length, whether it was cut and the level that was picked, with a progress bar and a **Cancel** button;
+- the result is decoded again and compared with the song before anything is replaced; if the check fails, the console goes to sleep during the job or it is cancelled, the console's file is left as it was.
+
+Only `/system_ex/vsh_asset/bgm_home.at9` is touched, no other music or sound. The first time, the console's file is copied to `/data/homescreenmanager/music`, and **Use the original music** (and **Undo everything I changed**) puts it back byte for byte. If the file was changed by something else in the meantime (a firmware update, another tool), it is left alone and the menu tells you. If another tool, such as Prospero Themes, changed the music earlier, the "original" HSM keeps is that tool's file; HSM can't tell. The new music may only play after the home screen or the console has restarted. A game or app that has music of its own plays that music when you highlight it; the home screen music only plays on tiles without their own (this is the console's behaviour and has no setting). It is tested on firmware 13.60; other firmware versions may differ.
+
+## Profile Picture
+
+The **Profile Picture** section changes the picture of any user on the console. Choose the user, pick a picture (upload one or take it from a USB drive), crop it square and save. Home Screen Manager writes the four sizes the home screen reads (`avatar64.dds`, `avatar128.dds`, `avatar260.dds`, `avatar440.dds`) into that user's folder under `/system_data/priv/cache/profile/`, and an empty `online.json` only if there is none. The console's own files are kept the first time; **Use the original** puts them back exactly, and **Undo everything** does it for every user. Then the home screen refreshes; if the old picture stays, restart the home screen or the console. A user who is signed in to PSN may get the picture overwritten by the console again.
+
 ## Clean Up Game Names
 
 Open **Clean Up Game Names** to tidy many names in one go. Tick the rules you want: remove &trade;, &reg; and &copy;, remove platform tags such as (PS4) and (PS5), clean up spaces, and **Fix capital letters**. Add your own words and phrases to remove, such as "Remastered", in any language, or add one of the suggestions with a tap.
