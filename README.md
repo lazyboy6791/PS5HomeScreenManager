@@ -268,9 +268,9 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 
 </details>
 
-## Native app (experimental)
+## Native app
 
-The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). After an update from GitHub or USB, the tile starts the updated copy (kept in `/data/homescreenmanager`) when it is newer than the one bundled in the app.
+The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). To update the app, build and install a new version of it.
 
 ## Building from source
 
