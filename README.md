@@ -283,6 +283,8 @@ See [BUILDING.md](BUILDING.md). It covers the PS5 build, the desktop test suite 
 - [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) by itsPLK
 - Home-screen research: [PS5-TabShifter](https://github.com/xvvulcanvx/PS5-TabShifter), [psgfx](https://github.com/elripalda/psgfx), [PS5 Art Swap](https://github.com/griches/PS5_ArtSwap) and the [PS5 Developer Wiki](https://www.psdevwiki.com/ps5/Title_ID)
 - [SQLite](https://sqlite.org) and [stb](https://github.com/nothings/stb) (public domain)
+- Home screen music: the ATRAC9 encoder is a C port of the one in [Prospero Themes](https://github.com/Darkatek7/ProsperoThemes) by Darkatek7 (GPL-3.0-or-later), itself a port of the encoder by [Blaze414](https://github.com/Blaze414/ps5-theme) (GPL-3.0-or-later), which builds on [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) by Alex Barney (MIT). MP3 files are read with [minimp3](https://github.com/lieff/minimp3) by Lieff (CC0)
+- Where the system tiles open: the idea and the database layout come from JailbreakStore by maj0r (MIT)
 
 ## License
 
