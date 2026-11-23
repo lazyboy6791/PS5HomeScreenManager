@@ -10,7 +10,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
 ![Platform Playstation 5](https://img.shields.io/badge/Platform-PlayStation%205-003791?style=flat&amp;logo=playstation)
 ![Tested on FW 13.60](https://img.shields.io/badge/Tested-FW%2013.60-2ea44f)
 ![Version 2.2.5](https://img.shields.io/badge/Version-2.2.5-7a4bf2)
-![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-ff0032)
+![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-ffb400)
 
 </div>
 
