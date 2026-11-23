@@ -84,15 +84,16 @@ There are 2 methods to install home screen manager. For best results use both bu
 ## The Menu
 
 1. **Home Screen Folders and Tiles**: your folders and tiles, with more **Folder options** inside.
-2. **Tile hiding options**
-3. **Change and Edit Wallpapers**
-4. **Home Screen Music**
-5. **Where System Tiles Open**
-6. **Clean Up Game Names**
-7. **Home Screen Manager Start-Up Options**
-8. **Update settings**
-9. **Export & Import**
-10. **More & troubleshooting**
+   - Folder Options
+3. **Tile hiding options**
+4. **Change and Edit Wallpapers**
+5. **Home Screen Music**
+6. **Where System Tiles Open**
+7. **Clean Up Game Names**
+8. **Home Screen Manager Start-Up Options**
+9. **Update settings**
+10. **Export & Import**
+11. **More & troubleshooting**
 
 ## Folders
 
