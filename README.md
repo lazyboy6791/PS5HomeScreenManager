@@ -7,8 +7,8 @@
 **It only does everything on your PS5 home screen.**<br>
 Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange, Hide & Rename any Tile and so much more...
 
-![Tested on FW 13.60](https://img.shields.io/badge/Tested-FW%2013.60-2ea44f)
-![Version 2.2.5](https://img.shields.io/badge/Version-2.2.5-7a4bf2)
+![Tested on FW 13.60](https://img.shields.io/badge/Tested-on-FW%2013.60-2ea44f)
+![Version 2.2.5](https://img.shields.io/badge/Latest-Version-2.2.5-7a4bf2)
 ![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-555)
 
 </div>
