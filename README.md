@@ -219,13 +219,7 @@ This project used to be called **Home Hider**. The first time the renamed versio
 
 ## Updating
 
-Go to **Updates** in the menu:
-
-- **USB:** copy the new `HomeScreenManager.elf` to the top of a USB drive and plug it in.
-- **GitHub:** enter this repository under **Update settings**. Downloads are checked against GitHub's SHA-256 checksum.
-- **File:** upload it from your phone or PC.
-
-Opening **Update settings** looks for a newer version on a USB drive; nothing checks in the background. Nothing installs until you press **Install**. The old version is kept in `/data/homescreenmanager/backup/`.
+Home Screen Manager does not update itself. **Update settings** in the menu can look on GitHub (when you press **Check for updates**, and when it starts, if that switch is on) and shows a notice when a newer version exists. To update, download the new release from GitHub and load it the way you loaded the first one (Payload Manager, or the app from `native-app/`).
 
 ## Undo
 
