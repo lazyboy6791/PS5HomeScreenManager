@@ -85,8 +85,8 @@ There are 2 methods to install home screen manager. For best results use both bu
 
 ## The Menu
 
-1. **Folders and Tiles**: your folders and tiles.
-2. **Folder and Tile Options**: the folder switches and the two tile hiding switches.
+1. **Folders and Tiles**
+2. **Folder and Tile Options**
 3. **Change and Edit Wallpapers**
 4. **Home Screen Music**
 5. **Profile Picture**
