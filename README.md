@@ -25,18 +25,19 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
 
    - **Create Your Own Folders**
    - **Rename any Tile**
-   - **Hide Anything**
-   - **Custom Icons on any Tile**
-   - **Custom Wallpapers On any App/Game/System Tile or Folder**
-   - **Rearrange Tiles and/or Move Them Between Tabs**
-   - **Change Your Home Screen Music**
-   - **Change the Profile Picture of Any User**
-   - **Clean Up Your Game Names**
+   - **Hide any Tile**
+   - **Rearrange Tiles and Folders**
+   - **Move Tiles and Folders Between Tabs**
+   - **Custom Icons on any Tile or Folder**
+   - **Start any Game/App from the Menu through PC or Phone**
+   - **Custom Wallpapers on any Tile or Folder**
+   - **Custom Home Screen Music**
+   - **Custom Profile Picture ((Avatar)**
    - **Redirect to Where Your System Tiles Open**
+   - **Clean Up Your Game Names**
+   - **Quiet Autoload**
    - **Export & Import All of Your Customizations**
    - **Light and Dark Mode**
-   - **Quiet Autoload**
-   - **Open Anything from the Menu through PC or Phone**
 
 
 ## Requirements
