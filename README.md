@@ -23,6 +23,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
 
 **NOTHING IS EVER DELETED! A SAFETY BACKUP IS MADE OF EVERYTHING! EVERY CHANGE CAN BE UNDONE!**
 
+   - **[Installation Guide](https://github.com/lazyboy6791/PS5HomeScreenManager#installation-guide)**
    - **Create Your Own Folders**
    - **Rename any Tile**
    - **Hide any Tile**
