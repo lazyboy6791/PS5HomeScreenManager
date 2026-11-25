@@ -7,10 +7,9 @@
 **It only does everything on your PS5 home screen.**<br>
 Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange, Hide & Rename any Tile and so much more...
 
-![Platform Playstation 5](https://img.shields.io/badge/Platform-PlayStation%205-003791?style=flat&amp;logo=playstation)
-![Tested on FW 13.60](https://img.shields.io/badge/Tested-FW%2013.60-2ea44f)
-![Version 2.2.5](https://img.shields.io/badge/Version-2.2.5-7a4bf2)
-![License GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-fcca55)
+![Tested on FW 13.60](https://img.shields.io/badge/tested-FW%2013.60-2ea44f)
+![Version 2.2.3](https://img.shields.io/badge/version-2.2.5-7a4bf2)
+![License GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-555)
 
 </div>
 
@@ -30,6 +29,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **Custom Wallpapers On any App/Game/System Tile or Folder**
    - **Rearrange Tiles and/or Move Them Between Tabs**
    - **Change Your Home Screen Music**
+   - **Change the Profile Picture of Any User**
    - **Clean Up Your Game Names**
    - **Redirect to Where Your System Tiles Open**
    - **Export & Import All of Your Customizations**
@@ -51,10 +51,10 @@ There are 2 methods to install home screen manager. For best results use both bu
 
 **Method 1:** 
    - Start [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) on the PS5 and add the latest `HomeScreenManager.elf` from the [Releases](../../releases) page in any one of these ways:
-      - **From within Payload Manager:** Go to **Settings > Multiple Payload Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download it from there. Updates will also be picked up if you choose this method.
-      - **Phone or PC:** In the same network as the PS5 open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file on your device.
-      - **USB drive:** Copy the file to the root of an exFAT or FAT32 drive, in payload manager go to **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
-      - **FTP or File Manager:** Copy the file from your device to `/data/pldmgr/payloads/`.
+   - **From within Payload Manager:** Go to **Settings > Multiple Payload Sources > Manage Sources**, add [this URL](https://raw.githubusercontent.com/lazyboy6791/PS5HomeScreenManager/main/payloads.json) and download it from there. Updates will also be picked up if you choose this method.
+   - **Phone or PC:** In the same network as the PS5 open `http://<PS5-IP>:8084`, go to **Get Payloads > Upload ELF Payload**, and choose the file on your device.
+   - **USB drive:** Copy the file to the root of an exFAT or FAT32 drive, in payload manager go to **Settings > Scan USB Payloads**, then go to **Get Payloads > USB Storage > Copy to Internal**.
+   - **FTP or File Manager:** Copy the file from your device to `/data/pldmgr/payloads/`.
    - Launch **HomeScreenManager** from the Payload Manager.
    - The menu opens in the PS5 browser and is also accessible on a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090`.
 >  [!Note]
@@ -77,23 +77,24 @@ There are 2 methods to install home screen manager. For best results use both bu
 | To... | Do this |
 |---|---|
 | Hide a tile | Find it with the search box or the tab filters, then press **Hide**. **Show** brings it back. |
-| Make a folder | Press **+ New folder**, give it a name, choose a tab and colour, tap the games, and press **Save folder**. |
+| Make a folder | Press **Create a New Folder**, give it a name, choose a tab and colour, tap the games, and press **Save folder**. |
 | Rename a tile, or change its picture or background | Press **Edit** next to it. |
 | Start a game or app | Press **Open**. It works for hidden ones too. |
 | See your changes | Hiding and folders show after you open and close any game, or restart. Names, pictures and backgrounds show after **Refresh home screen now**. |
 
 ## The Menu
 
-1. **Home Screen Folders and Tiles**: your folders and tiles, with more **Folder options** inside.
-2. **Tile hiding options**
+1. **Folders and Tiles**: your folders and tiles.
+2. **Folder and Tile Options**: the folder switches and the two tile hiding switches.
 3. **Change and Edit Wallpapers**
 4. **Home Screen Music**
-5. **Where System Tiles Open**
-6. **Clean Up Game Names**
-7. **Home Screen Manager Start-Up Options**
-8. **Update settings**
-9. **Export & Import**
-10. **More & troubleshooting**
+5. **Profile Picture**
+6. **Redirect Where System Tiles Open**
+7. **Clean Up Game Names**
+8. **Start-Up Options**
+9. **Update Settings**
+10. **Export & Import**
+11. **Troubleshooting & More**
 
 ## Folders
 
@@ -113,11 +114,11 @@ A folder is one tile on the **Games** or **Media** tab. Selecting it opens a pag
 
 Open **Change and Edit Wallpapers** to give many games the same background in one go. It shows what it will do first, makes a copy of the home screen database (`app.db.before-bulk`) before it writes anything, and restarts the home screen by itself when it is done, with a message and a counter while it runs.
 
-Choose one picture (from a USB drive, your phone or PC, or the pictures folder). Home Screen Manager crops it to 16:9 from the middle, shows the result with warnings if it is small or not 16:9, and lists every game with a tick box and **Select all** / **Select none** buttons. Games are ticked. Apps and system tiles that can take a background are listed and not ticked. Games that have no background entry in the database can't take one and are skipped, and folders are not included. **Overwrite backgrounds I've already set** is off by default, so your own work is never undone by accident.
+Choose one picture (from a USB drive, your phone or PC, or the pictures folder). Home Screen Manager crops it to 16:9 from the middle, shows the result with warnings if it is small or not 16:9, and lists every game with a tick box and **Select all** / **Select none** buttons. The list is there as soon as you open the section, and nothing is ticked to begin with. Apps, folders and system tiles that can take a background are listed too. Games that have no background entry in the database can't take one and are skipped, and folders are not included. **Overwrite backgrounds I've already set** is off by default, so your own work is never undone by accident.
 
 The picture is converted once for each file format and the result is shared between the games (linked when the drive allows it, copied when not), so a big library takes seconds to minutes, not hours. The log says how many files were linked and how many were copied. If the console's drive gets almost full, the job stops by itself and what is done stays. **Use the original for all** puts every original background back, with the same message and counter.
 
-**Games without a background entry.** They are in the normal list, ticked like the others, and get your picture too: HSM fills their empty slots in the home screen database, in the format the other tiles use in the same place (the log reports what it found and chose). They carry the note "game has no own wallpaper", because **Use the original** gives them back no wallpaper at all. System tiles (Game Library, Media Gallery and so on) are not included: the home screen does not keep a background that is given to them. The share box does not apply to these games, they get files of their own.
+**Games without a background entry.** They are in the normal list like the others, and get your picture too when you tick them: HSM fills their empty slots in the home screen database, in the format the other tiles use in the same place (the log reports what it found and chose). They carry the note "game has no own wallpaper", because **Use the original** gives them back no wallpaper at all. System tiles (Game Library, Media Gallery and so on) are not included: the home screen does not keep a background that is given to them. With **Share one file between games** ticked, their empty slots point at the shared files too, so they take no space of their own.
 
 **Share one file between games (experimental).** Instead of one converted file per game, one file per format is kept in a folder of its own (`hsm_shared` in `appmeta`) and every game points at it. It is much smaller and faster. It is off by default: try it on a few games first, restart the console once, and check that the backgrounds are still there. The shared files are removed when no game uses them any more.
 
@@ -127,13 +128,13 @@ The picture is converted once for each file format and the result is shared betw
 
 **System tile pictures.** The picture of PlayStation Store, PlayStation Plus, Game Library, App Library, Media Gallery, Explore, TV & Video, Music and All Apps can be changed in the editor like a game's (**Edit** next to the tile, only there, not in the bulk changer). These pictures are files of the console's (`icon0.png` inside the tile's own folder under `/system_ex/rnps/apps`, or under `/mnt/rnps/apps` on firmware that keeps a live copy, which is used first). The first time a tile is changed its own file is copied to `/data/homescreenmanager/sysicon`, and **Use the original** puts it back byte for byte (**Use the original for all** covers these too). The home screen shows a new picture after it restarts.
 
-## Where the System Tiles Open
+## Redirect Where System Tiles Open
 
-In the menu section **Where the System Tiles Open**, the PlayStation Store, PlayStation Plus and Welcome tiles can be made to open something else: a link from the list, or one you type (a web page, or a console link). Only that tile's launch link is changed (`pprDeeplinkUri` and `DEEPLINK_URI` in the console's app database, and the `DEEPLINK_URI` row in `appinfo.db`); the name and picture are not touched. The first time a tile is changed, what it held is saved, and **Use the original** (or Undo everything) puts it back, even if the tile had no link at all. If the console writes its own link back, Home Screen Manager puts yours back at the next start. The home screen refreshes by itself after a change. This changes the console's own database: if a tile doesn't open any more, use the original. The idea comes from [JailbreakStore]by maj0r (MIT licence).
+In the menu section **Redirect Where System Tiles Open**, the PlayStation Store, PlayStation Plus and Welcome tiles can be made to open something else: a link from the list, or one you type (a web page, or a console link). Only that tile's launch link is changed (`pprDeeplinkUri` and `DEEPLINK_URI` in the console's app database, and the `DEEPLINK_URI` row in `appinfo.db`); the name and picture are not touched. The first time a tile is changed, what it held is saved, and **Use the original** (or Undo everything) puts it back, even if the tile had no link at all. If the console writes its own link back, Home Screen Manager puts yours back at the next start. The home screen refreshes by itself after a change. This changes the console's own database: if a tile doesn't open any more, use the original. The idea comes from [JailbreakStore]by maj0r (MIT licence).
 
 ## Home Screen Music
 
-Plays your own song on the home screen. In the menu section **Home screen music**, pick a WAV or MP3 song from a USB drive or upload one from the device you are using (up to 100 MB). Home Screen Manager converts it to the console's music format (ATRAC9) itself, so you don't need to make an `.at9` file:
+Plays your own song on the home screen. In the menu section **Home Screen Music**, pick a WAV or MP3 song from a USB drive or upload one from the device you are using (up to 100 MB). Home Screen Manager converts it to the console's music format (ATRAC9) itself, so you don't need to make an `.at9` file:
 
 - the loudness is matched to the console's own music automatically, and a **volume** slider (about -12 dB to +12 dB, 0 by default) moves it from there. Changing the volume means converting the song again;
 - songs longer than 5 minutes are cut at 5 minutes, then the music loops (the limit is one number, `MUSIC_MAX_SECONDS`, in `src/audioin.h`);
@@ -145,7 +146,9 @@ Only `/system_ex/vsh_asset/bgm_home.at9` is touched, no other music or sound. Th
 
 ## Profile Picture
 
-The **Profile Picture** section changes the picture of any user on the console. Choose the user, pick a picture (upload one or take it from a USB drive), crop it square and save. Home Screen Manager writes the four sizes the home screen reads (`avatar64.dds`, `avatar128.dds`, `avatar260.dds`, `avatar440.dds`) into that user's folder under `/system_data/priv/cache/profile/`, and an empty `online.json` only if there is none. The console's own files are kept the first time; **Use the original** puts them back exactly, and **Undo everything** does it for every user. Then the home screen refreshes; if the old picture stays, restart the home screen or the console. A user who is signed in to PSN may get the picture overwritten by the console again.
+The **Profile Picture** section changes the picture of any user on the console. Choose the user, pick a picture (upload one or take it from a USB drive), crop it square and save. Home Screen Manager writes the four `avatar` files the console keeps for the picture (`avatar64.dds` to `avatar440.dds`) into that user's folder under `/system_data/priv/cache/profile/`, and an `online.json` with the user name if there is none (the other picture files in that folder are only backed up and put back by **Use the original**, never changed). The console's own files are kept the first time; **Use the original** puts them back exactly, and **Undo everything** does it for every user. The console shows the new picture when the home screen comes back (the PlayStation button in a game, closing a game); a refresh or restart also does it. A user who is signed in to PSN may get the picture overwritten by the console again.
+
+**Multiple Profile Pictures Playlist.** The lower part of the **Profile Picture** section (**Multiple Profile Pictures Playlist**, the same layout as the single picture above it) is for this: **Add to the list** collects up to 12 pictures for a user; tap one to use it now. Press **Use this list** and, with two or more pictures in the list, Home Screen Manager picks a random one at once and from then on quietly writes another one (picked at random: every picture of the list is shown once before any comes again) when Home Screen Manager starts and when a game starts. The console shows the new picture when the home screen comes back: the PlayStation button in the game, or closing it. No restart is needed. **Stop using the list** or **Use the original picture** switches this off and keeps the list.
 
 ## Clean Up Game Names
 
@@ -210,7 +213,7 @@ Because the PS5 re-sorts by recency, Home Screen Manager re-applies your order e
 
 ## Keep folders first
 
-Turn on **Keep folders first** (in **Folder options**, inside Home Screen Folders and Tiles) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Screen Manager next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in **Tile hiding options** turns that off). Home Screen Manager keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
+Turn on **Keep folders first** (in **Folder and Tile Options**) and your folders stay in the first spots of their tab, ahead of every game and app, even after you play something else. Folders still reorder among themselves: the one you open moves to the front of the folders (when you also have a saved order, it moves to the front a moment later, when Home Screen Manager next looks). A game that is running stays in front of the folders until you close it. A hidden game (one inside a folder, say) also stays on screen while it runs, so you can close it from the home row, and is hidden again after you close it (**Show a running game** in **Tile hiding options** turns that off). Home Screen Manager keeps this in place while it's running, so **add it to Autoload**. Switch it off and the PS5's own order comes back. Press **Refresh home screen now** (or open and close any game) to see a change.
 
 **Other apps that change the home screen.** Apps such as PS4 Mount or ShadowMountPlus re-register games, and the console then reshuffles tiles while they work: folders can show up on the Media tab and hidden games can appear for a moment. Home Screen Manager waits until the other app is done (a missing folder tile is only reinstalled after it has been missing for 45 seconds and the home screen database has been quiet for 30 seconds), then puts everything back by itself. It does not restart the home screen, so open and close any game or folder to redraw it sooner.
 
@@ -220,16 +223,16 @@ This project used to be called **Home Hider**. The first time the renamed versio
 
 ## Updating
 
-Home Screen Manager does not update itself. **Update settings** in the menu can look on GitHub (when you press **Check for updates**, and when it starts, if that switch is on) and shows a notice when a newer version exists. To update, download the new release from GitHub and load it the way you loaded the first one (Payload Manager, or the app from `native-app/`).
+Home Screen Manager does not update itself. **Update Settings** in the menu can look on GitHub (when it starts and when you open that section, if the start-up switch is on) and shows a notice when a newer version exists. To update, download the new release from GitHub and load it the way you loaded the first one (Payload Manager, or the app from `native-app/`).
 
 ## Undo
 
 | To undo | Do this |
 |---|---|
 | One tile | **Show**, or **Edit > Use the original…** |
-| Everything you hid | **More & troubleshooting > Show everything I hid** |
-| Everything Home Screen Manager changed | **More & troubleshooting > Undo everything I changed**. Takes back folders, moved tiles, order, hidden tiles, pictures, backgrounds and names, and leaves the rest of the database alone |
-| The whole database (last resort) | **More & troubleshooting > Restore original backup**, then restart the PS5. Games deleted since the backup can come back as blank tiles that only Safe Mode > Rebuild Database removes |
+| Everything you hid | **Troubleshooting & More > Show everything I hid** |
+| Everything Home Screen Manager changed | **Troubleshooting & More > Undo everything I changed**. Takes back folders, moved tiles, order, hidden tiles, pictures, backgrounds and names, and leaves the rest of the database alone |
+| The whole database (last resort) | **Troubleshooting & More > Restore original backup**, then restart the PS5. Games deleted since the backup can come back as blank tiles that only Safe Mode > Rebuild Database removes |
 | Without the jailbreak | Safe Mode > **Rebuild Database** |
 
 The first-run backup of the home-screen database is kept in `/data/homescreenmanager/backup/app.db.original`.
@@ -244,11 +247,11 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 | A change doesn't show | Hiding and folders: open and close any game, or restart. Names, pictures and backgrounds: **Refresh home screen now**. |
 | A folder shows "can't connect" | Home Screen Manager isn't running. Start it, or add it to Autoload. |
 | A web app in a folder shows "can't connect" | The payload behind it (for example, Payload Manager) isn't running. |
-| The menu opens at Autoload | **Home Screen Manager Start-Up Options > Quiet when started by Autoload**. |
+| The menu opens at Autoload | **Start-Up Options > Quiet when started by Autoload**. |
 | "Choose from USB drive" finds nothing | Use exFAT or FAT32, keep pictures within four folders of the top, and press **Refresh**. |
 | A background "can't be written yet" | That game uses an unusual texture format. |
 | "Port 8090 is busy" | Restart the PS5 and launch Home Screen Manager again. |
-| Anything else | **More & troubleshooting > Diagnostics** shows a log of every step, and lists of the tiles and directories that are not games, and **Copy log** copies it with one tap. Please include it when you open an issue. |
+| Anything else | **Troubleshooting & More > Diagnostics** shows a log of every step, and lists of the tiles and directories that are not games, and **Copy log** copies it with one tap. Please include it when you open an issue. |
 
 </details>
 
