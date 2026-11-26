@@ -9,7 +9,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
 
 ![Platform Playstation 5](https://img.shields.io/badge/Platform-PlayStation%205-003791?style=flat&amp;logo=playstation)
 ![Tested on FW 13.60](https://img.shields.io/badge/tested-FW%2013.60-2ea44f)
-![Version 2.2.3](https://img.shields.io/badge/version-2.2.5-7a4bf2)
+![Version 2.2.6](https://img.shields.io/badge/version-2.2.6-7a4bf2)
 ![License GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-555)
 
 </div>
@@ -33,12 +33,11 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **Start any Game/App from the Menu through PC or Phone**
    - **[Custom Wallpapers on any Tile or Folder](https://github.com/lazyboy6791/PS5HomeScreenManager#change-and-edit-wallpapers)**
    - **[Custom Home Screen Music](https://github.com/lazyboy6791/PS5HomeScreenManager#home-screen-music)**
-   - **[Custom Profile Picture ((Avatar)](https://github.com/lazyboy6791/PS5HomeScreenManager#profile-picture)**
+   - **[Custom Profile Picture ((Avatar)](https://github.com/lazyboy6791/PS5HomeScreenManager#profile-pictures)**
    - **[Redirect to Where Your System Tiles Open](https://github.com/lazyboy6791/PS5HomeScreenManager#redirect-where-system-tiles-open)**
    - **[Clean Up Game Names](https://github.com/lazyboy6791/PS5HomeScreenManager#clean-up-game-names)**
    - **Quiet Autoload**
    - **[Export & Import All of Your Customizations](https://github.com/lazyboy6791/PS5HomeScreenManager#export--import)**
-   - **[Playstation 5 App](https://github.com/lazyboy6791/PS5HomeScreenManager#playstation-5-app)**
    - **Light and Dark Mode**
 
 
@@ -91,10 +90,10 @@ There are 2 methods to install home screen manager. For best results use both bu
 1. **Folders and Tiles**
 2. **Folder and Tile Options**
 3. **Change and Edit Wallpapers**
-4. **Home Screen Music**
-5. **Profile Picture**
-6. **Redirect Where System Tiles Open**
-7. **Clean Up Game Names**
+4. **Profile Pictures**
+5. **Home Screen Music**
+6. **Clean Up Game Names**
+7. **Redirect Where System Tiles Open**
 8. **Start-Up Options**
 9. **Update Settings**
 10. **Export & Import**
@@ -128,9 +127,9 @@ The picture is converted once for each file format and the result is shared betw
 
 **System tiles.** PlayStation Plus, PlayStation Store, TV & Video, Music, All Apps, Explore, Game Library, Media Gallery, App Library, Share Play, Disc Player, Unsupported Disc and Remote Play (13 tiles) can take a background too, one by one (**Edit** next to the tile) or together with the rest. The console keeps these backgrounds as files in `/system_ex/vsh_asset`, so HSM writes its picture there in the same kind of file. The first time a tile is changed, its original file is copied to `/data/homescreenmanager/sysbg`, and **Use the original** puts that copy back byte for byte (**Use the original for all** also covers these). The home screen shows a new background after it restarts, and a change to these files may need a console restart on some firmware.
 
-**Default background.** Under the system tiles the list has one more entry, **Default background: every game and app without its own**. It is the console's main background file (`bg_hub_default.dds.zst`, next to the system tile ones), the picture that every game and app without a background of its own shows, including the ones whose entries HSM can't fill. It works like a system tile: the original is kept, **Use the original** puts it back byte for byte, and the home screen may need a restart to show it. It only appears if the console has that file.
+**Default background.** Below **Overwrite backgrounds I've already set** there is one more option, **Change default PS5 background**. It is the console's main background file (`bg_hub_default.dds.zst`, next to the system tile ones), the picture that every game and app without a background of its own shows, including the ones whose entries HSM can't fill. Tick it and press Apply to use your picture there. It works like a system tile: the original is kept, **Use the original for the selected** (with the option ticked) or **Use the original for all** puts it back byte for byte, and the home screen may need a restart to show it. It only appears if the console has that file.
 
-**System tile pictures.** The picture of PlayStation Store, PlayStation Plus, Game Library, App Library, Media Gallery, Explore, TV & Video, Music and All Apps can be changed in the editor like a game's (**Edit** next to the tile, only there, not in the bulk changer). These pictures are files of the console's (`icon0.png` inside the tile's own folder under `/system_ex/rnps/apps`, or under `/mnt/rnps/apps` on firmware that keeps a live copy, which is used first). The first time a tile is changed its own file is copied to `/data/homescreenmanager/sysicon`, and **Use the original** puts it back byte for byte (**Use the original for all** covers these too). The home screen shows a new picture after it restarts.
+**System tile pictures.** The picture of PlayStation Store, PlayStation Plus, Game Library, App Library, Media Gallery, Explore, TV & Video, Music and All Apps can be changed in the editor like a game's (**Edit** next to the tile, only there, not in the bulk changer). These pictures are files of the console's (`icon0.png` inside the tile's own folder under `/system_ex/rnps/apps`, or under `/mnt/rnps/apps` on firmware that keeps a live copy, which is used first). The first time a tile is changed its own file is copied to `/data/homescreenmanager/sysicon`, and **Use the original for the selected** (with the option ticked) or **Use the original for all** puts it back byte for byte (**Use the original for all** covers these too). The home screen shows a new picture after it restarts.
 
 ## Redirect Where System Tiles Open
 
@@ -148,11 +147,11 @@ Plays your own song on the home screen. In the menu section **Home Screen Music*
 
 Only `/system_ex/vsh_asset/bgm_home.at9` is touched, no other music or sound. The first time, the console's file is copied to `/data/homescreenmanager/music`, and **Use the original music** (and **Undo everything I changed**) puts it back byte for byte. If the file was changed by something else in the meantime (a firmware update, another tool), it is left alone and the menu tells you. If another tool, such as Prospero Themes, changed the music earlier, the "original" HSM keeps is that tool's file; HSM can't tell. The new music may only play after the home screen or the console has restarted. A game or app that has music of its own plays that music when you highlight it; the home screen music only plays on tiles without their own (this is the console's behaviour and has no setting). It is tested on firmware 13.60; other firmware versions may differ.
 
-## Profile Picture
+## Profile Pictures
 
-The **Profile Picture** section changes the picture of any user on the console. Choose the user, pick a picture (upload one or take it from a USB drive), crop it square and save. Home Screen Manager writes the four `avatar` files the console keeps for the picture (`avatar64.dds` to `avatar440.dds`) into that user's folder under `/system_data/priv/cache/profile/`, and an `online.json` with the user name if there is none (the other picture files in that folder are only backed up and put back by **Use the original**, never changed). The console's own files are kept the first time; **Use the original** puts them back exactly, and **Undo everything** does it for every user. The console shows the new picture when the home screen comes back (the PlayStation button in a game, closing a game); a refresh or restart also does it. A user who is signed in to PSN may get the picture overwritten by the console again.
+The **Profile Pictures** section changes the picture of any user on the console. Choose the user, pick a picture (upload one or take it from a USB drive), crop it square and save. Home Screen Manager writes the four `avatar` files the console keeps for the picture (`avatar64.dds` to `avatar440.dds`) into that user's folder under `/system_data/priv/cache/profile/`, and an `online.json` with the user name if there is none (the other picture files in that folder are only backed up and put back by **Use the original**, never changed). The console's own files are kept the first time; **Use the original** puts them back exactly, and **Undo everything** does it for every user. The console shows the new picture when the home screen comes back (the PlayStation button in a game, closing a game); a refresh or restart also does it. A user who is signed in to PSN may get the picture overwritten by the console again.
 
-**Multiple Profile Pictures Playlist.** The lower part of the **Profile Picture** section (**Multiple Profile Pictures Playlist**, the same layout as the single picture above it) is for this: **Add to the list** collects up to 12 pictures for a user; tap one to use it now. Press **Use this playlist** and, with two or more pictures in the list, Home Screen Manager picks a random one at once and from then on quietly writes another one (picked at random: every picture of the list is shown once before any comes again) when Home Screen Manager starts and when a game starts. The console shows the new picture when the home screen comes back: the PlayStation button in the game, or closing it. No restart is needed. **Stop using this playlist** or **Use the original picture** switches this off and keeps the list.
+**Multiple Profile Pictures Playlist.** The lower part of the **Profile Pictures** section (**Multiple Profile Pictures Playlist**, the same layout as the single picture above it) is for this: **Add to the list** collects up to 12 pictures for a user; tap one to use it now. Press **Use this playlist** and, with two or more pictures in the list, Home Screen Manager picks a random one at once and from then on quietly writes another one (picked at random: every picture of the list is shown once before any comes again) when Home Screen Manager starts and when a game starts. The console shows the new picture when the home screen comes back: the PlayStation button in the game, or closing it. No restart is needed. **Stop using this playlist** or **Use the original picture** switches this off and keeps the list.
 
 ## Clean Up Game Names
 
@@ -276,7 +275,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 
 </details>
 
-## Playstation 5 App
+## Native app
 
 The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). To update the app, build and install a new version of it.
 
