@@ -27,7 +27,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **[Create Your Own Folders](https://github.com/lazyboy6791/PS5HomeScreenManager#folders)**
    - **Rename any Tile**
    - **Hide any Tile**
-   - **Rearrange Tiles and Folders**
+   - **[Rearrange Tiles and Folders](https://github.com/lazyboy6791/PS5HomeScreenManager#rearrange-tiles-and-folders)**
    - **Move Tiles and Folders Between Tabs**
    - **Custom Icons on any Tile or Folder**
    - **Start any Game/App from the Menu through PC or Phone**
@@ -204,7 +204,7 @@ Each part has a **Use the original** button. The game's own files are never touc
 
 </details>
 
-## Reorder the home screen
+## Rearrange Tiles and Folders
 
 The PS5 sorts each tab by most-recently-played and has no manual reorder. The home-screen list shows your tiles in that same order, and lets you set your own instead.
 
