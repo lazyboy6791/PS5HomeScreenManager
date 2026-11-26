@@ -38,6 +38,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **[Clean Up Game Names](https://github.com/lazyboy6791/PS5HomeScreenManager#clean-up-game-names)**
    - **Quiet Autoload**
    - **[Export & Import All of Your Customizations](https://github.com/lazyboy6791/PS5HomeScreenManager#export--import)**
+   - **[Playstation 5 App](https://github.com/lazyboy6791/PS5HomeScreenManager#playstation-5-app)**
    - **Light and Dark Mode**
 
 
@@ -275,7 +276,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 
 </details>
 
-## Native app
+## Playstation 5 App
 
 The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). To update the app, build and install a new version of it.
 
