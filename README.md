@@ -38,6 +38,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **[Clean Up Game Names](https://github.com/lazyboy6791/PS5HomeScreenManager#clean-up-game-names)**
    - **[Quiet Autoload](https://github.com/lazyboy6791/PS5HomeScreenManager#start-up-options)**
    - **[Export & Import All of Your Customizations](https://github.com/lazyboy6791/PS5HomeScreenManager#export--import)**
+   - **[Playstaton 5 App](https://github.com/lazyboy6791/PS5HomeScreenManager#playstation-5-app)**
    - **Light and Dark Mode**
 
 
@@ -185,6 +186,10 @@ Open **Export & Import** in the menu to save everything Home Screen Manager mana
 - **Import** reads a backup from a USB drive or from your phone or PC, shows what is in it, and only changes anything after you confirm. Folders are added next to the ones you have, the hidden tiles and custom names, pictures and backgrounds are restored, and your saved order and settings are replaced by the backup's. Games that aren't installed are skipped.
 - Creating folders uses the console's installer, so an import can take up to about 10 minutes depending on your firmware. The menu shows a timer and which folder it is on, and the home screen refreshes by itself at the end.
 
+## Playstation 5 App
+
+The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). To update the app, build and install a new version of it.
+
 ## Names, pictures and backgrounds
 
 Press **Edit** next to any game, app or system tile:
@@ -286,10 +291,6 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 **Can I use it from my phone?** Yes. Open `http://<PS5-IP>:8090` on any device in the same network.
 
 </details>
-
-## Native app
-
-The `native-app/` folder holds a small PS5 app (title ID PPSA97979) that starts Home Screen Manager and opens its menu, so it has a tile of its own on the home screen. It is a source package: build it on Linux or WSL with `native-app/build.sh` (see `native-app/README.txt`). To update the app, build and install a new version of it.
 
 ## Building from source
 
