@@ -45,7 +45,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
 
 - A jailbroken PS5 (tested on firmware **13.60**)
 - [Payload Manager](https://github.com/itsPLK/ps5-payload-manager) and/or [ShadowMount+](https://github.com/drakmor/ShadowMountPlus)
-- `HomeScreenManager.elf` and/or **PPSA979797.zip** from the [Releases](../../releases) page
+- `HomeScreenManager.elf` and/or **PPSA979797.zip** from the [Releases](../../releases) page, the [Prospero Store](https://prosperostore.net/app/PPSA97979/) or the [Recomp Store](https://recompstore.com/game/SUB8268)
 
 
 ## Installation Guide
@@ -67,7 +67,7 @@ There are 2 methods to install home screen manager. For best results use both bu
 > - From then on HSM will start silently in the background. The menu will still be accessible through a PC or phone in the same network as the PS5 under `http://<PS5-IP>:8090` and the menu in the PS5 browser is also still accessible by re-launching HSM again through payload manager or the **tile in the media tab** as described in **Method 2**. 
 
 **Method 2:** 
-   - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page or the [Prospero Store](https://prosperostore.net/app/PPSA97979/)
+   - Download the latest **PPSA97979.zip** from the [Releases](../../releases) page, the [Prospero Store](https://prosperostore.net/app/PPSA97979/) or the [Recomp Store](https://recompstore.com/game/SUB8268)
    - Copy the unzipped **PPSA97979 Folder** to `/data/homebrew/` on your PS5 via **FTP or File Manager**.
    - Once it finishes [ShadowMount+](https://github.com/drakmor/ShadowMountPlus) will pick it up and **install a tile in the media tab**
    - Click on the tile and home screen manager will be loaded
