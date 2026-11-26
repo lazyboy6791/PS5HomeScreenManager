@@ -121,13 +121,13 @@ Choose one picture (from a USB drive, your phone or PC, or the pictures folder).
 
 The picture is converted once for each file format and the result is shared between the games (linked when the drive allows it, copied when not), so a big library takes seconds to minutes, not hours. The log says how many files were linked and how many were copied. If the console's drive gets almost full, the job stops by itself and what is done stays. **Use the original for all** puts every original background back, with the same message and counter.
 
-**Games without a background entry.** They are in the normal list like the others, and get your picture too when you tick them: HSM fills their empty slots in the home screen database, in the format the other tiles use in the same place (the log reports what it found and chose). They carry the note "game has no own wallpaper", because **Use the original** gives them back no wallpaper at all. System tiles (Game Library, Media Gallery and so on) are not included: the home screen does not keep a background that is given to them. With **Share one file between games** ticked, their empty slots point at the shared files too, so they take no space of their own.
-
-**Share one file between games (experimental).** Instead of one converted file per game, one file per format is kept in a folder of its own (`hsm_shared` in `appmeta`) and every game points at it. It is much smaller and faster. It is off by default: try it on a few games first, restart the console once, and check that the backgrounds are still there. The shared files are removed when no game uses them any more.
+**Games without a background entry.** They are in the normal list like the others, and get your picture too when you tick them: HSM fills their empty slots in the home screen database, in the format the other tiles use in the same place (the log reports what it found and chose). They carry the note "game has no own wallpaper", because **Use the original** gives them back no wallpaper at all. System tiles (Game Library, Media Gallery and so on) are not included: the home screen does not keep a background that is given to them.
 
 **Folders.** Your folders are listed as a group of their own, not ticked at the start (**Select all** includes them). One picture goes on every folder you tick, and all folders are registered with the console in one go, so it is quick. **Overwrite** and **Use the original** work for folders too.
 
 **System tiles.** PlayStation Plus, PlayStation Store, TV & Video, Music, All Apps, Explore, Game Library, Media Gallery, App Library, Share Play, Disc Player, Unsupported Disc and Remote Play (13 tiles) can take a background too, one by one (**Edit** next to the tile) or together with the rest. The console keeps these backgrounds as files in `/system_ex/vsh_asset`, so HSM writes its picture there in the same kind of file. The first time a tile is changed, its original file is copied to `/data/homescreenmanager/sysbg`, and **Use the original** puts that copy back byte for byte (**Use the original for all** also covers these). The home screen shows a new background after it restarts, and a change to these files may need a console restart on some firmware.
+
+**Default background.** Under the system tiles the list has one more entry, **Default background: every game and app without its own**. It is the console's main background file (`bg_hub_default.dds.zst`, next to the system tile ones), the picture that every game and app without a background of its own shows, including the ones whose entries HSM can't fill. It works like a system tile: the original is kept, **Use the original** puts it back byte for byte, and the home screen may need a restart to show it. It only appears if the console has that file.
 
 **System tile pictures.** The picture of PlayStation Store, PlayStation Plus, Game Library, App Library, Media Gallery, Explore, TV & Video, Music and All Apps can be changed in the editor like a game's (**Edit** next to the tile, only there, not in the bulk changer). These pictures are files of the console's (`icon0.png` inside the tile's own folder under `/system_ex/rnps/apps`, or under `/mnt/rnps/apps` on firmware that keeps a live copy, which is used first). The first time a tile is changed its own file is copied to `/data/homescreenmanager/sysicon`, and **Use the original** puts it back byte for byte (**Use the original for all** covers these too). The home screen shows a new picture after it restarts.
 
@@ -151,7 +151,7 @@ Only `/system_ex/vsh_asset/bgm_home.at9` is touched, no other music or sound. Th
 
 The **Profile Picture** section changes the picture of any user on the console. Choose the user, pick a picture (upload one or take it from a USB drive), crop it square and save. Home Screen Manager writes the four `avatar` files the console keeps for the picture (`avatar64.dds` to `avatar440.dds`) into that user's folder under `/system_data/priv/cache/profile/`, and an `online.json` with the user name if there is none (the other picture files in that folder are only backed up and put back by **Use the original**, never changed). The console's own files are kept the first time; **Use the original** puts them back exactly, and **Undo everything** does it for every user. The console shows the new picture when the home screen comes back (the PlayStation button in a game, closing a game); a refresh or restart also does it. A user who is signed in to PSN may get the picture overwritten by the console again.
 
-**Multiple Profile Pictures Playlist.** The lower part of the **Profile Picture** section (**Multiple Profile Pictures Playlist**, the same layout as the single picture above it) is for this: **Add to the list** collects up to 12 pictures for a user; tap one to use it now. Press **Use this list** and, with two or more pictures in the list, Home Screen Manager picks a random one at once and from then on quietly writes another one (picked at random: every picture of the list is shown once before any comes again) when Home Screen Manager starts and when a game starts. The console shows the new picture when the home screen comes back: the PlayStation button in the game, or closing it. No restart is needed. **Stop using the list** or **Use the original picture** switches this off and keeps the list.
+**Multiple Profile Pictures Playlist.** The lower part of the **Profile Picture** section (**Multiple Profile Pictures Playlist**, the same layout as the single picture above it) is for this: **Add to the list** collects up to 12 pictures for a user; tap one to use it now. Press **Use this playlist** and, with two or more pictures in the list, Home Screen Manager picks a random one at once and from then on quietly writes another one (picked at random: every picture of the list is shown once before any comes again) when Home Screen Manager starts and when a game starts. The console shows the new picture when the home screen comes back: the PlayStation button in the game, or closing it. No restart is needed. **Stop using this playlist** or **Use the original picture** switches this off and keeps the list.
 
 ## Clean Up Game Names
 
@@ -190,7 +190,7 @@ Each part has a **Use the original** button. The game's own files are never touc
 
 **Where pictures come from.** Home Screen Manager copies the picture it uses, so you can unplug the drive afterwards.
 
-- **USB drive:** put pictures anywhere on the drive (up to four folders deep), then press **Choose from USB drive**. PS5 screenshots show up too.
+- **USB drive:** put pictures anywhere on the drive (up to four folders deep), then press **Choose from PS5 USB Drive**. PS5 screenshots show up too.
 - **Phone or PC:** open the menu at `http://<PS5-IP>:8090` and use the file picker.
 - **FTP:** put pictures in `/data/homescreenmanager/pictures`.
 
@@ -226,7 +226,7 @@ This project used to be called **Home Hider**. The first time the renamed versio
 
 ## Updating
 
-Home Screen Manager does not update itself. **Update Settings** in the menu can look on GitHub (when it starts and when you open that section, if the start-up switch is on) and shows a notice when a newer version exists. To update, download the new release from GitHub and load it the way you loaded the first one (Payload Manager, or the app from `native-app/`).
+Home Screen Manager does not update itself. **Update Settings** in the menu can look on GitHub (when you open that section, and when it starts if the start-up switch is on) and shows a notice when a newer version exists. To update, download the new release from GitHub and load it the way you loaded the first one (Payload Manager, or the app from `native-app/`).
 
 ## Undo
 
@@ -251,7 +251,7 @@ The first-run backup of the home-screen database is kept in `/data/homescreenman
 | A folder shows "can't connect" | Home Screen Manager isn't running. Start it, or add it to Autoload. |
 | A web app in a folder shows "can't connect" | The payload behind it (for example, Payload Manager) isn't running. |
 | The menu opens at Autoload | **Start-Up Options > Quiet when started by Autoload**. |
-| "Choose from USB drive" finds nothing | Use exFAT or FAT32, keep pictures within four folders of the top, and press **Refresh**. |
+| "Choose from PS5 USB Drive" finds nothing | Use exFAT or FAT32, keep pictures within four folders of the top, and press **Refresh**. |
 | A background "can't be written yet" | That game uses an unusual texture format. |
 | "Port 8090 is busy" | Restart the PS5 and launch Home Screen Manager again. |
 | Anything else | **Troubleshooting & More > Diagnostics** shows a log of every step, and lists of the tiles and directories that are not games, and **Copy log** copies it with one tap. Please include it when you open an issue. |
