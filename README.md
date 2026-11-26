@@ -32,10 +32,10 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **Custom Icons on any Tile or Folder**
    - **Start any Game/App from the Menu through PC or Phone**
    - **[Custom Wallpapers on any Tile or Folder](https://github.com/lazyboy6791/PS5HomeScreenManager#change-and-edit-wallpapers)**
-   - **[Custom Home Screen Music](https://github.com/lazyboy6791/PS5HomeScreenManager#home-screen-music)**
    - **[Custom Profile Picture ((Avatar)](https://github.com/lazyboy6791/PS5HomeScreenManager#profile-pictures)**
-   - **[Redirect to Where Your System Tiles Open](https://github.com/lazyboy6791/PS5HomeScreenManager#redirect-where-system-tiles-open)**
+   - **[Custom Home Screen Music](https://github.com/lazyboy6791/PS5HomeScreenManager#home-screen-music)**
    - **[Clean Up Game Names](https://github.com/lazyboy6791/PS5HomeScreenManager#clean-up-game-names)**
+   - **[Redirect to Where Your System Tiles Open](https://github.com/lazyboy6791/PS5HomeScreenManager#redirect-where-system-tiles-open)**
    - **[Quiet Autoload](https://github.com/lazyboy6791/PS5HomeScreenManager#start-up-options)**
    - **[Export & Import All of Your Customizations](https://github.com/lazyboy6791/PS5HomeScreenManager#export--import)**
    - **[Playstaton 5 App](https://github.com/lazyboy6791/PS5HomeScreenManager#playstation-5-app)**
