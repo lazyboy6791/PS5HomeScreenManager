@@ -36,7 +36,7 @@ Create Folders; Change your Music, Avatars, Tile Icons, Wallpapers;<br>Rearrange
    - **[Custom Profile Picture ((Avatar)](https://github.com/lazyboy6791/PS5HomeScreenManager#profile-pictures)**
    - **[Redirect to Where Your System Tiles Open](https://github.com/lazyboy6791/PS5HomeScreenManager#redirect-where-system-tiles-open)**
    - **[Clean Up Game Names](https://github.com/lazyboy6791/PS5HomeScreenManager#clean-up-game-names)**
-   - **Quiet Autoload**
+   - **[Quiet Autoload](https://github.com/lazyboy6791/PS5HomeScreenManager#start-up-options)**
    - **[Export & Import All of Your Customizations](https://github.com/lazyboy6791/PS5HomeScreenManager#export--import)**
    - **Light and Dark Mode**
 
@@ -164,6 +164,18 @@ Open **Clean Up Game Names** to tidy many names in one go. Tick the rules you wa
 **Use the original names** only undoes what the cleanup changed. If the cleanup had tidied a name you gave by hand, you get your own name back. Tick **Also names I changed by hand** next to the button to put every name back to the original. A line under the button says how many names it will put back. A copy of the database is made first, and the home screen restarts by itself when the names are saved.
 
 Custom names, pictures and backgrounds stay in place: when the PS5 writes a game's own name back (it does that when you start the game), Home Screen Manager puts yours back within a moment.
+
+## Start-Up Options
+
+**Start-Up Options** decides what Home Screen Manager does when it starts: whether the menu opens in the PS5 browser or it just runs in the background. Pick one of three choices. The menu shows a short explanation under the one you have selected.
+
+| Choice | What happens |
+|---|---|
+| **Open the menu** | The menu opens in the PS5 browser every time Home Screen Manager starts. |
+| **Quiet when started by Autoload** | The first start after the PS5 turns on (started by Autoload) runs quietly in the background. Starting Home Screen Manager again from Payload Manager, or from its tile, opens the menu. |
+| **Never open the menu** | Home Screen Manager always runs quietly. Open the menu from a phone or PC at `http://<PS5-IP>:8090`, or in the PS5 browser at `http://127.0.0.1:8090`. |
+
+**Quiet when started by Autoload** is the best choice if Home Screen Manager is in your Autoload list. Your folders, hidden tiles, names and pictures are applied at every start anyway, so the console doesn't need to open a browser each time it turns on.
 
 ## Export & Import
 
