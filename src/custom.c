@@ -696,8 +696,9 @@ static void bg_prefix(const char *tid, char *out, size_t n) {
   snprintf(out, n, "%s/%s/hh_bg_", C.appmeta_dir, tid);
 }
 
-/* The experimental "share one file between games": one converted file per picture and format, in a
- * folder of its own, and every game's background entry points at it. */
+/* The shared folder of an earlier build's "share one file between games" (the option is gone). Entries that
+ * still point there are recognised as ours, put back to the original on request, and the files are removed
+ * once no entry uses them. */
 static void bg_shared_dir(char *out, size_t n) { snprintf(out, n, "%s/hsm_shared", C.appmeta_dir); }
 static int bg_is_shared(const char *v) {
   char sh[420];
@@ -747,33 +748,6 @@ static int bg_is_ours(const char *v, const char *pre) {
   if (!prev) return 0;
   size_t base = (size_t)(prev - pre) + 1;
   return !strncmp(v, pre, base) && strstr(v + base, "/hh_bg_") != NULL;
-}
-
-static unsigned crc32_buf(const unsigned char *b, size_t n) {
-  static unsigned tab[256];
-  static int ready;
-  if (!ready) {
-    for (unsigned i = 0; i < 256; i++) {
-      unsigned c = i;
-      for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-      tab[i] = c;
-    }
-    ready = 1;
-  }
-  unsigned c = 0xFFFFFFFFu;
-  for (size_t i = 0; i < n; i++) c = tab[(c ^ b[i]) & 0xFF] ^ (c >> 8);
-  return c ^ 0xFFFFFFFFu;
-}
-/* the crc of the same picture is asked for once per game: remember the last answer */
-static unsigned crc32_cached(const unsigned char *b, size_t n) {
-  static const unsigned char *last_b;
-  static size_t last_n;
-  static unsigned last_c;
-  if (b == last_b && n == last_n && b) return last_c;
-  last_c = crc32_buf(b, n);
-  last_b = b;
-  last_n = n;
-  return last_c;
 }
 
 static void bg_source(const char *tid, char *out, size_t n) {
@@ -839,8 +813,8 @@ static void bg_cleanup(const char *tid, char keep[][600], int nkeep) {
 /* A bulk run converts the picture once for each file format and links that file into every tile
  * (a link takes no copying time and no extra space; if the drive can't link, the file is copied). */
 #define BG_CACHE 8
-static int g_bulk = 0, g_share = 0;
-static long g_bulk_shared = 0;
+static int g_bulk = 0;
+
 static struct {
   tex_fmt_t f;
   char master[600];
@@ -854,10 +828,8 @@ static long cb_now_ms(void) {
   return (long)(ts.tv_sec * 1000L + ts.tv_nsec / 1000000L);
 }
 
-void custom_bulk_begin(int share) {
+void custom_bulk_begin(void) {
   g_bulk = 1;
-  g_share = share ? 1 : 0;
-  g_bulk_shared = 0;
   memset(g_bgc, 0, sizeof(g_bgc));
   g_bulk_encode_ms = 0;
   g_bulk_reused = 0;
@@ -865,9 +837,7 @@ void custom_bulk_begin(int share) {
   g_bulk_copied = 0;
 }
 
-void custom_bulk_end(long *encode_ms, long *reused, long *linked, long *copied, long *shared) {
-  if (shared) *shared = g_bulk_shared;
-  g_share = 0;
+void custom_bulk_end(long *encode_ms, long *reused, long *linked, long *copied) {
   if (encode_ms) *encode_ms = g_bulk_encode_ms;
   if (reused) *reused = g_bulk_reused;
   if (linked) *linked = g_bulk_linked;
@@ -886,13 +856,8 @@ static int apply_bg_locked(hh_t *h, const char *tid, const unsigned char *img, s
     cerr(h, "This tile has no background in the home screen database, so Home Screen Manager can't change it.");
     return -1;
   }
-  char pre[400], shdir[400];
+  char pre[400];
   bg_prefix(tid, pre, sizeof(pre));
-  bg_shared_dir(shdir, sizeof(shdir));
-  int share = g_share;
-  for (int i = 0; i < n; i++)
-    if (bg_is_shared(cells[i].value)) share = 1; /* a tile that is already sharing keeps sharing */
-  unsigned crc = share ? crc32_cached(img, len) : 0;
 
   /* the original each cell had, and the format to write for it */
   char (*orig)[512] = calloc((size_t)n, 512);
@@ -961,15 +926,7 @@ static int apply_bg_locked(hh_t *h, const char *tid, const unsigned char *img, s
     if (k == nf) {
       if (nf == BG_FILES) continue;
       fmts[nf] = f;
-      if (share) {
-        char d[96];
-        tex_describe(&f, d, sizeof(d));
-        for (char *q = d; *q; q++)
-          if (!isalnum((unsigned char)*q)) *q = '_';
-        snprintf(files[nf], sizeof(files[nf]), "%s/bg_%08x_%s.%s", shdir, crc, d, tex_ext(&f));
-      } else {
-        snprintf(files[nf], sizeof(files[nf]), "%s%ld_%d.%s", pre, stamp, nf, tex_ext(&f));
-      }
+      snprintf(files[nf], sizeof(files[nf]), "%s%ld_%d.%s", pre, stamp, nf, tex_ext(&f));
       nf++;
     }
     which[i] = k;
@@ -985,11 +942,7 @@ static int apply_bg_locked(hh_t *h, const char *tid, const unsigned char *img, s
     snprintf(dir, sizeof(dir), "%s/%s", C.appmeta_dir, tid);
     mkdirs(dir);
     for (int k = 0; k < nf && rc == 0; k++) {
-      if (share) {
-        if (file_exists(files[k])) continue; /* the shared file is there already: nothing to make */
-        mkdirs(shdir);
-      }
-      if (g_bulk && !share) { /* made for an earlier tile in this run: link to that file */
+      if (g_bulk) { /* made for an earlier tile in this run: link to that file */
         int c;
         for (c = 0; c < BG_CACHE; c++)
           if (g_bgc[c].used && !memcmp(&g_bgc[c].f, &fmts[k], sizeof(tex_fmt_t)) && file_exists(g_bgc[c].master)) break;
@@ -1018,7 +971,7 @@ static int apply_bg_locked(hh_t *h, const char *tid, const unsigned char *img, s
       tex_describe(&fmts[k], desc, sizeof(desc));
       hh_log("background %s: wrote %s (%s, %zu bytes)", tid, files[k], desc, ol);
       free(out);
-      if (g_bulk && !share && rc == 0) {
+      if (g_bulk && rc == 0) {
         g_bulk_encode_ms += cb_now_ms() - t_enc;
         for (int c = 0; c < BG_CACHE; c++)
           if (!g_bgc[c].used) {
@@ -1052,8 +1005,7 @@ static int apply_bg_locked(hh_t *h, const char *tid, const unsigned char *img, s
   }
   if (rc == 0) {
     bg_cleanup(tid, files, nf); /* earlier backgrounds of ours */
-    if (share) g_bulk_shared++;
-  } else if (!share) {
+  } else {
     for (int k = 0; k < nf; k++) unlink(files[k]);
   }
   free(cells);
@@ -1260,6 +1212,30 @@ int custom_refresh_folder_tile(hh_t *h, const char *tid, const char *name, const
   hh_log("folder %s: name and picture put in the home screen database (%d name cell(s), %d picture cell(s), %d value(s) changed)",
          tid, names, icons, changed);
   return 0;
+}
+
+/* Puts a folder tile's name right again if the console changed it (it takes the old name back from its
+ * own copy when another tool such as PS4 Mount registers games). Only name cells that differ are
+ * written. Returns how many values were changed, 0 when all is right, -1 on error. */
+int custom_fix_folder_name(hh_t *h, const char *tid, const char *name) {
+  if (!hh_valid_tid(tid) || !folders_is_folder(tid) || h->nusers == 0 || !name || !name[0]) return 0;
+  cell_t *cells = calloc(MAX_CELLS, sizeof(cell_t));
+  if (!cells) return -1;
+  int changed = 0, rc = 0;
+  int n = find_cells(h, tid, K_NAME, cells, MAX_CELLS);
+  for (int i = 0; i < n && rc == 0; i++) {
+    if (!is_title_name_col(cells[i].col) || !strcmp(cells[i].value, name)) continue;
+    char old[200];
+    snprintf(old, sizeof(old), "%.199s", cells[i].value);
+    int ch = set_cell(h, &cells[i], cells[i].value, name);
+    if (ch < 0) rc = -1;
+    else if (ch > 0) {
+      changed += ch;
+      hh_log("folder %s: the console had changed the name to \"%s\", put \"%s\" back", tid, old, name);
+    }
+  }
+  free(cells);
+  return rc ? -1 : changed;
 }
 
 int custom_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t len) {
@@ -1513,14 +1489,9 @@ int custom_set_bg_prepared(hh_t *h, const char *tid, const unsigned char *jpg, s
   char src[400], dir[400], orig[256] = "";
   snprintf(dir, sizeof(dir), "%s/backgrounds", C.data_dir);
   mkdirs(dir);
-  if (g_share) { /* one source picture for all the games that share */
-    snprintf(src, sizeof(src), "%.360s/shared_%08x.jpg", dir, crc32_cached(jpg, len));
-    if (!file_exists(src) && link(prepared_path, src) != 0) copy_file(prepared_path, src);
-  } else {
-    bg_source(tid, src, sizeof(src));
-    unlink(src);
-    if (link(prepared_path, src) != 0) copy_file(prepared_path, src);
-  }
+  bg_source(tid, src, sizeof(src));
+  unlink(src);
+  if (link(prepared_path, src) != 0) copy_file(prepared_path, src);
   hh_title_name(h, tid, orig, sizeof(orig));
   run(h, "INSERT INTO hh.custom(title_id, bg_file, orig_name, updated_at) "
          "VALUES(?1, ?2, ?3, datetime('now')) ON CONFLICT(title_id) DO UPDATE SET "
@@ -1557,8 +1528,8 @@ void custom_bulk_info_json(hh_t *h, char (*ids)[16], int n, strbuf_t *sb) {
       text1(h, "SELECT count(*) FROM hh.custom_cells WHERE title_id=?1 AND kind='bg' AND orig IS NOT NULL AND orig<>''", ids[i], cnt, sizeof(cnt));
       no_own = atoi(cnt) == 0;
     }
-    sb_printf(sb, "%s{\"id\":\"%s\",\"can_bg\":%s,\"sys\":%s,\"no_own\":%s,\"can_rename\":%s,\"by\":\"%s\",\"orig_name\":", i ? "," : "", ids[i], bg ? "true" : "false",
-              sys ? "true" : "false", no_own ? "true" : "false", rn ? "true" : "false", cname[0] ? (!strcmp(src, "tool") ? "tool" : "hand") : "");
+    sb_printf(sb, "%s{\"id\":\"%s\",\"can_bg\":%s,\"sys\":%s,\"sys_custom\":%s,\"no_own\":%s,\"can_rename\":%s,\"by\":\"%s\",\"orig_name\":", i ? "," : "", ids[i], bg ? "true" : "false",
+              sys ? "true" : "false", sys && sysbg_custom(ids[i]) ? "true" : "false", no_own ? "true" : "false", rn ? "true" : "false", cname[0] ? (!strcmp(src, "tool") ? "tool" : "hand") : "");
     sb_json_str(sb, orig[0] ? orig : name);
     sb_puts(sb, "}");
   }

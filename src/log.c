@@ -43,14 +43,10 @@ void hh_log(const char *fmt, ...) {
   pthread_mutex_unlock(&g_mx);
 }
 
-void hh_log_tail(strbuf_t *sb, size_t max_bytes) {
-  pthread_mutex_lock(&g_mx);
-  FILE *f = g_path[0] ? fopen(g_path, "rb") : NULL;
-  if (!f) {
-    pthread_mutex_unlock(&g_mx);
-    sb_puts(sb, "(empty)\n");
-    return;
-  }
+/* Appends the last max_bytes of a file, starting at a full line. Returns how many bytes of the file exist. */
+static long append_tail(const char *path, strbuf_t *sb, size_t max_bytes) {
+  FILE *f = fopen(path, "rb");
+  if (!f) return 0;
   fseek(f, 0, SEEK_END);
   long size = ftell(f);
   long from = size > (long)max_bytes ? size - (long)max_bytes : 0;
@@ -68,5 +64,25 @@ void hh_log_tail(strbuf_t *sb, size_t max_bytes) {
     free(buf);
   }
   fclose(f);
+  return size;
+}
+
+/* The log is moved to <log>.old when it gets big, so right after that the log file holds only the last few
+ * lines. The newest part of the old file goes first so the answer still has max_bytes of history. */
+void hh_log_tail(strbuf_t *sb, size_t max_bytes) {
+  pthread_mutex_lock(&g_mx);
+  struct stat st;
+  if (!g_path[0] || stat(g_path, &st) != 0) {
+    pthread_mutex_unlock(&g_mx);
+    sb_puts(sb, "(empty)\n");
+    return;
+  }
+  size_t have = (size_t)st.st_size > max_bytes ? max_bytes : (size_t)st.st_size;
+  if (have < max_bytes) {
+    char old[320];
+    snprintf(old, sizeof(old), "%s.old", g_path);
+    append_tail(old, sb, max_bytes - have);
+  }
+  append_tail(g_path, sb, max_bytes);
   pthread_mutex_unlock(&g_mx);
 }

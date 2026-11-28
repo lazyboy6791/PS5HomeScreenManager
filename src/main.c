@@ -32,6 +32,7 @@
 #include "custom.h"
 #include "sysbg.h"
 #include "sysicon.h"
+#include "avatar.h"
 #include "sysmusic.h"
 #include "sysredirect.h"
 #include "http.h"
@@ -87,6 +88,7 @@ static void request_home_refresh(void) {
   g_refresh_full = 1;
   g_refresh_request = 1;
 }
+
 static void request_home_refresh_quick(void) {
   g_refresh_quick = 1;
   g_refresh_full = 1;
@@ -98,15 +100,12 @@ static void request_home_refresh_quick(void) {
 static const char *g_default_repo = HH_DEFAULT_REPO;
 
 static settings_t g_cfg = {1, 1, 1, 0, 1, 1, 1, 1, 0, 0, HH_DEFAULT_REPO};
-static char g_pldmgr_dir[256];
 static char g_usb_fmt[256];
 static char g_github_api[128];
 static char g_app_dir[256];
 static char g_appmeta_dir[256];
 static int  g_folders_fixed = 0;
-static int  g_loader_port = 9021;
 static int  g_released = 0;
-static char g_updated_to[32];
 static volatile int g_running = 1;
 static int g_reapplied = 0;
 static int g_custom_fixed = 0;
@@ -155,7 +154,6 @@ static void setup_paths(void) {
   const char *data = "/data/homescreenmanager";
   const char *legacy = "/data/homehider"; /* where the data was before the app was renamed */
   const char *app = "/system_data/priv/mms/app.db";
-  const char *pldmgr = "/data/pldmgr/payloads";
   const char *usb = "/mnt/usb%d";
   const char *api = "https://api.github.com";
 #ifdef HH_HOST
@@ -163,7 +161,6 @@ static void setup_paths(void) {
   legacy = getenv("HH_LEGACY_DATA_DIR"); /* tests only: on a PC nothing is moved unless asked */
   if (getenv("HH_DEFAULT_REPO")) g_default_repo = getenv("HH_DEFAULT_REPO"); /* tests */
   if (getenv("HH_APP_DB")) app = getenv("HH_APP_DB");
-  if (getenv("HH_PLDMGR_DIR")) pldmgr = getenv("HH_PLDMGR_DIR");
   /* test override: must hold exactly one %d and no other conversions */
   if (getenv("HH_USB_FMT")) {
     const char *f = getenv("HH_USB_FMT"), *pc = strchr(f, '%');
@@ -171,9 +168,7 @@ static void setup_paths(void) {
     else fprintf(stderr, "HH_USB_FMT ignored: needs one %%d and under %zu characters\n", sizeof(g_usb_fmt));
   }
   if (getenv("HH_GITHUB_API")) api = getenv("HH_GITHUB_API");
-  if (getenv("HH_LOADER_PORT")) g_loader_port = atoi(getenv("HH_LOADER_PORT"));
 #endif
-  snprintf(g_pldmgr_dir, sizeof(g_pldmgr_dir), "%s", pldmgr);
   snprintf(g_usb_fmt, sizeof(g_usb_fmt), "%s", usb);
   snprintf(g_github_api, sizeof(g_github_api), "%s", api);
   const char *appdir = "/user/app";
@@ -300,9 +295,12 @@ static void handle_status(int fd) {
   sb_puts(&sb, ",\"default_repo\":");
   sb_json_str(&sb, g_default_repo);
   sb_puts(&sb, "}");
-  sb_printf(&sb, ",\"released_locked\":%d,\"folders_fixed\":%d,\"updated_to\":", g_released,
+  char who[64] = "";
+  if (plat_foreground_user_name(who, sizeof(who))) who[0] = '\0';
+  sb_puts(&sb, ",\"user\":");
+  sb_json_str(&sb, who);
+  sb_printf(&sb, ",\"released_locked\":%d,\"folders_fixed\":%d", g_released,
             g_folders_fixed);
-  sb_json_str(&sb, g_updated_to[0] ? g_updated_to : NULL);
   sb_puts(&sb, ",\"marker\":");
   sb_json_str(&sb, upd_marker());
   sb_printf(&sb, ",\"reapplied_at_launch\":%d", g_reapplied);
@@ -841,7 +839,8 @@ static void handle_open_menu(int fd, const char *query) {
   send_ok(fd, "Menu will open");
 }
 
-static void handle_reload(int fd) {
+static void handle_reload(int fd, const char *query) {
+  (void)query;
   if (plat_reload_shellui()) send_error(fd, 500, "Could not find the home screen process.");
   else send_ok(fd, "Home screen restarting");
 }
@@ -854,41 +853,9 @@ static void handle_update_status(int fd) {
   sb_free(&sb);
 }
 
-static void handle_update_check(int fd, const char *query) {
-  char v[8];
-  int usb_only = !http_query_get(query, "usb_only", v, sizeof(v)) && atoi(v);
-  if (upd_start_check(usb_only ? 0 : 1, 1, 0)) send_error(fd, 409, "An update task is already running.");
+static void handle_update_check(int fd) {
+  if (upd_start_check(0)) send_error(fd, 409, "An update check is already running.");
   else send_ok(fd, "checking");
-}
-
-static void handle_update_install(int fd, const char *query) {
-  char src[16];
-  if (http_query_get(query, "source", src, sizeof(src)) ||
-      (strcmp(src, "github") && strcmp(src, "usb"))) {
-    send_error(fd, 400, "Unknown update source.");
-    return;
-  }
-  if (upd_start_install(src)) send_error(fd, 409, "An update task is already running.");
-  else send_ok(fd, "installing");
-}
-
-static void handle_update_upload(int fd, http_req_t *r) {
-  unsigned char *body = NULL;
-  size_t len = 0;
-  int rc = http_read_body(fd, r, &body, &len, UPD_MAX_ELF);
-  if (rc == -2) {
-    send_error(fd, 413, "Send a Home Screen Manager .elf file (up to 32 MB).");
-    return;
-  }
-  if (rc) {
-    send_error(fd, 400, "The upload was interrupted.");
-    return;
-  }
-  char v[8], msg[320];
-  int allow_older = !http_query_get(r->query, "allow_older", v, sizeof(v)) && atoi(v);
-  if (upd_install_upload(body, len, allow_older, msg, sizeof(msg))) send_error(fd, 409, msg);
-  else send_ok(fd, msg);
-  free(body);
 }
 
 /* ---- folders ---- */
@@ -1969,6 +1936,127 @@ static void probe_system_art(void) {
   hh_log("probe: done");
 }
 
+/* Read-only look at where the console keeps its system fonts, written to <data>/font_probe.txt (nothing is
+ * changed, and no write test is made: only access() and the mount flags are asked). It tells whether a font
+ * changer could work at all on this firmware: which files exist, how big they are, what they start with,
+ * and whether the place is writable. */
+static void font_probe_walk(FILE *out, const char *path, int depth, int maxdepth, int *budget) {
+  DIR *d = opendir(path);
+  if (!d) {
+    fprintf(out, "%*s%s: cannot open (%s)\n", depth * 2, "", path, strerror(errno));
+    return;
+  }
+  struct dirent *e;
+  while ((e = readdir(d))) {
+    if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+    if (*budget <= 0) {
+      fprintf(out, "%*s... more entries not listed\n", depth * 2, "");
+      break;
+    }
+    char sub[600];
+    snprintf(sub, sizeof(sub), "%s/%s", path, e->d_name);
+    struct stat sb;
+    if (lstat(sub, &sb) != 0) continue;
+    (*budget)--;
+    if (S_ISDIR(sb.st_mode)) {
+      fprintf(out, "%*s%s/\n", depth * 2, "", sub);
+      if (depth < maxdepth) font_probe_walk(out, sub, depth + 1, maxdepth, budget);
+    } else {
+      unsigned char b[8] = {0};
+      FILE *f = fopen(sub, "rb");
+      size_t got = f ? fread(b, 1, sizeof(b), f) : 0;
+      if (f) fclose(f);
+      char hex[32] = "cannot read";
+      if (got >= 4) snprintf(hex, sizeof(hex), "starts %02x %02x %02x %02x", b[0], b[1], b[2], b[3]);
+      fprintf(out, "%*s%s  %lld bytes, mode %o, %s\n", depth * 2, "", sub, (long long)sb.st_size,
+              (unsigned)(sb.st_mode & 0777), hex);
+    }
+  }
+  closedir(d);
+}
+
+static void probe_fonts(void) {
+  static const char *roots[] = {"/preinst/common/font", "/system/common/font", "/system_ex/common/font"};
+  const char *over = getenv("HH_FONT_ROOT"); /* tests */
+  char path[400];
+  snprintf(path, sizeof(path), "%s/font_probe.txt", g_data_dir);
+  FILE *out = fopen(path, "w");
+  if (!out) return;
+  fprintf(out, "Home Screen Manager %s: read-only look at the system font folders (nothing was changed)\n", HH_VERSION);
+  int found = 0, writable = 0, files = 0;
+  for (size_t i = 0; i < (over ? 1 : sizeof(roots) / sizeof(roots[0])); i++) {
+    const char *r = over ? over : roots[i];
+    struct stat sb;
+    char mnt[300] = "";
+    fprintf(out, "---- %s\n", r);
+    if (stat(r, &sb) != 0) {
+      fprintf(out, "not there (%s)\n", strerror(errno));
+      continue;
+    }
+    found++;
+    plat_describe_mount(r, mnt, sizeof(mnt));
+    int w = access(r, W_OK) == 0;
+    writable += w;
+    fprintf(out, "on: %s\nwrite permission (asked, not tried): %s\n", mnt, w ? "yes" : "no");
+    int budget = 150;
+    font_probe_walk(out, r, 1, 3, &budget);
+    DIR *d = opendir(r);
+    struct dirent *e;
+    while (d && (e = readdir(d))) files += e->d_name[0] != '.';
+    if (d) closedir(d);
+  }
+  fprintf(out, "---- done\n");
+  fclose(out);
+  hh_log("fonts: looked at the system font folders (read-only): %d of %d found, %d entries in the top folders, write permission asked on %d; details in font_probe.txt",
+         found, over ? 1 : (int)(sizeof(roots) / sizeof(roots[0])), files, writable);
+}
+
+/* Read-only look at where the console keeps the profile pictures (the folders of the users), written to
+ * <data>/profile_probe.txt. Only names, sizes, modes and the first four bytes of each file are written, never
+ * what is inside (online.json can hold names). Nothing is changed and no write is tried. */
+static void probe_profiles(void) {
+  static const struct { const char *path; int maxdepth; } roots[] = {
+      {"/system_data/priv/cache/profile", 3},
+      {"/system_data/priv/cache", 1},
+      {"/user/home", 1},
+  };
+  const char *over = getenv("HH_PROFILE_ROOT"); /* tests */
+  char path[400];
+  snprintf(path, sizeof(path), "%s/profile_probe.txt", g_data_dir);
+  FILE *out = fopen(path, "w");
+  if (!out) return;
+  fprintf(out, "Home Screen Manager %s: read-only look at the profile picture folders (nothing was changed; file contents are not written)\n", HH_VERSION);
+  int found = 0, writable = 0, folders = 0;
+  size_t n = over ? 1 : sizeof(roots) / sizeof(roots[0]);
+  for (size_t i = 0; i < n; i++) {
+    const char *r = over ? over : roots[i].path;
+    struct stat sb;
+    char mnt[300] = "";
+    fprintf(out, "---- %s\n", r);
+    if (stat(r, &sb) != 0) {
+      fprintf(out, "not there (%s)\n", strerror(errno));
+      continue;
+    }
+    found++;
+    plat_describe_mount(r, mnt, sizeof(mnt));
+    int w = access(r, W_OK) == 0;
+    writable += w;
+    fprintf(out, "on: %s\nwrite permission (asked, not tried): %s\n", mnt, w ? "yes" : "no");
+    int budget = 200;
+    font_probe_walk(out, r, 1, over ? 3 : roots[i].maxdepth, &budget);
+    if (i == 0) {
+      DIR *d = opendir(r);
+      struct dirent *e;
+      while (d && (e = readdir(d))) folders += e->d_name[0] != '.';
+      if (d) closedir(d);
+    }
+  }
+  fprintf(out, "---- done\n");
+  fclose(out);
+  hh_log("profiles: looked at the profile picture folders (read-only): %d of %d places found, %d entries in the profile folder, write permission asked on %d; details in profile_probe.txt",
+         found, (int)n, folders, writable);
+}
+
 static unsigned long long appmeta_free(void) {
   const char *ff = getenv("HH_TEST_FREE_FILE");
   if (ff) {
@@ -2299,7 +2387,7 @@ static void handle_bulk_bg_preview(int fd) {
 
 typedef struct {
   char (*ids)[16];
-  int n, overwrite, share;
+  int n, overwrite;
 } bkjob_t;
 
 /* A job thread with a roomy stack: the background code keeps large layout tables on it, and the
@@ -2320,7 +2408,7 @@ static void *bulk_bg_worker(void *arg) {
   sysbg_blob_t sblob;
   int have_sblob = 0;
   char first_err[300] = "";
-  long t0 = bk_now_ms(), enc_ms = 0, reused = 0, linked = 0, copied = 0, shared = 0;
+  long t0 = bk_now_ms(), enc_ms = 0, reused = 0, linked = 0, copied = 0;
   char path[420];
   bulk_prep_path(path, sizeof(path));
   unsigned char *jpg = NULL;
@@ -2340,11 +2428,22 @@ static void *bulk_bg_worker(void *arg) {
   if (jpg && hh_open(&h, g_app_db, g_state_db) == 0) {
     folders_hold(1);
     folders_defer_install(1);
-    custom_bulk_begin(j->share);
+    custom_bulk_begin();
+    /* Two rounds: the folders first, registered with one install, then the games and the rest. The install
+       makes the console put its own pictures back into the PS5 games, so it must come before them. */
+    int done_n = 0;
+    for (int round = 0; round < 2; round++) {
+    if (round == 1 && folders) {
+      snprintf(g_bk.phase, sizeof(g_bk.phase), "Registering the %d folder(s) with the console…", folders);
+      int notreg = folders_install_pending(&h);
+      hh_log("bulk background: %d folder(s) registered with one install, %d not registered", folders, notreg);
+    }
+    if (round == 1) folders_defer_install(0);
     for (int i = 0; i < j->n; i++) {
-      g_bk.i = i + 1;
-      snprintf(g_bk.phase, sizeof(g_bk.phase), "Applying the background… %d of %d", i + 1, j->n);
       const char *id = j->ids[i];
+      if ((strncmp(id, "HHFD", 4) == 0) != (round == 0)) continue;
+      g_bk.i = ++done_n;
+      snprintf(g_bk.phase, sizeof(g_bk.phase), "Applying the background… %d of %d", done_n, j->n);
       if (getenv("HH_BULK_DELAY_MS")) usleep((useconds_t)atoi(getenv("HH_BULK_DELAY_MS")) * 1000); /* tests only */
       if (appmeta_free() < 96ULL * 1024 * 1024) {
         stopped = 1; /* the drive is almost full: stop here, what is done stays and can be undone */
@@ -2419,13 +2518,8 @@ static void *bulk_bg_worker(void *arg) {
         failed++;
       }
     }
-    custom_bulk_end(&enc_ms, &reused, &linked, &copied, &shared);
-    if (folders) {
-      snprintf(g_bk.phase, sizeof(g_bk.phase), "Registering the %d folder(s) with the console…", folders);
-      int notreg = folders_install_pending(&h);
-      hh_log("bulk background: %d folder(s) registered with one install, %d not registered", folders, notreg);
     }
-    folders_defer_install(0);
+    custom_bulk_end(&enc_ms, &reused, &linked, &copied);
     folders_hold(0);
     if (have_sblob) sysbg_blob_free(&sblob);
     hh_close(&h);
@@ -2436,13 +2530,13 @@ static void *bulk_bg_worker(void *arg) {
   free(jpg);
   long total = bk_now_ms() - t0;
   hh_log("bulk background: %d applied, %d without a background entry, %d already set by you, %d failed, %d of them folders, %d system tile(s); "
-         "%ld ms in all, %ld ms converting, %ld converted file(s) reused (%ld linked, %ld copied)%s%s",
-         applied, no_entry, already, failed, folders, sys, total, enc_ms, reused, linked, copied, j->share ? "; sharing one file between games" : "",
+         "%ld ms in all, %ld ms converting, %ld converted file(s) reused (%ld linked, %ld copied)%s",
+         applied, no_entry, already, failed, folders, sys, total, enc_ms, reused, linked, copied,
          stopped ? "; STOPPED: the drive is almost full" : "");
   strbuf_t sb;
   sb_init(&sb);
-  sb_printf(&sb, "{\"ok\":true,\"applied\":%d,\"no_entry\":%d,\"already_set\":%d,\"failed\":%d,\"folders\":%d,\"system\":%d,\"ms\":%ld,\"converting_ms\":%ld,\"reused\":%ld,\"linked\":%ld,\"copied\":%ld,\"shared\":%ld,\"stopped\":%s,\"error\":",
-            applied, no_entry, already, failed, folders, sys, total, enc_ms, reused, linked, copied, shared, stopped ? "true" : "false");
+  sb_printf(&sb, "{\"ok\":true,\"applied\":%d,\"no_entry\":%d,\"already_set\":%d,\"failed\":%d,\"folders\":%d,\"system\":%d,\"ms\":%ld,\"converting_ms\":%ld,\"reused\":%ld,\"linked\":%ld,\"copied\":%ld,\"stopped\":%s,\"error\":",
+            applied, no_entry, already, failed, folders, sys, total, enc_ms, reused, linked, copied, stopped ? "true" : "false");
   sb_json_str(&sb, first_err);
   sb_puts(&sb, "}");
   snprintf(g_bk.result, sizeof(g_bk.result), "%s", sb.data ? sb.data : "{\"ok\":false}");
@@ -2477,7 +2571,7 @@ static void handle_bulk_bg_apply(int fd, http_req_t *r) {
   }
   char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
   int n = ids ? ids_from_json((const char *)buf, t, nt, json_get((const char *)buf, t, nt, 0, "ids"), ids, BULK_MAX_TILES) : 0;
-  int overwrite = json_flag((const char *)buf, t, nt, "overwrite"), share = json_flag((const char *)buf, t, nt, "share");
+  int overwrite = json_flag((const char *)buf, t, nt, "overwrite");
   free(buf);
   free(t);
   if (!ids || n == 0) {
@@ -2500,7 +2594,6 @@ static void handle_bulk_bg_apply(int fd, http_req_t *r) {
   j->ids = ids;
   j->n = n;
   j->overwrite = overwrite;
-  j->share = share;
   bulk_backup();
   g_bk.job++;
   g_bk.done = 0;
@@ -2510,7 +2603,7 @@ static void handle_bulk_bg_apply(int fd, http_req_t *r) {
   g_bk.t0 = time(NULL);
   snprintf(g_bk.phase, sizeof(g_bk.phase), "Starting…");
   g_import_running = 1;
-  hh_log("bulk background: %d tile(s) chosen, overwrite=%d, share=%d", n, overwrite, share);
+  hh_log("bulk background: %d tile(s) chosen, overwrite=%d", n, overwrite);
   pthread_t th;
   if (create_big_thread(&th, bulk_bg_worker, j) != 0) {
     g_import_running = 0;
@@ -2535,13 +2628,15 @@ typedef struct {
 static void *bulk_undo_worker(void *arg) {
   bkundo_t *j = arg;
   hh_t h;
-  int back = 0;
+  int back = 0, retry_failed = 0;
   long t0 = bk_now_ms();
   if (hh_open(&h, g_app_db, g_state_db) == 0) {
     folders_hold(1);
     custom_gc_defer(1);
     folders_defer_install(1);
     int fback = 0;
+    int *retry = calloc((size_t)(j->n > 0 ? j->n : 1), sizeof(int));
+    int nretry = 0;
     for (int i = 0; i < j->n; i++) {
       g_bk.i = i + 1;
       snprintf(g_bk.phase, sizeof(g_bk.phase), "Putting the original backgrounds back… %d of %d", i + 1, j->n);
@@ -2555,10 +2650,35 @@ static void *bulk_undo_worker(void *arg) {
       }
       if (sysbg_is(j->ids[i])) {
         char serr[300];
-        if (sysbg_custom(j->ids[i]) && sysbg_reset(j->ids[i], serr, sizeof(serr)) == 0) back++;
+        if (sysbg_custom(j->ids[i])) {
+          if (sysbg_reset(j->ids[i], serr, sizeof(serr)) == 0) back++;
+          else {
+            hh_log("bulk background: %s: the original couldn't be put back: %.200s", j->ids[i], serr);
+            if (retry && nretry < j->n) retry[nretry++] = i;
+          }
+        }
       }
-      if (custom_has_bg(&h, j->ids[i]) && custom_set_bg(&h, j->ids[i], NULL, 0) == 0) back++;
+      if (custom_has_bg(&h, j->ids[i])) {
+        if (custom_set_bg(&h, j->ids[i], NULL, 0) == 0) back++;
+        else {
+          hh_log("bulk background: %s: the original couldn't be put back (%.200s)", j->ids[i], h.err);
+          if (retry && nretry < j->n && !sysbg_is(j->ids[i])) retry[nretry++] = i;
+        }
+      }
     }
+    /* a tile that failed (the console had the database busy): one more try at the end */
+    for (int q = 0; q < nretry; q++) {
+      const char *id = j->ids[retry[q]];
+      snprintf(g_bk.phase, sizeof(g_bk.phase), "Trying %d tile(s) again…", nretry);
+      if (custom_has_bg(&h, id) && custom_set_bg(&h, id, NULL, 0) == 0) {
+        back++;
+        hh_log("bulk background: %s: put back on the second try", id);
+      } else if (custom_has_bg(&h, id)) {
+        retry_failed++;
+        hh_log("bulk background: %s: still couldn't be put back", id);
+      }
+    }
+    free(retry);
     if (fback) {
       int notreg = folders_install_pending(&h);
       hh_log("bulk background: %d folder(s) registered with one install, %d not registered", fback, notreg);
@@ -2570,7 +2690,7 @@ static void *bulk_undo_worker(void *arg) {
     folders_hold(0);
     hh_close(&h);
   }
-  hh_log("bulk background: %d original background(s) put back, %ld ms", back, bk_now_ms() - t0);
+  hh_log("bulk background: %d original background(s) put back, %d could not be put back, %ld ms", back, retry_failed, bk_now_ms() - t0);
   snprintf(g_bk.result, sizeof(g_bk.result), "{\"ok\":true,\"undo\":true,\"changed\":%d,\"ms\":%ld}", back, bk_now_ms() - t0);
   if (back) request_home_refresh_quick();
   free(j->ids);
@@ -2669,7 +2789,7 @@ static void bk_step(const char *what, int i, int n) {
 static void *undo_everything_worker(void *arg) {
   (void)arg;
   hh_t h;
-  int folders = 0, tabs = 0, order = 0, shown = 0, pics = 0, bgs = 0, names = 0, failed = 0, music = 0, links = 0;
+  int folders = 0, tabs = 0, order = 0, shown = 0, pics = 0, bgs = 0, names = 0, failed = 0, music = 0, links = 0, avatars = 0;
   long t0 = bk_now_ms();
   char (*ids)[16] = calloc(BULK_MAX_TILES, 16);
   if (ids && hh_open(&h, g_app_db, g_state_db) == 0) {
@@ -2740,6 +2860,17 @@ static void *undo_everything_worker(void *arg) {
       if (sysmusic_reset(note, sizeof(note), serr, sizeof(serr)) == 0) music = 1;
       else failed++;
     }
+    {
+      char aids[16][16];
+      int an = avatar_custom_ids(aids, 16);
+      for (int i = 0; i < an; i++) {
+        char serr[300];
+        bk_step("Putting the original profile pictures back…", i + 1, an);
+        if (avatar_reset(aids[i], serr, sizeof(serr)) == 0) avatars++;
+        else failed++;
+      }
+      avatar_pool_clear_all();
+    }
     n = custom_renamed_ids(&h, ids, BULK_MAX_TILES);
     for (int i = 0; i < n; i++) {
       bk_step("Putting the original names back…", i + 1, n);
@@ -2760,8 +2891,8 @@ static void *undo_everything_worker(void *arg) {
          folders, tabs, order ? "cleared" : "unchanged", shown, pics, bgs, names, failed, bk_now_ms() - t0);
   snprintf(g_bk.result, sizeof(g_bk.result),
            "{\"ok\":true,\"folders\":%d,\"tabs\":%d,\"order\":%d,\"shown\":%d,\"pics\":%d,\"bgs\":%d,\"names\":%d,"
-           "\"music\":%d,\"links\":%d,\"failed\":%d,\"ms\":%ld}",
-           folders, tabs, order, shown, pics, bgs, names, music, links, failed, bk_now_ms() - t0);
+           "\"music\":%d,\"links\":%d,\"avatars\":%d,\"failed\":%d,\"ms\":%ld}",
+           folders, tabs, order, shown, pics, bgs, names, music, links, avatars, failed, bk_now_ms() - t0);
   request_home_refresh_quick();
   g_bk.done = 1;
   g_import_running = 0;
@@ -3077,6 +3208,167 @@ static void handle_music_prepare(int fd, http_req_t *r) {
   sb_free(&sb);
 }
 
+/* ---- profile pictures ---- */
+
+static void handle_avatar_get(int fd) {
+  strbuf_t sb;
+  sb_init(&sb);
+  avatar_json(&sb);
+  send_json(fd, 200, &sb);
+  sb_free(&sb);
+}
+
+static void handle_avatar_picture(int fd, const char *query) {
+  char id[24] = "";
+  http_query_get(query, "id", id, sizeof(id));
+  unsigned char *png = NULL;
+  size_t len = 0;
+  if (!avatar_valid_id(id) || avatar_current_png(id, &png, &len)) {
+    http_send_text(fd, 404, "text/plain", "no picture");
+    return;
+  }
+  http_send(fd, 200, "image/png", png, len, "Cache-Control: no-store\r\n");
+  free(png);
+}
+
+static void handle_avatar_set(int fd, http_req_t *r) {
+  char id[24] = "", usb[512] = "";
+  http_query_get(r->query, "id", id, sizeof(id));
+  http_query_get(r->query, "usb", usb, sizeof(usb));
+  unsigned char *body = NULL;
+  size_t len = 0;
+  if (usb[0]) {
+    http_drain(fd, r);
+    if (usbpics_read(usb, &body, &len)) {
+      send_error(fd, 404, "That picture isn't on the USB drive any more. Plug the drive back in and try again.");
+      return;
+    }
+  } else {
+    int rc = http_read_body(fd, r, &body, &len, USBPIC_MAX_BYTES);
+    if (rc) {
+      send_error(fd, rc == -2 ? 413 : 400, "Send a PNG, JPG, BMP, GIF or TGA picture (up to 32 MB).");
+      return;
+    }
+  }
+  if (g_import_running || folders_busy()) {
+    free(body);
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  char err[300] = "";
+  if (avatar_apply(id, body, len, err, sizeof(err))) {
+    free(body);
+    send_error(fd, 409, err);
+    return;
+  }
+  free(body);
+  request_home_refresh_quick(); /* the home screen shows the new picture when it restarts */
+  send_ok(fd, "Profile picture saved.");
+}
+
+static void handle_avatar_pool_pic(int fd, const char *query) {
+  char id[24] = "", ns[16] = "";
+  http_query_get(query, "id", id, sizeof(id));
+  http_query_get(query, "n", ns, sizeof(ns));
+  unsigned char *png = NULL;
+  size_t len = 0;
+  if (!avatar_valid_id(id) || avatar_pool_get(id, atoi(ns), &png, &len)) {
+    http_send_text(fd, 404, "text/plain", "no picture");
+    return;
+  }
+  http_send(fd, 200, "image/png", png, len, "Cache-Control: no-store\r\n");
+  free(png);
+}
+
+static void handle_avatar_pool_add(int fd, http_req_t *r) {
+  char id[24] = "", usb[512] = "";
+  http_query_get(r->query, "id", id, sizeof(id));
+  http_query_get(r->query, "usb", usb, sizeof(usb));
+  unsigned char *body = NULL;
+  size_t len = 0;
+  if (usb[0]) {
+    http_drain(fd, r);
+    if (usbpics_read(usb, &body, &len)) {
+      send_error(fd, 404, "That picture isn't on the USB drive any more. Plug the drive back in and try again.");
+      return;
+    }
+  } else {
+    int rc = http_read_body(fd, r, &body, &len, USBPIC_MAX_BYTES);
+    if (rc) {
+      send_error(fd, rc == -2 ? 413 : 400, "Send a PNG, JPG, BMP, GIF or TGA picture (up to 32 MB).");
+      return;
+    }
+  }
+  char err[300] = "";
+  int rc = avatar_pool_add(id, body, len, err, sizeof(err));
+  free(body);
+  if (rc) send_error(fd, 409, err);
+  else send_ok(fd, "Added to the list.");
+}
+
+static void handle_avatar_pool_do(int fd, http_req_t *r, const char *what) {
+  char id[24] = "", ns[16] = "", on[8] = "";
+  http_query_get(r->query, "id", id, sizeof(id));
+  http_query_get(r->query, "n", ns, sizeof(ns));
+  http_query_get(r->query, "on", on, sizeof(on));
+  http_drain(fd, r);
+  if (!avatar_valid_id(id)) {
+    send_error(fd, 409, "That isn't a profile folder.");
+    return;
+  }
+  if (!strcmp(what, "remove")) {
+    if (avatar_pool_remove(id, atoi(ns))) send_error(fd, 404, "That picture isn't in the list.");
+    else send_ok(fd, "Taken out of the list.");
+  } else if (!strcmp(what, "auto")) {
+    if (avatar_pool_auto_set(id, on[0] == '1')) send_error(fd, 500, "Couldn't save the setting.");
+    else if (on[0] != '1') send_ok(fd, "The list is not used any more.");
+    else {
+      /* "Use this list": take effect at once with a random picture of it, then refresh so it shows */
+      char err[300] = "";
+      if (g_import_running || folders_busy()) {
+        send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+        return;
+      }
+      if (avatar_pool_random(id, err, sizeof(err))) {
+        avatar_pool_auto_set(id, 0);
+        send_error(fd, 409, err);
+        return;
+      }
+          request_home_refresh_quick();
+      send_ok(fd, "The list is in use.");
+    }
+  } else { /* use */
+    if (g_import_running || folders_busy()) {
+      send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+      return;
+    }
+    char err[300] = "";
+    if (avatar_pool_use(id, atoi(ns), err, sizeof(err))) {
+      send_error(fd, 409, err);
+      return;
+    }
+      request_home_refresh_quick();
+    send_ok(fd, "Profile picture saved.");
+  }
+}
+
+static void handle_avatar_reset(int fd, http_req_t *r) {
+  char id[24] = "";
+  http_query_get(r->query, "id", id, sizeof(id));
+  http_drain(fd, r);
+  if (g_import_running || folders_busy()) {
+    send_error(fd, 409, "Another long job (an import or a bulk change) is running. Please wait until it has finished.");
+    return;
+  }
+  char err[300] = "";
+  if (avatar_reset(id, err, sizeof(err))) {
+    send_error(fd, 500, err);
+    return;
+  }
+  request_home_refresh_quick();
+  send_ok(fd, "The console's own picture is back.");
+}
+
 static void handle_music_cancel(int fd, http_req_t *r) {
   http_drain(fd, r);
   g_music_cancel = 1;
@@ -3116,7 +3408,6 @@ static void handle_client(int fd) {
   int post = strcmp(r.method, "POST") == 0;
   const char *p = r.path;
   snprintf(g_cur_path, sizeof(g_cur_path), "%s %.200s", r.method, r.path);
-  int upload = post && !strcmp(p, "/api/update/upload");
   int fsave = post && !strcmp(p, "/api/folders/save");
   int ficon = post && !strcmp(p, "/api/folders/icon");
   int cname = post && !strcmp(p, "/api/custom/name");
@@ -3127,8 +3418,9 @@ static void handle_client(int fd) {
   int iinspect = post && !strcmp(p, "/api/import/inspect"); /* reads the backup file itself */
   int bulk = post && !strncmp(p, "/api/bulk/", 10);      /* reads its own body */
   int mprep = post && !strcmp(p, "/api/music/prepare");  /* reads the song itself */
+  int avset = post && (!strcmp(p, "/api/avatar/set") || !strcmp(p, "/api/avatar/pool_add")); /* reads the picture itself */
   if (mprep) bulk = 1;
-  if (!upload && !fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave && !iinspect && !bulk) http_drain(fd, &r);
+  if (!fsave && !ficon && !cname && !cicon && !cbg && !fbg && !asave && !iinspect && !bulk && !avset) http_drain(fd, &r);
 
   if (!strcmp(p, "/") || !strcmp(p, "/index.html")) {
     send_page(fd, WEBUI_HTML, WEBUI_HTML_LEN);
@@ -3156,6 +3448,24 @@ static void handle_client(int fd) {
     handle_usb_images(fd);
   } else if (!strcmp(p, "/api/usb_pic")) {
     handle_usb_pic(fd, r.query);
+  } else if (!strcmp(p, "/api/avatar")) {
+    handle_avatar_get(fd);
+  } else if (!strcmp(p, "/api/avatar/picture")) {
+    handle_avatar_picture(fd, r.query);
+  } else if (!strcmp(p, "/api/avatar/pool_pic")) {
+    handle_avatar_pool_pic(fd, r.query);
+  } else if (!strcmp(p, "/api/avatar/pool_add")) {
+    handle_avatar_pool_add(fd, &r);
+  } else if (!strcmp(p, "/api/avatar/pool_remove")) {
+    handle_avatar_pool_do(fd, &r, "remove");
+  } else if (!strcmp(p, "/api/avatar/auto")) {
+    handle_avatar_pool_do(fd, &r, "auto");
+  } else if (!strcmp(p, "/api/avatar/pool_use")) {
+    handle_avatar_pool_do(fd, &r, "use");
+  } else if (!strcmp(p, "/api/avatar/set")) {
+    handle_avatar_set(fd, &r);
+  } else if (!strcmp(p, "/api/avatar/reset")) {
+    handle_avatar_reset(fd, &r);
   } else if (!strcmp(p, "/api/music")) {
     handle_music_get(fd);
   } else if (!strcmp(p, "/api/redirect")) {
@@ -3244,12 +3554,8 @@ static void handle_client(int fd) {
     handle_hide(fd, r.query, 1);
   } else if (!strcmp(p, "/api/unhide")) {
     handle_hide(fd, r.query, 0);
-  } else if (upload) {
-    handle_update_upload(fd, &r);
   } else if (!strcmp(p, "/api/update/check")) {
-    handle_update_check(fd, r.query);
-  } else if (!strcmp(p, "/api/update/install")) {
-    handle_update_install(fd, r.query);
+    handle_update_check(fd);
   } else if (fsave) {
     handle_folder_save(fd, &r);
   } else if (ficon) {
@@ -3288,7 +3594,7 @@ static void handle_client(int fd) {
   } else if (!strcmp(p, "/api/restore")) {
     handle_restore(fd);
   } else if (!strcmp(p, "/api/reload_shell")) {
-    handle_reload(fd);
+    handle_reload(fd, r.query);
   } else if (!strcmp(p, "/api/open_menu")) {
     handle_open_menu(fd, r.query);
   } else if (!strcmp(p, "/api/quit")) {
@@ -3539,6 +3845,11 @@ static void *rehide_watchdog(void *arg) {
         g_force_custom = 1;
         snprintf(closed_tid, sizeof(closed_tid), "%s", prev);
         closed = 1;
+      }
+      if (!prev[0] && now[0] && strcmp(now, "PPSA97979")) {
+        /* a game starts: the users with a list get another picture now. The console reads the picture again when the home
+         * screen comes back (the PlayStation button, or the game closing), the way it does after Prospero Manager's change. */
+        avatar_rotate_all();
       }
       snprintf(prev, sizeof(prev), "%s", now);
       if (g_refresh_request) refresh = 1; /* a folder was created or changed */
@@ -3828,6 +4139,8 @@ int main(void) {
     plat_unmask_leftover();
   }
   if (getenv("HH_PROBE")) probe_system_art(); /* a long read-only listing, only for diagnosis */
+  probe_fonts();
+  probe_profiles();
   launch_cfg_t lcfg = {g_app_dir, g_appmeta_dir};
   launch_init(&lcfg);
   custom_cfg_t ccfg = {g_data_dir, g_appmeta_dir};
@@ -3835,6 +4148,8 @@ int main(void) {
   sysbg_init(g_data_dir, getenv("HH_VSH_ASSET"));
   sysicon_init(g_data_dir, getenv("HH_RNPS_LIVE"), getenv("HH_RNPS_SHIPPED"));
   sysmusic_init(g_data_dir, getenv("HH_VSH_ASSET"));
+  avatar_init(g_data_dir, getenv("HH_PROFILE_ROOT"));
+  avatar_rotate_all(); /* a new start: another picture for the users who have a list */
   {
     const char *ai = "/system_data/priv/mms/appinfo.db";
 #ifdef HH_HOST
@@ -3867,24 +4182,9 @@ int main(void) {
     }
   }
 
-  upd_config_t ucfg = {g_data_dir, g_backup_dir, g_pldmgr_dir, g_usb_fmt, g_github_api,
-                       g_loader_port};
+  upd_config_t ucfg = {g_github_api};
   upd_init(&ucfg);
   upd_set_repo(g_cfg.repo);
-
-  /* started by our own updater? then the browser is already open */
-  int just_updated = 0;
-  {
-    char flag[300];
-    snprintf(flag, sizeof(flag), "%s/.updated", g_data_dir);
-    FILE *f = fopen(flag, "r");
-    if (f) {
-      just_updated = 1;
-      snprintf(g_updated_to, sizeof(g_updated_to), "%s", HH_VERSION);
-      fclose(f);
-      unlink(flag);
-    }
-  }
 
   int srv = open_server();
   if (srv < 0) {
@@ -3897,19 +4197,16 @@ int main(void) {
   char ip[64] = "";
   char url[96];
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/", HH_PORT);
-  if (just_updated)
-    plat_notify("Home Screen Manager updated to v%s", HH_VERSION);
-  else if (plat_get_ip(ip, sizeof(ip)) == 0)
+  if (plat_get_ip(ip, sizeof(ip)) == 0)
     plat_notify("Home Screen Manager %s running\nMenu: http://%s:%d%s", HH_VERSION, ip, HH_PORT,
                 g_reapplied ? "\n(re-hid tiles the system restored)" : "");
   else
     plat_notify("Home Screen Manager %s running on port %d", HH_VERSION, HH_PORT);
 
-  if (g_cfg.auto_check && !just_updated) upd_start_check(g_cfg.repo[0] != '\0', 1, 1);
+  if (g_cfg.auto_check && g_cfg.repo[0]) upd_start_check(1);
 
   int first_boot_start = first_start_since_boot();
-  int open_menu = !just_updated &&
-                  (g_cfg.open_browser == 1 ||
+  int open_menu = (g_cfg.open_browser == 1 ||
                    (g_cfg.open_browser == 2 && (was_running || !first_boot_start)));
   hh_log("startup: menu mode %d, already running %d, first start since boot %d -> %s",
          g_cfg.open_browser, was_running, first_boot_start, open_menu ? "open menu" : "quiet");

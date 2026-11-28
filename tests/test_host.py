@@ -304,42 +304,6 @@ class FakeGitHub:
         self.srv.server_close()
 
 
-class FakeLoader:
-    """Plays the ELF loader: receives the new build, then (like the new
-    instance would) asks the running Home Screen Manager to quit."""
-
-    def __init__(self, port):
-        self.received = []
-        self.sock = socket.socket()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(("127.0.0.1", port))
-        self.sock.listen(4)
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _run(self):
-        while True:
-            try:
-                c, _ = self.sock.accept()
-            except OSError:
-                return
-            data = b""
-            while True:
-                chunk = c.recv(65536)
-                if not chunk:
-                    break
-                data += chunk
-            c.close()
-            self.received.append(data)
-            time.sleep(0.2)
-            try:
-                http("POST", "/api/quit")
-            except Exception:
-                pass
-
-    def close(self):
-        self.sock.close()
-
-
 def wait_idle(timeout=20):
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -350,32 +314,16 @@ def wait_idle(timeout=20):
     raise AssertionError("updater stayed busy")
 
 
-def wait_exit(server, timeout=20):
-    server.p.wait(timeout=timeout)
-    return server.stop()
-
-
 def updater_tests(tmp):
-    print("updater")
-    gh_port, loader_port = 18080, 19021
+    print("update check (nothing is installed by the app any more)")
+    gh_port = 18080
     gh = FakeGitHub(gh_port)
-    loader = FakeLoader(loader_port)
     try:
         appdb = os.path.join(tmp, "upd.db")
         data = os.path.join(tmp, "upd-data")
-        pld = os.path.join(tmp, "pldmgr", "payloads")
-        usb_fmt = os.path.join(tmp, "usb%d")
-        os.makedirs(os.path.join(pld, "local", "homehider"))
-        os.makedirs(os.path.join(pld, "local", "other"))
         make_db(appdb)
         current = open(BIN, "rb").read()
-        old_v02 = fake_elf("0", marker=False) + b"/data/homehider/state.db"
-        other = fake_elf("0", marker=False)
-        open(os.path.join(pld, "local", "homehider", "HomeHider.elf"), "wb").write(current)
-        open(os.path.join(pld, "HomeHider-v0.2.0.elf"), "wb").write(old_v02)
-        open(os.path.join(pld, "local", "other", "ftpsrv.elf"), "wb").write(other)
-        env = {"HH_PLDMGR_DIR": pld, "HH_USB_FMT": usb_fmt, "HH_LOADER_PORT": str(loader_port),
-               "HH_GITHUB_API": "http://127.0.0.1:%d" % gh_port}
+        env = {"HH_GITHUB_API": "http://127.0.0.1:%d" % gh_port}
 
         cur_ver = re.search(rb"HOMEHIDER-ELF-VERSION=([0-9.]+);", current).group(1).decode()
         s = Server(appdb, data, env)
@@ -383,8 +331,10 @@ def updater_tests(tmp):
         check(st["marker"] == "HOMESCREENMANAGER-ELF-VERSION=%s;" % cur_ver, "build carries its version marker")
         check(re.search(rb"HOMESCREENMANAGER-ELF-VERSION=%s;" % cur_ver.encode(), current) is not None,
               "the new marker is in the file, and so is the old one (so builds from before the rename can still read the version)")
+        check("updated_to" not in st, "status has no 'updated to' note any more")
         u = wait_idle()
-        check(u["current"] == cur_ver and not u["usb"]["newer"] and not u["repo"], "nothing to update at start")
+        check(u["current"] == cur_ver and not u["repo"], "nothing to update at start")
+        check("usb" not in u and "asset" not in u["github"] and "progress" not in u, "the status has no USB, download or install parts")
 
         print("  repository setting")
         code, r = http("POST", "/api/settings?repo=" + urllib.parse.quote("bad repo"))
@@ -404,7 +354,8 @@ def updater_tests(tmp):
         u = wait_idle()
         g = u["github"]
         check(g["ok"] and g["newer"] and g["version"] == "9.9.9", "newer GitHub release found")
-        check(g["asset"] == "HomeHider.elf" and g["digest"], "picked the .elf asset with its digest")
+        check(g["page"].endswith("/tag/v9.9.9"), "the release page address is kept")
+        check(u["phase"] == "available", "the status says a version is available")
         check(g["notes"].startswith("What\u2019s new") and "\U0001F3AE" in g["notes"], "release notes decoded (UTF-8, escapes)")
 
         print("  GitHub: an odd tag like v.9.9.9 still counts")
@@ -414,114 +365,29 @@ def updater_tests(tmp):
         u = wait_idle()
         check(u["github"]["ok"] and u["github"]["newer"] and u["github"]["version"] == "9.9.9", "the tag 'v.9.9.9' is read as version 9.9.9")
 
-        print("  GitHub: checksum mismatch is refused")
-        gh.publish("9.9.9", new, bad_digest=True)
-        http("POST", "/api/update/check"); wait_idle()
-        before = {p: open(p, "rb").read() for p in glob_elves(pld)}
-        code, r = http("POST", "/api/update/install?source=github")
-        check(code == 200, "install started")
+        print("  GitHub: the same version is not newer")
+        gh.publish(cur_ver, new)
+        http("POST", "/api/update/check")
         u = wait_idle()
-        check(u["phase"] == "error" and "checksum" in u["message"], "bad checksum -> error, nothing installed")
-        check({p: open(p, "rb").read() for p in glob_elves(pld)} == before, "payload files untouched")
+        check(u["github"]["ok"] and not u["github"]["newer"] and u["phase"] == "idle", "the same version: no notice")
 
-        print("  GitHub: real install + restart")
-        gh.publish("9.9.9", new)
-        http("POST", "/api/update/check"); wait_idle()
-        code, r = http("POST", "/api/update/install?source=github")
-        log = wait_exit(s)
-        check(loader.received and loader.received[-1] == new, "new build handed to the ELF loader")
-        check(open(os.path.join(pld, "local", "homehider", "HomeHider.elf"), "rb").read() == new, "Payload Manager copy replaced")
-        check(open(os.path.join(pld, "HomeHider-v0.2.0.elf"), "rb").read() == new, "old v0.2 copy recognised and replaced")
-        check(open(os.path.join(pld, "local", "other", "ftpsrv.elf"), "rb").read() == other, "other payloads untouched")
-        check(open(os.path.join(data, "HomeScreenManager.elf"), "rb").read() == new, "own copy written, under the new name")
-        bk = os.path.join(data, "backup")
-        check(open(os.path.join(bk, "HomeScreenManager-%s.elf" % cur_ver), "rb").read() == current, "previous version backed up")
-        check(os.path.exists(os.path.join(bk, "HomeScreenManager-previous.elf")), "v0.2 copy backed up")
-        check(os.path.exists(os.path.join(data, ".updated")), "restart flag left for the new instance")
-        check(not [f for f in os.listdir(os.path.join(pld, "local", "homehider")) if f.endswith(".hhnew")], "no temp files left")
+        print("  nothing can be installed from the app")
+        for path in ("/api/update/install?source=github", "/api/update/install?source=usb", "/api/update/upload"):
+            code, r = http("POST", path)
+            check(code == 404, "%s is gone" % path.split("?")[0])
+        s.stop()
 
-        print("  first start after an update")
+        print("  unreachable GitHub")
         s = Server(appdb, data, dict(env, HH_GITHUB_API="http://127.0.0.1:1"))
-        code, st = http("GET", "/api/status")
-        check(st["updated_to"] == cur_ver, "status says it was just updated")
-        check(not any("would open" in l for l in s.out), "browser not reopened after an update")
-        check(not os.path.exists(os.path.join(data, ".updated")), "restart flag consumed")
-        u = wait_idle()
-        check(not u["github"]["checked"], "no automatic check right after updating")
         http("POST", "/api/update/check")
         u = wait_idle()
         check(not u["github"]["ok"] and "Couldn't reach GitHub" in (u["github"]["error"] or ""), "unreachable GitHub explained")
         lg = http("GET", "/api/log", raw=True)[1].decode()
         check("update check: GitHub me/HomeHider: couldn't connect (code 0x" in lg, "an update check that can't connect logs the code and the step")
-        check("update check: GitHub me/HomeHider: a newer version is available" in lg or "update check: GitHub me/HomeHider: no newer version" in lg,
-              "and a check that got an answer logs how it went")
-        check("update check: USB drives:" in lg, "USB drives are logged too")
-
-        print("  USB drive")
-        os.makedirs(usb_fmt % 0 + "/homehider")
-        os.makedirs(usb_fmt % 1)
-        usb_new = fake_elf("9.9.10")
-        open(usb_fmt % 0 + "/homehider/HomeHider-v9.9.10.elf", "wb").write(usb_new)
-        open(usb_fmt % 1 + "/HomeHider-old.elf", "wb").write(fake_elf("0.0.1"))
-        open(usb_fmt % 1 + "/random.elf", "wb").write(other)
-        http("POST", "/api/update/check?usb_only=1")
-        u = wait_idle()
-        check(u["usb"]["newer"] and u["usb"]["version"] == "9.9.10", "newest USB build found")
-        os.makedirs(usb_fmt % 2 + "/homescreenmanager")
-        usb_new = fake_elf("9.9.11", marker="new")
-        open(usb_fmt % 2 + "/homescreenmanager/HomeScreenManager-v9.9.11.elf", "wb").write(usb_new)
-        http("POST", "/api/update/check?usb_only=1")
-        u = wait_idle()
-        check(u["usb"]["newer"] and u["usb"]["version"] == "9.9.11",
-              "a build with only the new marker, in a homescreenmanager folder, is found too and wins")
-        code, r = http("POST", "/api/update/install?source=usb")
-        wait_exit(s)
-        check(loader.received[-1] == usb_new, "USB build handed to the loader")
-        check(open(os.path.join(pld, "local", "homehider", "HomeHider.elf"), "rb").read() == usb_new, "USB build installed")
-
-        print("  upload from a phone/PC")
-        s = Server(appdb, data, env)
-        wait_idle()
-        def upload(body, q=""):
-            req = urllib.request.Request(BASE + "/api/update/upload" + q, method="POST", data=body,
-                                         headers={"Origin": BASE})
-            try:
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    return r.status, json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                return e.code, json.loads(e.read())
-        code, r = upload(b"not an elf at all" * 3000)
-        check(code == 409 and "isn't a PS5 payload" in r["error"], "garbage upload refused")
-        code, r = upload(other)
-        check(code == 409 and "isn't a Home Screen Manager build" in r["error"], "other payload refused")
-        code, r = upload(fake_elf("0.0.1"))
-        check(code == 409 and "Allow older" in r["error"], "older build needs explicit permission")
-        evil = urllib.request.Request(BASE + "/api/update/upload", method="POST", data=fake_elf("9.9.12"),
-                                      headers={"Origin": "http://evil.example"})
-        try:
-            urllib.request.urlopen(evil, timeout=10); code = 200
-        except urllib.error.HTTPError as e:
-            code = e.code
-        check(code == 403, "cross-site upload refused")
-        up = fake_elf("9.9.11")
-        code, r = upload(up)
-        check(code == 200 and "9.9.11" in r["note"], "upload installed")
-        wait_exit(s)
-        check(loader.received[-1] == up, "uploaded build handed to the loader")
-        check(open(os.path.join(pld, "local", "homehider", "HomeHider.elf"), "rb").read() == up, "uploaded build installed")
-
-        print("  loader not running")
-        s = Server(appdb, data, dict(env, HH_LOADER_PORT="1"))
-        wait_idle()
-        code, r = upload(fake_elf("9.9.13"))
-        check(code == 200, "install still succeeds")
-        time.sleep(1.0)
-        u = wait_idle()
-        check(u["phase"] == "done" and "start it again from Payload Manager" in u["message"], "asks to restart manually")
+        check("USB drives" not in lg, "no USB check is logged")
         s.stop()
     finally:
         gh.close()
-        loader.close()
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +559,21 @@ def folder_tests(tmp):
     check(st["folders_fixed"] == 2, "missing tile reinstalled and moved tile put back")
     check(all(r_ and r_[0][1] & 4 for r_ in tile_rows(appdb, "HHFD00001")), "tile back on the Media tab")
     check(all(r_ for r_ in tile_rows(appdb, "HHFD00002")), "deleted tile reinstalled")
+
+    print("  a name the console took back")
+    code, j = http("GET", "/api/folder?id=HHFD00001")
+    fname = j["folder"]["name"]
+    s.stop()
+    con = sqlite3.connect(appdb)
+    for u in USERS:
+        con.execute(f'UPDATE "tbl_iconinfo_{u}" SET titleName=? WHERE titleId=?', ("An old name", "HHFD00001"))
+    con.commit()
+    con.close()
+    s = Server(appdb, data, env)
+    code, st = http("GET", "/api/status")
+    names = [r_[0] for u in USERS for r_ in sqlite3.connect(appdb).execute(f'SELECT titleName FROM "tbl_iconinfo_{u}" WHERE titleId=?', ("HHFD00001",))]
+    check(names and all(n == fname for n in names), "a folder name the console changed is put back (%s)" % names)
+    check(st["folders_fixed"] >= 1, "and it counts as a repair")
 
     print("  delete")
     code, r = http("POST", "/api/folders/delete?id=HHFD00002")
@@ -1053,27 +934,27 @@ def startup_mode_tests(tmp):
     def sec(sid):
         a = m.index('<details class="section" id="%s">' % sid)
         return a, m.index("</details>", a)
-    order = ["folderOpts", "hideOpts", "updSettings", "adv"]
+    order = ["hideOpts", "updSettings", "adv"]
     spans = [sec(i) for i in order]
-    check(all(spans[i][1] < spans[i + 1][0] for i in range(3)), "the four sections follow each other, none inside another")
+    check(all(spans[i][1] < spans[i + 1][0] for i in range(2)), "the three sections follow each other, none inside another")
     titles = [m[a:b].split('<span class="sumh">')[1].split("</span>")[0] for a, b in spans]
-    check(titles == ["Folder options", "Tile hiding options", "Update settings", "More &amp; troubleshooting"],
+    check(titles == ["Folder and Tile Options", "Update Settings", "Troubleshooting &amp; More"],
           "their titles")
     check("Updates &amp; advanced options" not in m, "the old combined section is gone")
     def has(i, ids):
         a, b = spans[i]
         return all(('id="%s"' % x) in m[a:b] for x in ids)
-    check(has(0, ["sw_fh", "sw_fb", "sw_fe"]) and "sw_reapply" not in m[spans[0][0]:spans[0][1]],
-          "Folder options: the picture and name, the count and sort row, and the edit link")
+    check(has(0, ["sw_ff", "sw_fh", "sw_fb", "sw_fe"]) and m.index('id="sw_ff"') < m.index('id="sw_reapply"'),
+          "Folder and Tile Options: the folder switches come first")
     check('id="sw_fi"' not in m and "folder_inplace" not in m, "the 'without the installer' switch is gone")
-    check(has(1, ["sw_reapply", "sw_run"]) and all(x not in m[spans[1][0]:spans[1][1]] for x in ("sw_fh", "updCheckBtn", "updSettings")),
-          "Tile hiding options: only Keep tiles hidden and Show a running game")
-    check(has(2, ["updMsg", "updHint", "updCheckBtn", "updOffers", "repo", "sw_auto", "updFile", "allowOlder"]),
-          "Update settings: the status line, Check for updates, the offers area, repository, check at start, install from a file")
+    check(has(0, ["sw_reapply", "sw_run"]) and all(x not in m[spans[0][0]:spans[0][1]] for x in ("updCheckBtn", "updSettings")),
+          "Folder and Tile Options: also Keep tiles hidden and Show a running game")
+    check(has(1, ["updMsg", "updHint", "updOffers", "repo", "sw_auto"]) and "updCheckBtn" not in m and all(x not in m for x in ('id="updFile"', 'id="allowOlder"', "Install from a file", "uploadFile", "installUpd")),
+          "Update Settings: the status line, the offers area, repository and check at start; no Check for updates button; no install from a file")
     check(m.index('id="updMsg"') < m.index('id="repo"'), "the status line comes before the repository")
-    check(has(3, ["diag", "dl"]), "More & troubleshooting keeps its buttons")
-    check("document.getElementById('updSettings')" in m and "document.getElementById('advAll')" not in m,
-          "See update opens the Update settings section")
+    check(has(2, ["diag", "dl"]), "Troubleshooting & More keeps its buttons")
+    check("goUpdates" not in m and "See update" not in m and "Release page" not in m and 'target="_blank"' not in m[m.index("function offer("):m.index("function offer(") + 400],
+          "the update notices have no links or buttons, and nothing in the page installs an update")
     a = m.index("function saveFolder(btn)")
     save_js = m[a:m.index("\nfunction ", a + 10)]
     check("/api/folders/save?async=1" in save_js and "folderJob(" in m, "the folder save runs as a background job")
@@ -3011,25 +2892,25 @@ def menu_new_sections_tests(tmp):
     code, fh = http("GET", "/folder/HHFD00001", raw=True)
     s.stop()
     m = html.decode()
-    order = [m.index('id="%s"' % i) for i in ("mainSec", "folderOpts", "hideOpts", "bgSec", "nmSec", "startOpts", "updSettings", "expImp", "adv")]
-    check(order == sorted(order), "the sections run: Home Screen Folders and Tiles (Folder options inside), Tile hiding options, Wallpapers, Game names, Start-Up Options, Update settings, Export & Import, More & troubleshooting")
+    order = [m.index('id="%s"' % i) for i in ("mainSec", "hideOpts", "bgSec", "avSec", "muSec", "nmSec", "rdSec", "startOpts", "updSettings", "expImp", "adv")]
+    check(order == sorted(order), "the sections run: Folders and Tiles, Folder and Tile Options, Wallpapers, Profile Pictures, Music, Game names, Redirect Where System Tiles Open, Start-Up Options, Update Settings, Export & Import, Troubleshooting & More")
     titles = dict(re.findall(r'<details class="section" id="(\w+)">\s*<summary><span class="sumh">([^<]+)</span>', m))
-    check(titles == {"mainSec": "Home Screen Folders and Tiles", "folderOpts": "Folder options", "hideOpts": "Tile hiding options", "bgSec": "Change and Edit Wallpapers",
-                     "nmSec": "Clean Up Game Names", "startOpts": "Home Screen Manager Start-Up Options", "updSettings": "Update settings", "expImp": "Export &amp; Import",
-                     "adv": "More &amp; troubleshooting"}, "the sections have the names we chose (%s)" % titles)
+    check(titles == {"mainSec": "Folders and Tiles", "hideOpts": "Folder and Tile Options", "bgSec": "Change and Edit Wallpapers",
+                     "nmSec": "Clean Up Game Names", "startOpts": "Start-Up Options", "updSettings": "Update Settings", "expImp": "Export &amp; Import",
+                     "adv": "Troubleshooting &amp; More"}, "the sections have the names we chose (%s)" % titles)
     check("<details open" not in m and 'id="bulk"' not in m, "every section is closed when the page opens, and Bulk changes is gone")
     check("It only does everything you want with your PS5 home screen." in m and "Hide games, apps and system tiles from your home screen" not in m, "the line under the header is the new one")
     check("An updated version has been found." in m, "the update status line says so when a newer version was found")
     main = m[m.index('id="mainSec"'):m.index('id="hideOpts"')]
-    fo = main[main.index('id="folderOpts"'):main.index('id="q"')]
-    check("+ New folder" in main and 'id="tcount"' in main and main.index('id="folderOpts"') < main.index('id="q"') < main.index('id="list"'),
-          "Home Screen Folders and Tiles has New folder, the count, Folder options, then the search and the list")
-    check("sw_ff" in fo and "sw_fh" in fo and "sw_fb" in fo and "sw_fe" in fo and "sw_fd" not in fo and fo.index("sw_ff") < fo.index("sw_fh"),
-          "Folder options has Keep folders first first, then the three folder page switches, and not the controller test switch")
-    check("sw_fd" in m[m.index('id="adv"'):] and "Folder page: show what the controller sends" in m[m.index('id="adv"'):], "the controller test switch is in More & troubleshooting")
-    check(m.index('id="sw_ff"') < m.index('id="q"') and main.count('id="sw_ff"') == 1, "Keep folders first is inside Folder options, only once")
+    fo = m[m.index('id="hideOpts"'):m.index('id="bgSec"')]
+    check("Create a New Folder" in main and 'id="tcount"' not in m and main.index("Create a New Folder") < main.index('id="q"') < main.index('id="list"') and 'id="folderOpts"' not in m,
+          "Folders and Tiles has Create a New Folder, then the search and the list, no count and no folder options")
+    check("sw_ff" in fo and "sw_fh" in fo and "sw_fb" in fo and "sw_fe" in fo and "sw_fd" not in fo and fo.index("sw_ff") < fo.index("sw_fh") < fo.index("sw_reapply"),
+          "Folder and Tile Options has Keep folders first first, then the three folder page switches, then the tile switches, and not the controller test switch")
+    check("sw_fd" in m[m.index('id="adv"'):] and "Folder page: show what the controller sends" in m[m.index('id="adv"'):], "the controller test switch is in Troubleshooting & More")
+    check(m.count('id="sw_ff"') == 1 and m.index('id="sw_ff"') > m.index('id="hideOpts"'), "Keep folders first is inside Folder and Tile Options, only once")
     bg = m[m.index('id="bgSec"'):m.index('id="nmSec"')]
-    check("Background for many games" not in bg and "Choose from USB drive" in bg and 'id="bgFile"' in bg, "the wallpapers section has no inner title, and the two ways to choose a picture")
+    check("Background for many games" not in bg and "Choose from PS5 USB Drive" in bg and 'id="bgFile"' in bg, "the wallpapers section has no inner title, and the two ways to choose a picture")
     check("<b>!ATTENTION!</b> Applying or undoing a background for many games can take a while. Please do not open any apps or games while it runs. When it has finished, the homescreen will refresh automatically to show the results." in bg,
           "the amber message covers applying and undoing, and says the home screen refreshes by itself")
     check(bg.index('id="bgAttn"') < bg.index('id="bgApplyBtn"') and "display:none" not in bg[bg.index('id="bgAttn"'):bg.index('id="bgAttn"') + 60], "and it is always shown, above Apply and Use the original for all")
@@ -3060,20 +2941,20 @@ def menu_new_sections_tests(tmp):
             "Importing can take up to 10 minutes to import and install everything, depending on your firmware. "
             "Please do not open any apps or games while it runs. The homescreen will refresh automatically when it is done.")
     check(attn in sec, "the amber message next to the import says up to 10 minutes")
-    check(sec.index("Choose from USB drive") > sec.index('id="impAttn"'), "and it sits above the import controls")
+    check(sec.index("Choose from PS5 USB Drive") > sec.index('id="impAttn"'), "and it sits above the import controls")
     check("function impDraw" in m and "fmtElapsed(s)" in m and "' · folder '" in m, "the import shows a timer and the folder count")
     adv = m[m.index('id="adv"'):]
     check("copyLog(this)" in adv and ">Copy log</button>" in adv and adv.index(">Diagnostics</button>") < adv.index(">Copy log</button>") < adv.index("Download original backup"),
-          "Copy log is in More & troubleshooting, next to Diagnostics")
+          "Copy log is in Troubleshooting & More, next to Diagnostics")
     check("function checkedMessage" not in m and "updNote" in m and "function updErr" in m,
-          "Update settings shows its results in its status line, not in the bar at the top")
-    check("}, 20000);" not in m and "updDetails.addEventListener('toggle'" in m and "usb_only=1" in m and "function usbCheckOnOpen" in m,
-          "USB drives are checked when Update settings is opened, with no timer")
+          "Update Settings shows its results in its status line, not in the bar at the top")
+    check("usbCheckOnOpen" not in m and "usb_only" not in m and "/api/update/install" not in m and "/api/update/upload" not in m,
+          "the page no longer looks on USB drives or installs anything")
     check('id="repoDefault"' in m, "the repository setting tells what the default is")
     check('<div id="toast"></div>' in m and "function toast(" in m and "toast('Log copied (' + lines + ' lines)')" in m and "toast('Backup written to the USB drive: '" in m,
           "Copy log and the USB export show a small pop-up near the bottom of the screen")
     check("Highlight the first tile" not in m and "highlight_first" not in m, "the first tile highlight is gone")
-    fnames = ["updCheck", "installUpd", "sendElf", "uploadFile", "saveRepo", "startRestartWait", "checkRestarted", "exportUsb",
+    fnames = ["updCheck", "saveRepo", "exportUsb",
               "impUsbList", "impDone", "reloadShell", "quitApp", "unhideAll", "restore", "copyLog", "diag"]
     still = []
     for fn in fnames:
@@ -3084,7 +2965,7 @@ def menu_new_sections_tests(tmp):
     check("Press again to show everything" in m and 'onclick="unhideAll(this)"' in m and "Press again to quit" in m and "Press again to restore" in m,
           "Show everything I hid, Restore and Quit all ask for a second press")
     check('id="advMsg"' in m and "Original backup restored. Restart the PS5 so the home screen is right." in m,
-          "the restore result stays under the buttons of More & troubleshooting")
+          "the restore result stays under the buttons of Troubleshooting & More")
     fp = fh.decode()
     check(":hover" not in fp and "function padTarget" in fp and "function redirectClick" in fp and "function pointerMove" in fp
           and "function padDown" in fp and "document.addEventListener('mousedown', padDown, true)" in fp
@@ -3115,7 +2996,7 @@ def release_tests(tmp):
     check(open(os.path.join(out, "HomeScreenManager.elf.sha256")).read() == "%s  HomeScreenManager.elf\n" % digest, "the checksum file is in the format sha256sum -c reads")
     check(open(os.path.join(out, "HomeScreenManager.elf"), "rb").read() == open(elf, "rb").read(), "the file is the build")
     notes = open(os.path.join(out, "RELEASE_NOTES.md"), encoding="utf-8").read()
-    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Home screen music" in notes,
+    check(notes.startswith("# Home Screen Manager v%s" % ver) and digest in notes and "What's new" in notes and "Default background" in notes,
           "the note has the title, the changelog entry and the checksum")
     r = run(elf, "--out", out, "--version", "9.9.9")
     check(r.returncode != 0 and "not version 9.9.9" in r.stderr, "it stops if the build isn't the version it is releasing")
@@ -3720,6 +3601,32 @@ def system_bg_tests(tmp):
         time.sleep(0.2)
     check(all(open(os.path.join(assets, "bg_%s.dds.zst" % t), "rb").read() == originals[t] for t in tiles), "and all of them are the console's own files again")
     check(not os.listdir(os.path.join(data, "sysbg")), "nothing is left in the folder of originals")
+
+    print("  the default background (own option below the tiles)")
+    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["NPXS00000"]}))
+    check(not r["tiles"][0]["sys"], "without the console's file it is not offered")
+    hub = os.path.join(assets, "bg_hub_default.dds.zst")
+    horig = bytes([0x28, 0xB5, 0x2F, 0xFD, 0x20, 0x00]) + (b"hub" * 4000)
+    open(hub, "wb").write(horig)
+    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["NPXS00000"]}))
+    check(r["tiles"][0]["can_bg"] and r["tiles"][0]["sys"] and not r["tiles"][0]["sys_custom"], "with it, it is offered like a system tile")
+    code, r = post_bytes("/api/bulk/bg/apply", jbody({"ids": ["NPXS00000"], "overwrite": False}))
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            break
+        time.sleep(0.2)
+    check(j["result"]["applied"] == 1 and len(unpack(hub)) == 8294548 and unpack(hub)[:4] == b"DDS ", "the picture is written as bg_hub_default.dds.zst")
+    check(open(os.path.join(data, "sysbg", "NPXS00000.orig"), "rb").read() == horig, "the console's own file was kept")
+    code, r = post_bytes("/api/bulk/info", jbody({"ids": ["NPXS00000"]}))
+    check(r["tiles"][0]["sys_custom"], "and it is known to carry ours")
+    code, r = post_bytes("/api/bulk/bg/undo", jbody({"all": True}))
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            break
+        time.sleep(0.2)
+    check(open(hub, "rb").read() == horig, "Use the original for all puts it back byte for byte")
     s.stop()
 
 
@@ -4019,67 +3926,7 @@ def experiment_tests(tmp):
     code, r = post_bytes("/api/bulk/bg/try", jb({"id": "CUSA99999"}))
     check(code == 409 and "no background slot at all" in r["error"] and "experiment CUSA99999: no table" in log(), "a tile the database knows nothing about gets a clear message, and the log says why")
     check(post_bytes("/api/bulk/bg/try", jb({"id": "bad id"}))[0] == 400, "a bad id is refused")
-    s.stop()
 
-
-def share_tests(tmp):
-    print("sharing one file between games")
-    if not Image:
-        print("  (skipped: needs the Pillow package)")
-        return
-    import io
-    d, db, env, ids = bulk_setup(tmp, "h", 10)
-    data = os.path.join(d, "data")
-    s = Server(db, data, env)
-
-    def jb(o):
-        return json.dumps(o).encode()
-
-    def log():
-        return http("GET", "/api/log", raw=True)[1].decode()
-
-    def cells(tid):
-        return q(db, 'SELECT pic0Info, pic1Info FROM "tbl_concepticoninfo_%s" WHERE localConceptId=?' % USERS[0], "cid:local:" + tid)[0]
-
-    def run_job(path, body):
-        code, r = post_bytes(path, jb(body))
-        for _ in range(300):
-            j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
-            if j.get("done"):
-                return j["result"]
-            time.sleep(0.2)
-        return {}
-
-    buf = io.BytesIO()
-    Image.new("RGB", (1920, 1080), (30, 60, 200)).save(buf, "PNG")
-    post_bytes("/api/bulk/bg/prepare", buf.getvalue())
-    tiles = ["CUSA9%04d" % i for i in range(10)]
-    res = run_job("/api/bulk/bg/apply", {"ids": tiles, "share": True})
-    check(res["applied"] == 10 and res["shared"] == 10 and res["failed"] == 0, "ten games are done in shared mode (%s)" % res)
-    sh = d + "/meta/hsm_shared"
-    files = sorted(os.listdir(sh)) if os.path.isdir(sh) else []
-    check(len(files) == 2 and all(f.startswith("bg_") for f in files), "two shared files exist, one per format, in a folder of their own (%s)" % files)
-    check(all(c.startswith(sh + "/") and os.path.exists(c) for t in tiles for c in cells(t)) and len({c for t in tiles for c in cells(t)}) == 2, "every game's entries point at those two files")
-    check(not any(os.path.isdir(d + "/meta/" + t) and any(f.startswith("hh_bg_") for f in os.listdir(d + "/meta/" + t)) for t in tiles), "and no game has a copy in its own folder")
-    srcs = os.listdir(data + "/backgrounds")
-    check(len(srcs) == 1 and srcs[0].startswith("shared_"), "there is one source picture, not one per game (%s)" % srcs)
-    check(len({r[0] for r in q(db, "SELECT bg_file FROM custom WHERE bg_file IS NOT NULL")}) == 1 if False else True, "set up")
-    lg = log()
-    check("; sharing one file between games" in lg and "bulk background: 10 tile(s) chosen, overwrite=0, share=1" in lg, "the log says it was shared")
-    # the console puts a game's own background back: the repair keeps sharing
-    orig = os.path.join(d, "orig", "pic0.dds")
-    for u in USERS:
-        qx(db, f'UPDATE "tbl_concepticoninfo_{u}" SET pic0Info=? WHERE localConceptId=?', orig, "cid:local:CUSA90003")
-    check(wait_for(lambda: cells("CUSA90003")[0].startswith(sh + "/"), 9), "if the console resets one game, the repair points it at the shared file again")
-    check(not (os.path.isdir(d + "/meta/CUSA90003") and any(f.startswith("hh_bg_") for f in os.listdir(d + "/meta/CUSA90003"))), "without making a copy for that game")
-    code, r = post_bytes("/api/custom/bg?id=CUSA90000&reset=1", b"")
-    check(cells("CUSA90000")[0] == orig and len(os.listdir(sh)) == 2, "undoing one game puts its original back, and the shared files stay for the others")
-    res = run_job("/api/bulk/bg/undo", {"all": True})
-    check(res["changed"] == 9 and all(cells(t)[0] == orig for t in tiles), "undo for all puts every original back")
-    check(not (os.path.isdir(sh) and any(f.startswith("bg_") for f in os.listdir(sh))) and not any(f.startswith("shared_") for f in os.listdir(data + "/backgrounds")),
-          "and when nobody uses them any more, the shared files and the source picture are removed")
-    res = run_job("/api/bulk/bg/apply", {"ids": tiles[:3], "share": False})
-    check(res["shared"] == 0 and all("/meta/" + t + "/hh_bg_" in cells(t)[0] for t in tiles[:3]) and not os.path.isdir(sh) or not os.listdir(sh), "without the box, every game gets its own file as before")
     s.stop()
 
 
@@ -4240,6 +4087,334 @@ def redirect_tests(tmp):
         time.sleep(0.2)
     check(res.get("links") == 1 and ainfo(STORE) == ["orig:store"], "Undo everything puts the tile link back too (%s)" % res)
     s.stop()
+
+
+def font_probe_tests(tmp):
+    print("font folder look (read-only)")
+    d, db, env, ids = bulk_setup(tmp, "fp", 0)
+    data = os.path.join(d, "data")
+    fonts = os.path.join(tmp, "fp-fonts")
+    os.makedirs(os.path.join(fonts, "sub"))
+    open(os.path.join(fonts, "SST-Roman.otf"), "wb").write(b"OTTO" + b"\x00" * 100)
+    open(os.path.join(fonts, "sub", "SST-Bold.ttf"), "wb").write(b"\x00\x01\x00\x00" + b"\x00" * 50)
+    before = sorted((p, open(p, "rb").read()) for p in glob_files(fonts))
+    s = Server(db, data, dict(env, HH_FONT_ROOT=fonts))
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("fonts: looked at the system font folders (read-only): 1 of 1 found" in lg and "font_probe.txt" in lg, "the log says it looked, and where the details are")
+    txt = open(os.path.join(data, "font_probe.txt")).read()
+    check("SST-Roman.otf  104 bytes" in txt and "starts 4f 54 54 4f" in txt, "a file's size and first bytes are listed")
+    check("SST-Bold.ttf" in txt and "starts 00 01 00 00" in txt, "files in a sub folder are listed too")
+    check("nothing was changed" in txt and "write permission (asked, not tried)" in txt, "it asks about write permission but does not try")
+    s.stop()
+    check(sorted((p, open(p, "rb").read()) for p in glob_files(fonts)) == before, "the font folder is untouched")
+    s = Server(db, data, dict(env, HH_FONT_ROOT=os.path.join(tmp, "no-such-fonts")))
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    txt = open(os.path.join(data, "font_probe.txt")).read()
+    check("0 of 1 found" in lg and "not there" in txt, "a missing folder is reported, not an error")
+    s.stop()
+
+
+def profile_probe_tests(tmp):
+    print("profile picture folder look (read-only)")
+    d, db, env, ids = bulk_setup(tmp, "pp", 0)
+    data = os.path.join(d, "data")
+    prof = os.path.join(tmp, "pp-profile")
+    os.makedirs(os.path.join(prof, "0x1a2b3c4d"))
+    open(os.path.join(prof, "0x1a2b3c4d", "avatar440.dds"), "wb").write(b"DDS " + b"\x00" * 60)
+    open(os.path.join(prof, "0x1a2b3c4d", "online.json"), "wb").write(b'{"firstName":"Secret"}')
+    before = [(p, open(p, "rb").read()) for p in glob_files(prof)]
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("profiles: looked at the profile picture folders (read-only): 1 of 1 places found, 1 entries" in lg and "profile_probe.txt" in lg,
+          "the log says it looked, and where the details are")
+    txt = open(os.path.join(data, "profile_probe.txt")).read()
+    check("0x1a2b3c4d/avatar440.dds  64 bytes" in txt and "starts 44 44 53 20" in txt, "a picture file's size and first bytes are listed")
+    check("online.json" in txt and "Secret" not in txt, "file contents are never written")
+    check("write permission (asked, not tried)" in txt, "write permission is asked, not tried")
+    s.stop()
+    check([(p, open(p, "rb").read()) for p in glob_files(prof)] == before, "the profile folder is untouched")
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=os.path.join(tmp, "no-such-profile")))
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("0 of 1 places found" in lg and "not there" in open(os.path.join(data, "profile_probe.txt")).read(), "a missing folder is reported, not an error")
+    s.stop()
+
+
+def avatar_pool_tests(tmp):
+    print("profile pictures: several per user, changed by itself")
+    d, db, env, ids = bulk_setup(tmp, "avp", 0)
+    data = os.path.join(d, "data")
+    prof = os.path.join(tmp, "avp-profile")
+    u1 = "0x1A2B3C4D"
+    os.makedirs(os.path.join(prof, u1))
+    pool = os.path.join(data, "avatar", "pool", u1)
+
+    def color():
+        f = open(os.path.join(prof, u1, "avatar440.dds"), "rb").read()
+        c0 = struct.unpack("<H", f[128 + 8:128 + 10])[0]
+        return "red" if c0 >> 11 >= 28 and (c0 & 0x7E0) >> 5 <= 6 else "blue" if c0 & 31 >= 28 else "green" if (c0 & 0x7E0) >> 5 >= 58 else "other"
+
+    def prof_json():
+        return http("GET", "/api/avatar")[1]["profiles"][0]
+
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+    check(prof_json()["pool"] == [] and prof_json()["auto"] is False, "nothing is in the list at first")
+    red, blue, green = tiny_png(300, 200, (255, 0, 0)), tiny_png(100, 100, (0, 0, 255)), tiny_png(64, 64, (0, 255, 0))
+    check(post_bytes("/api/avatar/pool_add?id=" + u1, red)[0] == 200 and post_bytes("/api/avatar/pool_add?id=" + u1, blue)[0] == 200, "two pictures are added")
+    check(prof_json()["pool"] == [1, 2], "the list shows them")
+    check(not os.path.exists(os.path.join(prof, u1, "avatar440.dds")), "adding to the list changes nothing on the console")
+    code, png = http("GET", "/api/avatar/pool_pic?id=%s&n=1" % u1, raw=True)
+    check(code == 200 and png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (512, 512), "a listed picture is a 512 px square PNG")
+    check(http("GET", "/api/avatar/pool_pic?id=%s&n=9" % u1, raw=True)[0] == 404, "a picture that isn't there gives 404")
+    code, r = post_bytes("/api/avatar/pool_add?id=" + u1, b"not a picture")
+    check(code == 409 and "couldn't be read" in r["error"] and prof_json()["pool"] == [1, 2], "a bad picture is refused")
+
+    print("  use one now")
+    code, r = post_bytes("/api/avatar/pool_use?id=%s&n=1" % u1, b"")
+    check(code == 200 and color() == "red", "picture 1 is written")
+    check(os.path.exists(os.path.join(data, "avatar", u1, "state.txt")), "the console's own picture is kept")
+
+    print("  changed by itself")
+    check(post_bytes("/api/avatar/auto?id=%s&on=1" % u1, b"")[0] == 200 and prof_json()["auto"], "the switch is saved")
+    s.stop()
+    seen = set()
+    for _ in range(6):
+        s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+        seen.add(color())
+        lg = http("GET", "/api/log", raw=True)[1].decode()
+        s.stop()
+    check(seen == {"red", "blue"}, "each start writes a different picture of the list (%s)" % sorted(seen))
+    check("picked by itself" in lg, "the log says so")
+    cur_before = color()
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+    check(color() != cur_before, "it is never the same picture twice in a row")
+
+    print("  when a game starts")
+    check(post_bytes("/api/avatar/pool_add?id=" + u1, green)[0] == 200, "a third picture is added")
+    running = os.path.join(tmp, "avp-running")
+    s.stop()
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof, HH_RUNNING_FILE=running))
+    before = color()
+    time.sleep(1.2)
+    check(color() == before, "with no game running nothing changes")
+    open(running, "w").write("PPSA02000")
+    ok = False
+    for _ in range(60):
+        time.sleep(0.5)
+        if color() != before:
+            ok = True
+            break
+    check(ok, "when a game starts, a different picture is written")
+    check("picked by itself" in http("GET", "/api/log", raw=True)[1].decode(), "(the log says so)")
+    after = color()
+    time.sleep(1.5)
+    check(color() == after, "while the game runs nothing more changes")
+    open(running, "w").write("")
+    time.sleep(2.5)
+    check(color() == after, "when the game closes nothing changes")
+    open(running, "w").write("PPSA97979")
+    time.sleep(2.5)
+    check(color() == after, "starting Home Screen Manager's own app does not count as a game")
+
+    print("  every picture once before any comes again")
+    s.stop()
+    try:
+        os.remove(os.path.join(data, "avatar", "pool", u1, "used"))
+    except OSError:
+        pass
+    round_seen = []
+    for _ in range(3):
+        s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+        round_seen.append(color())
+        s.stop()
+    check(len(set(round_seen)) == 3, "three starts with three pictures show all three, none twice (%s)" % round_seen)
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+    check(color() != round_seen[-1], "the next round starts with a different picture than the last one shown")
+    check(os.path.exists(os.path.join(data, "avatar", "pool", u1, "used")), "the pictures shown in this round are remembered")
+
+    print("  one picture only, or switched off")
+    post_bytes("/api/avatar/pool_remove?id=%s&n=2" % u1, b"")
+    post_bytes("/api/avatar/pool_remove?id=%s&n=3" % u1, b"")
+    post_bytes("/api/avatar/pool_use?id=%s&n=1" % u1, b"")
+    s.stop()
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+    check(prof_json()["pool"] == [1] and color() == "red", "with one picture nothing changes")
+    post_bytes("/api/avatar/pool_add?id=" + u1, blue)
+    post_bytes("/api/avatar/auto?id=%s&on=0" % u1, b"")
+    s.stop()
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof))
+    check(color() == "red", "switched off: nothing changes by itself")
+
+    print("  the list is limited")
+    for i in range(12):
+        code, r = post_bytes("/api/avatar/pool_add?id=" + u1, green)
+    check(code == 409 and "full" in r["error"] and len(prof_json()["pool"]) == 12, "the list holds 12 pictures")
+
+    print("  the original")
+    post_bytes("/api/avatar/auto?id=%s&on=1" % u1, b"")
+    code, r = post_bytes("/api/avatar/reset?id=" + u1, b"")
+    p = prof_json()
+    check(code == 200 and not os.path.exists(os.path.join(prof, u1, "avatar440.dds")) and p["auto"] is False and len(p["pool"]) == 12,
+          "the original is back, changing by itself is off, the list is kept")
+    check(post_bytes("/api/avatar/pool_use?id=%s&n=1" % u1, b"")[0] == 200, "a listed picture can be used again")
+
+    print("  undo everything")
+    post_bytes("/api/avatar/auto?id=%s&on=1" % u1, b"")
+    code, r = post_bytes("/api/undo_everything", b"{}")
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            break
+        time.sleep(0.2)
+    check(not os.path.exists(os.path.join(prof, u1, "avatar440.dds")) and not os.path.exists(pool), "the original is back and the list is gone")
+    s.stop()
+
+
+def log_rotation_tests(tmp):
+    print("the log after it was moved to log.txt.old")
+    d, db, env, ids = bulk_setup(tmp, "lr", 0)
+    data = os.path.join(d, "data")
+    os.makedirs(data, exist_ok=True)
+    open(os.path.join(data, "log.txt.old"), "w").write("".join("11-01 00:00:%02d older line %d\n" % (i % 60, i) for i in range(50)))
+    open(os.path.join(data, "log.txt"), "w").write("11-02 00:00:00 newer line\n")
+    s = Server(db, data, env)
+    lg = http("GET", "/api/log", raw=True)[1].decode()
+    check("older line 0\n" in lg and "older line 49\n" in lg and lg.index("older line 49") < lg.index("newer line") < lg.index("starting"),
+          "the lines before the move come first, then the newer ones")
+    s.stop()
+
+
+def avatar_tests(tmp):
+    print("profile pictures")
+    d, db, env, ids = bulk_setup(tmp, "av", 0)
+    data = os.path.join(d, "data")
+    prof = os.path.join(tmp, "av-profile")
+    u1, u2 = "0x1A2B3C4D", "0x5E6F7A8B"
+    os.makedirs(os.path.join(prof, u1))
+    os.makedirs(os.path.join(prof, u2))
+    os.makedirs(os.path.join(prof, "junk"))
+    open(os.path.join(prof, "junk", "avatar64.dds"), "wb").write(b"not ours")
+
+    def dxt5(size, color565):
+        blocks = ((size + 3) // 4) ** 2
+        hdr = bytearray(128)
+        hdr[0:4] = b"DDS "
+        struct.pack_into("<I", hdr, 4, 124)
+        struct.pack_into("<I", hdr, 8, 0x1 | 0x2 | 0x4 | 0x1000 | 0x80000)
+        struct.pack_into("<II", hdr, 12, size, size)
+        struct.pack_into("<I", hdr, 20, blocks * 16)
+        struct.pack_into("<I", hdr, 28, 1)
+        struct.pack_into("<I", hdr, 76, 32)
+        struct.pack_into("<I", hdr, 80, 4)
+        hdr[84:88] = b"DXT5"
+        struct.pack_into("<I", hdr, 108, 0x1000)
+        blk = bytes([255, 255]) + b"\0" * 6 + struct.pack("<HH", color565, color565) + b"\0" * 4
+        return bytes(hdr) + blk * blocks
+
+    orig = {}
+    for n in (64, 128, 260, 440):
+        orig[n] = dxt5(n, 0x07E0)  # green
+        open(os.path.join(prof, u1, "avatar%d.dds" % n), "wb").write(orig[n])
+    open(os.path.join(prof, u1, "online.json"), "wb").write(b'{"firstName":"X"}')
+    junk_before = open(os.path.join(prof, "junk", "avatar64.dds"), "rb").read()
+
+    def rd(user, name):
+        p = os.path.join(prof, user, name)
+        return open(p, "rb").read() if os.path.exists(p) else None
+
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=prof, HH_USER_NAMES="0x1A2B3C4D=Billy Joe;0x77777777=Other", HH_FOREGROUND_NAME="Billy Joe"))
+    check(http("GET", "/api/status")[1].get("user") == "Billy Joe", "the status names the user who is signed in (for the welcome line)")
+
+    def log():
+        return http("GET", "/api/log", raw=True)[1].decode()
+
+    code, r = http("GET", "/api/avatar")
+    ps = {p["id"]: p for p in r["profiles"]}
+    check(r["available"] and sorted(ps) == [u1, u2], "the users' folders are listed (and the junk folder is not)")
+    check(ps[u1]["name"] == "Billy Joe" and ps[u2]["name"] == "", "the console's user name is listed (empty when it isn't known)")
+    check(ps[u1]["has_picture"] and not ps[u2]["has_picture"] and not ps[u1]["custom"], "who has a picture, and nothing is changed yet")
+    code, png = http("GET", "/api/avatar/picture?id=" + u1, raw=True)
+    check(code == 200 and png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", png[16:24]) == (128, 128), "the current picture is shown as a PNG (decoded from the DXT5 file)")
+    check(http("GET", "/api/avatar/picture?id=" + u2, raw=True)[0] == 404, "a user without a picture gives 404")
+    check(http("GET", "/api/avatar/picture?id=../../etc/passwd", raw=True)[0] == 404, "an odd id gives 404")
+
+    print("  setting a picture")
+    red = tiny_png(300, 200, (255, 0, 0))
+    code, r = post_bytes("/api/avatar/set?id=" + u1, red)
+    check(code == 200 and r.get("ok"), "the picture is accepted (%s)" % r)
+    for n in (64, 128, 260, 440):
+        f = rd(u1, "avatar%d.dds" % n)
+        blocks = ((n + 3) // 4) ** 2 * 16
+        check(f is not None and len(f) == 128 + blocks and f[:4] == b"DDS " and f[84:88] == b"DXT5" and struct.unpack("<II", f[12:20]) == (n, n)
+              and struct.unpack("<I", f[20:24])[0] == blocks, "avatar%d.dds is a %dx%d DXT5 file of the right size" % (n, n, n))
+    c0 = struct.unpack("<H", rd(u1, "avatar128.dds")[128 + 8:128 + 10])[0]
+    check(c0 >> 11 >= 28 and (c0 & 0x7E0) >> 5 <= 4, "and it is the new (red) picture")
+    check(rd(u1, "online.json") == b'{"firstName":"X"}', "the user's online.json is left alone")
+    check(not [f for f in os.listdir(os.path.join(prof, u1)) if f.endswith(".tmp")], "no leftover .tmp files")
+    check(sorted(os.listdir(os.path.join(prof, u1))) == sorted(["avatar%s.dds" % n for n in (64, 128, 260, 440)] + ["online.json"]), "only the four avatar files and online.json are there")
+    bk = os.path.join(data, "avatar", u1)
+    check(all(open(os.path.join(bk, "avatar%d.dds" % n), "rb").read() == orig[n] for n in orig) and os.path.exists(os.path.join(bk, "state.txt")), "the console's own files were kept")
+    check(http("GET", "/api/avatar")[1]["profiles"][0]["custom"], "the user is marked as changed")
+    check("profile picture %s: new picture written" % u1 in log(), "the log says so")
+
+    print("  a second change keeps the first original")
+    blue = tiny_png(100, 100, (0, 0, 255))
+    code, r = post_bytes("/api/avatar/set?id=" + u1, blue)
+    c0 = struct.unpack("<H", rd(u1, "avatar440.dds")[128 + 8:128 + 10])[0]
+    check(code == 200 and c0 & 31 >= 28, "the second picture is in place")
+    check(all(open(os.path.join(bk, "avatar%d.dds" % n), "rb").read() == orig[n] for n in orig), "the saved original is still the console's own")
+
+    print("  a picture that can't be read changes nothing")
+    before = {n: rd(u1, "avatar%d.dds" % n) for n in orig}
+    code, r = post_bytes("/api/avatar/set?id=" + u1, b"this is not a picture at all")
+    check(code == 409 and "couldn't be read" in r.get("error", ""), "it is refused with a clear message (%s)" % r)
+    check(all(rd(u1, "avatar%d.dds" % n) == before[n] for n in orig), "and the files are as they were")
+
+    print("  put the original back")
+    code, r = post_bytes("/api/avatar/reset?id=" + u1, b"")
+    check(code == 200 and all(rd(u1, "avatar%d.dds" % n) == orig[n] for n in orig), "the console's own files are back, byte for byte")
+    check(rd(u1, "online.json") == b'{"firstName":"X"}' and not os.path.exists(bk), "online.json is untouched and the saved copy is gone")
+    check(not http("GET", "/api/avatar")[1]["profiles"][0]["custom"], "the user is no longer marked as changed")
+    code, r = post_bytes("/api/avatar/reset?id=" + u1, b"")
+    check(code == 200, "putting back when nothing was changed is fine")
+
+    print("  a user with no picture of their own")
+    code, r = post_bytes("/api/avatar/set?id=" + u2, red)
+    check(code == 200 and b"isOfficiallyVerified" in (rd(u2, "online.json") or b"") and rd(u2, "avatar440.dds") is not None, "the pictures and an online.json of ours are made")
+    code, r = post_bytes("/api/avatar/reset?id=" + u2, b"")
+    check(code == 200 and os.listdir(os.path.join(prof, u2)) == [], "everything that was made is removed again")
+
+    print("  odd ids are refused")
+    for bad in ("0x1234", "../x", "0x1A2B3C4G", "0x5E6F7A8C"):
+        code, r = post_bytes("/api/avatar/set?id=" + urllib.parse.quote(bad), red)
+        check(code == 409, "id %s is refused" % bad)
+    check(open(os.path.join(prof, "junk", "avatar64.dds"), "rb").read() == junk_before, "other folders are never touched")
+
+    print("  undo everything puts the pictures back too")
+    post_bytes("/api/avatar/set?id=" + u1, red)
+    code, r = post_bytes("/api/undo_everything", b"{}")
+    res = {}
+    for _ in range(300):
+        j = http("GET", "/api/bulk/job?job=%d" % r["job"])[1]
+        if j.get("done"):
+            res = j["result"]
+            break
+        time.sleep(0.2)
+    check(res.get("avatars") == 1 and res.get("failed") == 0, "it reports the picture it put back (%s)" % res)
+    check(all(rd(u1, "avatar%d.dds" % n) == orig[n] for n in orig), "and the console's own files are back")
+    s.stop()
+
+    print("  no profile folder")
+    s = Server(db, data, dict(env, HH_PROFILE_ROOT=os.path.join(tmp, "av-none")))
+    code, r = http("GET", "/api/avatar")
+    check(code == 200 and r["available"] is False and r["profiles"] == [], "a console without the folder is reported as such")
+    s.stop()
+
+
+def glob_files(root):
+    out = []
+    for dd, _, files in os.walk(root):
+        out += [os.path.join(dd, f) for f in files]
+    return sorted(out)
 
 
 def menu_health_tests(tmp):
@@ -4737,9 +4912,13 @@ def main():
             redirect_tests,
             alive_marker_tests,
             menu_health_tests,
+            font_probe_tests,
+            profile_probe_tests,
+            avatar_tests,
+            avatar_pool_tests,
+            log_rotation_tests,
             names_source_tests,
             experiment_tests,
-            share_tests,
             shared_concept_tests,
             undo_everything_tests,
             theme_tests,

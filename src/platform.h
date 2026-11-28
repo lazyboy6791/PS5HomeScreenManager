@@ -18,6 +18,9 @@ int  plat_launch_browser(const char *url);
 void plat_describe_mount(const char *path, char *out, size_t n);
 /* Writes the console's LAN IPv4 address. Returns 0 on success. */
 int  plat_get_ip(char *buf, size_t n);
+/* The console user's name for a user id (the number in a profile folder name, 0x1B82CFEC). 0 on success. */
+int  plat_user_name(unsigned user_id, char *buf, size_t n);
+int  plat_foreground_user_name(char *buf, size_t n); /* the name of the user who is signed in on the console */
 /* Launcher (sceLncUtil) error codes Home Screen Manager handles itself. */
 #define LNC_ERR_NOT_INITIALIZED   0x80940001
 #define LNC_ERR_ALREADY_RUNNING   0x8094000c

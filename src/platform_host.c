@@ -41,6 +41,31 @@ void plat_describe_mount(const char *path, char *out, size_t n) {
   snprintf(out, n, "host build: no mount information");
 }
 
+/* tests: HH_USER_NAMES="0x1A2B3C4D=Billy;0x5E6F7A8B=Guest" */
+int plat_user_name(unsigned user_id, char *buf, size_t n) {
+  const char *e = getenv("HH_USER_NAMES");
+  char key[16];
+  if (n) buf[0] = '\0';
+  if (!e || !n) return -1;
+  snprintf(key, sizeof(key), "0x%08X=", user_id);
+  const char *q = strstr(e, key);
+  if (!q) return -1;
+  q += strlen(key);
+  size_t i = 0;
+  while (q[i] && q[i] != ';' && i + 1 < n) { buf[i] = q[i]; i++; }
+  buf[i] = '\0';
+  return i ? 0 : -1;
+}
+
+/* tests: HH_FOREGROUND_NAME="Billy" */
+int plat_foreground_user_name(char *buf, size_t n) {
+  const char *e = getenv("HH_FOREGROUND_NAME");
+  if (n) buf[0] = '\0';
+  if (!e || !e[0] || !n) return -1;
+  snprintf(buf, n, "%s", e);
+  return 0;
+}
+
 int plat_get_ip(char *buf, size_t n) {
   snprintf(buf, n, "127.0.0.1");
   return 0;

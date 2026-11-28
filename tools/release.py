@@ -85,7 +85,7 @@ def main(argv):
 ## Install or update
 
 - **New install:** add `{n}.elf` to Payload Manager (see the README, "Install").
-- **Update:** open the menu, go to **Update settings** and press **Check for updates**, or copy the file to the top of a USB drive, or upload it from your phone or PC.
+- **Update:** load the new file the way you loaded the first one (Payload Manager, or the app from `native-app/`). The menu only tells you when a newer version exists; it does not install it.
 
 ## Checksum (SHA-256)
 

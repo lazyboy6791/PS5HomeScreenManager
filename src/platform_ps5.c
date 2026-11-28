@@ -41,6 +41,7 @@ int sceKernelSendNotificationRequest(int device, notify_request_t *req,
 int sceUserServiceInitialize(void *);
 int sceSystemServiceLaunchWebBrowser(const char *uri, void *);
 int sceUserServiceGetForegroundUser(int *user_id);
+int sceUserServiceGetUserName(int user_id, char *name, size_t size);
 
 typedef struct {
   uint32_t sz;
@@ -129,6 +130,24 @@ void plat_describe_mount(const char *path, char *out, size_t n) {
   snprintf(out, n, "type %s, from %s, mounted on %s, %s, %llu KiB free", sf.f_fstypename, sf.f_mntfromname,
            sf.f_mntonname, (sf.f_flags & MNT_RDONLY) ? "READ-ONLY" : "writable",
            (unsigned long long)sf.f_bavail * sf.f_bsize / 1024);
+}
+
+int plat_user_name(unsigned user_id, char *buf, size_t n) {
+  char tmp[64] = "";
+  if (n == 0) return -1;
+  buf[0] = '\0';
+  int rc = sceUserServiceGetUserName((int)user_id, tmp, sizeof(tmp));
+  if (rc != 0 || !tmp[0]) return rc ? rc : -1;
+  snprintf(buf, n, "%s", tmp);
+  return 0;
+}
+
+int plat_foreground_user_name(char *buf, size_t n) {
+  int user = 0;
+  if (n) buf[0] = '\0';
+  int rc = sceUserServiceGetForegroundUser(&user);
+  if (rc != 0) return rc;
+  return plat_user_name((unsigned)user, buf, n);
 }
 
 int plat_launch_app(const char *title_id, uint32_t *app_id) {

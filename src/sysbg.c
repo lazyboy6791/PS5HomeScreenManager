@@ -23,6 +23,9 @@ static const struct {
     {"NPXS40071", "Game Library"},     {"NPXS40075", "Media Gallery"},     {"NPXS40139", "App Library"},
     {"NPXS40080", "Share Play"},       {"NPXS40110", "Disc Player"},       {"NPXS40144", "Unsupported Disc"},
     {"NPXS40154", "Remote Play"},
+    /* not a tile: the console's main background, shown behind every game and app that has no background of its own
+       (bg_hub_default.dds.zst, the file Prospero Themes replaces for "apps without their own image") */
+    {SYSBG_DEFAULT_ID, "Default background"},
 };
 #define NTILES ((int)(sizeof(kTiles) / sizeof(kTiles[0])))
 
@@ -43,7 +46,10 @@ const char *sysbg_name(const char *tid) {
   return NULL;
 }
 
-static void asset_path(const char *tid, char *out, size_t n) { snprintf(out, n, "%s/bg_%s.dds.zst", g_assets, tid); }
+static void asset_path(const char *tid, char *out, size_t n) {
+  if (!strcmp(tid, SYSBG_DEFAULT_ID)) snprintf(out, n, "%s/bg_hub_default.dds.zst", g_assets);
+  else snprintf(out, n, "%s/bg_%s.dds.zst", g_assets, tid);
+}
 static void orig_path(const char *tid, char *out, size_t n) { snprintf(out, n, "%s/%s.orig", g_dir, tid); }
 static void jpg_path(const char *tid, char *out, size_t n) { snprintf(out, n, "%s/%s.jpg", g_dir, tid); }
 

@@ -44,6 +44,10 @@ int  custom_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t le
 int  custom_refresh_folder_tile(hh_t *h, const char *tid, const char *name, const unsigned char *png,
                                 size_t len);
 
+/* Writes a folder tile's name back into the database when the console changed it. Returns the number of
+ * values changed (0 = all right), -1 on error. */
+int  custom_fix_folder_name(hh_t *h, const char *tid, const char *name);
+
 /* The chosen background picture (a JPEG copy), for previews. 0 if any. */
 int  custom_bg_path(hh_t *h, const char *tid, char *out, size_t n);
 
@@ -59,8 +63,8 @@ int  custom_reapply(hh_t *h, int *fixed);
  * each file format and the result is linked into every tile. */
 void custom_gc_defer(int on);       /* 1: do not clean shared files after every tile (bulk undo) */
 void custom_shared_gc(hh_t *h);     /* remove shared files no tile uses any more */
-void custom_bulk_begin(int share); /* share: one converted file for all the games (experimental) */
-void custom_bulk_end(long *encode_ms, long *reused, long *linked, long *copied, long *shared);
+void custom_bulk_begin(void);
+void custom_bulk_end(long *encode_ms, long *reused, long *linked, long *copied);
 int  custom_set_bg_prepared(hh_t *h, const char *tid, const unsigned char *jpg, size_t len, const char *prepared_path);
 int  custom_can_bg(hh_t *h, const char *tid);
 void custom_bulk_info_json(hh_t *h, char (*ids)[16], int n, strbuf_t *sb);

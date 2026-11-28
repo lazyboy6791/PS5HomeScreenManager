@@ -10,6 +10,9 @@
 
 #include <stddef.h>
 
+/* the id the menu uses for the console's default background (a file, not a tile of the home screen) */
+#define SYSBG_DEFAULT_ID "NPXS00000"
+
 void sysbg_init(const char *data_dir, const char *asset_dir);
 int  sysbg_is(const char *tid);                 /* 1 for the thirteen tiles that can take a background */
 const char *sysbg_name(const char *tid);        /* the tile's real name, or NULL */

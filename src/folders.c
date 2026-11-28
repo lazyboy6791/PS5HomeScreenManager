@@ -322,6 +322,26 @@ static int place_tile(hh_t *h, const char *tid, const char *tab) {
 /* tile files                                                                */
 /* ------------------------------------------------------------------------- */
 
+/* param.json: a launcher whose "game" is our folder page. force=0 only writes when the file differs. */
+static int write_param(hh_t *h, const char *tid, const char *name, const char *path) {
+  strbuf_t pj;
+  sb_init(&pj);
+  sb_printf(&pj, "{\n  \"titleId\": \"%s\",\n  \"applicationCategoryType\": 65536,\n"
+                 "  \"deeplinkUri\": \"http://127.0.0.1:%d/folder/%s\",\n"
+                 "  \"localizedParameters\": {\n    \"defaultLanguage\": \"en-US\",\n"
+                 "    \"en-US\": {\n      \"titleName\": ",
+            tid, F.port, tid);
+  sb_json_str(&pj, name);
+  sb_puts(&pj, "\n    }\n  }\n}\n");
+  int rc = pj.oom ? -1 : write_file(path, pj.data, pj.len);
+  sb_free(&pj);
+  if (rc) {
+    ferr(h, "Couldn't write %.400s.", path);
+    return -1;
+  }
+  return 0;
+}
+
 static int write_tile(hh_t *h, const char *tid) {
   char name[FOLDER_NAME_MAX * 2] = "", color[16] = "blue";
   int custom = 0, style = 0;
@@ -344,23 +364,8 @@ static int write_tile(hh_t *h, const char *tid) {
   snprintf(dir, sizeof(dir), "%s/%s/sce_sys", F.app_dir, tid);
   mkdirs(dir);
 
-  /* param.json: a launcher whose "game" is our folder page */
-  strbuf_t pj;
-  sb_init(&pj);
-  sb_printf(&pj, "{\n  \"titleId\": \"%s\",\n  \"applicationCategoryType\": 65536,\n"
-                 "  \"deeplinkUri\": \"http://127.0.0.1:%d/folder/%s\",\n"
-                 "  \"localizedParameters\": {\n    \"defaultLanguage\": \"en-US\",\n"
-                 "    \"en-US\": {\n      \"titleName\": ",
-            tid, F.port, tid);
-  sb_json_str(&pj, name);
-  sb_puts(&pj, "\n    }\n  }\n}\n");
   snprintf(path, sizeof(path), "%s/param.json", dir);
-  int rc = pj.oom ? -1 : write_file(path, pj.data, pj.len);
-  sb_free(&pj);
-  if (rc) {
-    ferr(h, "Couldn't write %.400s.", path);
-    return -1;
-  }
+  if (write_param(h, tid, name, path)) return -1;
 
   /* icon0.png: custom picture or a collage of the first four games */
   unsigned char *png = NULL;
@@ -394,7 +399,7 @@ static int write_tile(hh_t *h, const char *tid) {
     }
   }
   snprintf(path, sizeof(path), "%s/icon0.png", dir);
-  rc = write_file(path, png, png_len);
+  int rc = write_file(path, png, png_len);
   free(png);
   if (rc) {
     ferr(h, "Couldn't write %.400s.", path);
@@ -1301,6 +1306,45 @@ int folders_set_bg(hh_t *h, const char *tid, const unsigned char *img, size_t le
   return rc;
 }
 
+/* The name the folder is set to have. */
+static void folder_name(hh_t *h, const char *tid, char *name, size_t n) {
+  name[0] = '\0';
+  sqlite3_stmt *st = prep(h, "SELECT name FROM hh.folders WHERE title_id=?1");
+  if (!st) return;
+  sqlite3_bind_text(st, 1, tid, -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) snprintf(name, n, "%s", sqlite3_column_text(st, 0));
+  sqlite3_finalize(st);
+}
+
+/* Name right again on a tile that is there (0/1: something was changed). */
+static int fix_tile_name(hh_t *h, const char *tid) {
+  char name[FOLDER_NAME_MAX * 2];
+  folder_name(h, tid, name, sizeof(name));
+  /* the tile's own file keeps the name too: a database rebuild by the console would bring an old one back */
+  if (name[0]) {
+    char path[520], want[FOLDER_NAME_MAX * 2 + 8];
+    unsigned char *old = NULL;
+    size_t ol = 0;
+    snprintf(path, sizeof(path), "%s/%s/sce_sys/param.json", F.app_dir, tid);
+    strbuf_t q;
+    sb_init(&q);
+    sb_json_str(&q, name);
+    snprintf(want, sizeof(want), "%s", q.data ? q.data : "");
+    sb_free(&q);
+    if (read_file(path, &old, &ol) == 0) {
+      char *z = realloc(old, ol + 1);
+      if (z) {
+        old = (unsigned char *)z;
+        old[ol] = 0;
+        if (want[0] && !strstr((char *)old, want) && write_param(h, tid, name, path) == 0)
+          hh_log("folder %s: the tile's own file had an old name, now \"%s\"", tid, name);
+      }
+      free(old);
+    }
+  }
+  return custom_fix_folder_name(h, tid, name) > 0;
+}
+
 static int reapply_impl(hh_t *h, int *fixed, int patient, long quiet) {
   *fixed = 0;
   if (h->nusers == 0) return 0;
@@ -1343,7 +1387,7 @@ static int reapply_impl(hh_t *h, int *fixed, int patient, long quiet) {
        * them), which is a cheap check that only writes when a tile is off its place */
       since = 0;
       for (int i = 0; i < n; i++)
-        if (place_tile(h, ids[i], tabs[i])) (*fixed)++;
+        if (place_tile(h, ids[i], tabs[i]) | fix_tile_name(h, ids[i])) (*fixed)++;
       return 0;
     }
     long wait = 45, calm = 30, most = 900;
@@ -1382,7 +1426,7 @@ static int reapply_impl(hh_t *h, int *fixed, int patient, long quiet) {
   for (int i = 0; i < n; i++) {
     if (missing[i]) {
       if (install_tile(h, ids[i], NULL, 0) == 0) (*fixed)++;
-    } else if (place_tile(h, ids[i], tabs[i])) {
+    } else if (place_tile(h, ids[i], tabs[i]) | fix_tile_name(h, ids[i])) {
       (*fixed)++;
     }
   }
